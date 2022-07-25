@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	4 1 1
+Partition :	4 1 1 #Test
 
 # Mesh definition
 Lx :	5
