@@ -23,10 +23,6 @@ INCLUDE_LOCATIONS += $(Ulocs)
 VPATH_LOCATIONS   += $(Ulocs)
 
 # Define external libraries - this can also be in .profile
-HYPRE_DIR = /Users/desjardi/Builds/hypre
-FFTW_DIR  = /Users/desjardi/Builds/fftw
-LAPACK_DIR= /Users/desjardi/Builds/lapack
-
 HYPRE_DIR = /home/fs01/od57/Repositories/hypre/src/hypre
 FFTW_DIR  = /home/fs01/od57/Repositories/fftw
 LAPACK_DIR= /home/fs01/od57/Repositories/lapack
