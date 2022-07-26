@@ -24,8 +24,10 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:), allocatable :: SR
+   real(WP), dimension(:,:,:),   allocatable :: SR_mag   !< Magnitude of strain rate tensor
    
    !> Fluid viscosity
    real(WP) :: visc
@@ -45,12 +47,14 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resU  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR    (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR_mag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)) 
       end block allocate_work_arrays
       
       
@@ -97,8 +101,8 @@ contains
          do k=fs%cfg%kmino_,fs%cfg%kmaxo_
             do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                do i=fs%cfg%imino_,fs%cfg%imaxo_
-                  if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
-                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
+                  if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k) !+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
+                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k) !+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
                end do
             end do
          end do
@@ -182,8 +186,11 @@ contains
          fs%Vold=fs%V
          fs%Wold=fs%W
          
-         ! Apply time-varying Dirichlet conditions
-         ! This is where time-dpt Dirichlet would be enforced
+         ! Update SR_mag for domain
+         call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR,SR_mag=SR_mag)
+
+         ! Calculate strain rate dependent viscosity for non-Newtonian fluids
+         call fs%get_nonNewtonian_viscosity(SR_mag)
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)

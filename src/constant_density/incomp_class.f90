@@ -44,7 +44,8 @@ module incomp_class
       
       ! Constant property fluid
       real(WP) :: rho                                     !< This is our constant fluid density
-      real(WP), dimension(:,:,:), allocatable :: visc     !< These is our constant+SGS dynamic viscosity
+      real(WP), dimension(:,:,:), allocatable :: visc     !< This is our constant+SGS dynamic viscosity
+      
       
       ! Boundary condition list
       integer :: nbc                                      !< Number of bcond for our solver
@@ -105,9 +106,10 @@ module incomp_class
       procedure :: setup                                  !< Finish configuring the flow solver
       procedure :: add_bcond                              !< Add a boundary condition
       procedure :: get_bcond                              !< Get a boundary condition
-      procedure :: apply_bcond                            !< Apply all boundary conditions
+      procedure :: apply_bcond                            !< Apply all boundary conditions    
       procedure :: init_metrics                           !< Initialize metrics
       procedure :: adjust_metrics                         !< Adjust metrics
+      procedure :: get_nonNewtonian_viscosity             !< Calculate strain rate dependent viscosity for non-Newtonian fluids
       procedure :: get_dmomdt                             !< Calculate dmom/dt
       procedure :: get_div                                !< Calculate velocity divergence
       procedure :: get_pgrad                              !< Calculate pressure gradient
@@ -1004,6 +1006,38 @@ contains
       end do
       
    end subroutine apply_bcond
+
+   !> Non-Newtonian viscosity formulation based on Sisko model for shear thinning fluids
+   subroutine get_nonNewtonian_viscosity(this,SR_mag)
+      implicit none
+      class(incomp), intent(inout) :: this
+      integer :: i,j,k
+      real(WP), dimension(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_), intent(in) :: SR_mag
+      ! Sisko model parameters for human saliva
+      real(WP) :: K_cons= 2.60e-2_WP
+      real(WP) :: n     =-0.70_WP
+      real(WP) :: mu_inf= 1.70e-3_WP
+      real(WP) :: visc_0= 0.10_WP
+      
+      ! Compute strain rate dependent viscosity
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               if (SR_mag(i,j,k).le.0.10_WP) then
+                  this%visc(i,j,k)=visc_0
+                  !print *, 'Constant viscosity: visc_0'
+               else if (SR_mag(i,j,k).gt.0.10_WP) then
+                  this%visc(i,j,k)=K_cons*SR_mag(i,j,k)**n+mu_inf
+                  print *, 'Calculated viscosity: k*gamma_dot^n+mu_inf'
+               end if 
+            end do
+         end do
+      end do
+
+      ! Synchronize boundaries
+      call this%cfg%sync(this%visc)
+
+   end subroutine get_nonNewtonian_viscosity
    
    
    !> Calculate the explicit momentum time derivative based on U/V/W/P
@@ -1216,18 +1250,20 @@ contains
    
    !> Calculate the strain rate tensor, including approximations for domain overlap
    !> This only uses interpolated velocities passed to this function (we could imagine a more local one that uses U/V/W too)
-   subroutine get_strainrate(this,Ui,Vi,Wi,SR)
+   subroutine get_strainrate(this,Ui,Vi,Wi,SR,SR_mag)
       use messager, only: die
       implicit none
       class(incomp), intent(inout) :: this
-      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in ) :: Ui  !< Needs to be     (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in ) :: Vi  !< Needs to be     (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in ) :: Wi  !< Needs to be     (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: SR  !< Needs to be (1:6,imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in ) :: Ui      !< Needs to be     (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in ) :: Vi      !< Needs to be     (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in ) :: Wi      !< Needs to be     (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: SR      !< Needs to be (1:6,imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension   (this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: SR_mag  !< Array to hold magniutde of SR tensor in each cell
       integer :: i,j,k
       real(WP) :: Uxm,Uxp,Uym,Uyp,Uzm,Uzp
       real(WP) :: Vxm,Vxp,Vym,Vyp,Vzm,Vzp
       real(WP) :: Wxm,Wxp,Wym,Wyp,Wzm,Wzp
+      real(WP) :: my_SRmax=0.0_WP
       real(WP), dimension(3,3) :: dUdx
       
       ! Check SR's first dimension
@@ -1270,17 +1306,27 @@ contains
          if (this%cfg%kproc.eq.this%cfg%npz) SR(:,:,:,this%cfg%kmax+1)=SR(:,:,:,this%cfg%kmax)
       end if
       
-      ! Ensure zero in walls
+      ! Ensure zero in walls and calculate SR magnitude in each cell
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
-               if (this%mask(i,j,k).eq.1) SR(:,i,j,k)=0.0_WP
+               if (this%mask(i,j,k).eq.1) then 
+                  SR(:,i,j,k)=0.0_WP
+                     cycle
+                  else
+                  SR_mag(i,j,k)=0.5_WP*sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+               end if
+               ! Store the maximum strain rate at current time step
+               my_SRmax=max(my_SRmax,abs(SR_mag(i,j,k)))
             end do
          end do
       end do
+
+      print *, 'SR_Max=',my_SRmax
       
       ! Sync it
       call this%cfg%sync(SR)
+      call this%cfg%sync(SR_mag)
       
    end subroutine get_strainrate
    
