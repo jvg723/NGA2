@@ -1013,23 +1013,27 @@ contains
       class(incomp), intent(inout) :: this
       integer :: i,j,k
       real(WP), dimension(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_), intent(in) :: SR_mag
-      ! Sisko model parameters for human saliva
-      real(WP) :: K_cons= 2.60e-2_WP
-      real(WP) :: n     =-0.70_WP
-      real(WP) :: mu_inf= 1.70e-3_WP
-      real(WP) :: visc_0= 0.10_WP
+      ! Power law model parameters
+      real(WP) :: K_cons= 0.00001_WP
+      real(WP) :: n     =-0.80_WP
+      ! ! Sisko model parameters for human saliva
+      ! real(WP) :: K_cons= 2.60e-2_WP
+      ! real(WP) :: n     =-0.70_WP
+      ! real(WP) :: mu_inf= 1.70e-3_WP
+      ! real(WP) :: visc_0= 0.10_WP
       
       ! Compute strain rate dependent viscosity
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               if (SR_mag(i,j,k).le.0.10_WP) then
-                  this%visc(i,j,k)=visc_0
-                  !print *, 'Constant viscosity: visc_0'
-               else if (SR_mag(i,j,k).gt.0.10_WP) then
-                  this%visc(i,j,k)=K_cons*SR_mag(i,j,k)**n+mu_inf
-                  print *, 'Calculated viscosity: k*gamma_dot^n+mu_inf'
-               end if 
+               this%visc(i,j,k)=K_cons*SR_mag(i,j,k)**n
+               ! if (SR_mag(i,j,k).le.0.10_WP) then
+               !    this%visc(i,j,k)=visc_0
+               !    !print *, 'Constant viscosity: visc_0'
+               ! else if (SR_mag(i,j,k).gt.0.10_WP) then
+               !    this%visc(i,j,k)=K_cons*SR_mag(i,j,k)**n+mu_inf
+               !    print *, 'Calculated viscosity: k*gamma_dot^n+mu_inf'
+               ! end if 
             end do
          end do
       end do
@@ -1311,18 +1315,15 @@ contains
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                if (this%mask(i,j,k).eq.1) then 
-                  SR(:,i,j,k)=0.0_WP
+                  SR(:,i,j,k)  =0.0_WP
+                  SR_mag(i,j,k)=0.0_WP
                      cycle
                   else
                   SR_mag(i,j,k)=0.5_WP*sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
                end if
-               ! Store the maximum strain rate at current time step
-               my_SRmax=max(my_SRmax,abs(SR_mag(i,j,k)))
             end do
          end do
       end do
-
-      print *, 'SR_Max=',my_SRmax
       
       ! Sync it
       call this%cfg%sync(SR)

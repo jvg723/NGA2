@@ -19,13 +19,14 @@ module simulation
    type(event)   :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,forcefile
+   type(monitor) :: mfile,cflfile,forcefile,velfile
    
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
    real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:),       allocatable :: Ui_sync
    real(WP), dimension(:,:,:,:), allocatable :: SR
    real(WP), dimension(:,:,:),   allocatable :: SR_mag   !< Magnitude of strain rate tensor
    
@@ -35,6 +36,9 @@ module simulation
    !> Channel forcing
    real(WP) :: Ubulk,Wbulk
    real(WP) :: meanU,meanW
+
+   !> Velocity profile ouput time
+   real(WP) :: vel_output
    
 contains
    
@@ -47,22 +51,24 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(resU  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR    (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR_mag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)) 
+         allocate(resU   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui_sync(cfg%jmin:cfg%jmax))
+         allocate(Vi     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR     (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR_mag (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)) 
       end block allocate_work_arrays
       
-      
+
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
          time=timetracker(amRoot=cfg%amRoot)
          call param_read('Max timestep size',time%dtmax)
          call param_read('Max cfl number',time%cflmax)
+         call param_read('Velocity profile output',vel_output)
          time%dt=time%dtmax
          time%itmax=2
       end block initialize_timetracker
@@ -70,14 +76,14 @@ contains
       
       ! Create a single-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use ils_class, only: gmres_amg
+         use ils_class, only: gmres_amg,pcg_amg,pcg_smg,gmres_smg !Didn't work: gmres_amg,amg
          use mathtools, only: twoPi
          integer :: i,j,k
          real(WP) :: amp,vel
          ! Create flow solver
          fs=incomp(cfg=cfg,name='NS solver')
-         ! Assign constant viscosity
-         call param_read('Dynamic viscosity',visc); fs%visc=visc
+         ! ! Assign constant viscosity
+         ! call param_read('Dynamic viscosity',visc); fs%visc=visc
          ! Assign constant density
          call param_read('Density',fs%rho)
          ! Configure pressure solver
@@ -87,7 +93,7 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         call fs%setup(pressure_ils=gmres_amg,implicit_ils=gmres_amg)
+         call fs%setup(pressure_ils=gmres_smg,implicit_ils=gmres_smg)
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
          call param_read('Wbulk',Wbulk)
@@ -101,8 +107,8 @@ contains
          do k=fs%cfg%kmino_,fs%cfg%kmaxo_
             do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                do i=fs%cfg%imino_,fs%cfg%imaxo_
-                  if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k) !+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
-                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k) !+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
+                  if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
+                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
                end do
             end do
          end do
@@ -110,6 +116,8 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
+      ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_amg
+      ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_smg
       
       
       ! Add Ensight output
@@ -121,6 +129,8 @@ contains
          call param_read('Ensight output period',ens_evt%tper)
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
+         call ens_out%add_scalar('SR_mag',SR_mag)
+         call ens_out%add_scalar('visc',fs%visc)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -185,7 +195,7 @@ contains
          fs%Uold=fs%U
          fs%Vold=fs%V
          fs%Wold=fs%W
-         
+
          ! Update SR_mag for domain
          call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR,SR_mag=SR_mag)
 
@@ -271,7 +281,7 @@ contains
          ! Recompute interpolated velocity and divergence
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
-         
+
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
          
@@ -280,6 +290,14 @@ contains
          call mfile%write()
          call cflfile%write()
          call forcefile%write()
+
+         ! velocity_profile_output: block
+         ! use messager, only: die
+         !    if (time%t.ge.vel_output) then
+         !       call write_file(cfg,'vel_profile.csv',cfg%ym(cfg%jmin:cfg%jmax),SR_mag(cfg%imax/2,cfg%jmin:cfg%jmax,cfg%kmin),fs%visc(cfg%imax/2,cfg%jmin:cfg%jmax,cfg%kmin))
+         !       if(cfg%amRoot) call die('Velocity profile written to file')
+         !    end if
+         ! end block velocity_profile_output
 
       end do
       
@@ -300,9 +318,25 @@ contains
       deallocate(resU,resV,resW,Ui,Vi,Wi)
       
    end subroutine simulation_final
-   
-   
-   
-   
+
+   subroutine write_file(cfg,filename,y,U,SRmag,visc)
+      use config_class, only: config
+      character(len=*), intent(in) :: filename
+      real(WP), intent(in)         :: y(:),U(:),SRmag(:),visc(:)
+      class(config), intent(in)    :: cfg
+      integer :: n,iu
+
+      open(newunit=iu,file=filename,status='replace',action='write')
+      if(cfg%amRoot) then
+         print "(a,i5)",' writting to '//trim(filename)//' on unit ',iu
+         do n=1,size(U)
+            write(iu,"(es12.4,2x,es12.6,2x,es12.4,2x,es12.6)") y(n),U(n),SRmag(n),visc(n)
+            print *, 'y=',y(n),'U=',U(n),'SRmag=',SRmag(n),'visc=',visc(n)
+         end do
+         close(iu)
+      end if
+
+   end subroutine write_file
+
    
 end module simulation
