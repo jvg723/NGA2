@@ -4,18 +4,18 @@ Partition :	4 2 1
 # Mesh definition
 Lx :	5
 Ly :	1
-Lz :	0.001
+Lz :	0.04
 nx :	128
 ny :	40
 nz :	1
 Stretching : 2.1
 
 # Fluid properties and velocity
-Dynamic viscosity :   0.001
+Dynamic viscosity :   0.01
 Density :             1
 Ubulk : 1
 Wbulk : 0
-Perturbation : 0.01
+Perturbation : 0
 
 # Time integration
 Max timestep size : 2e-2
@@ -30,8 +30,5 @@ Implicit tolerance : 1e-6
 Implicit iteration : 100
 
 # Ensight output
-Ensight output period   : 1e-1
-Velocity profile output : 2
-
-
-
+Ensight output period :  1e-1
+Postproc output period : 10
