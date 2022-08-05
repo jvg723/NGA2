@@ -5,8 +5,8 @@ Partition :	4 2 1
 Lx :	5
 Ly :	1
 Lz :	0.04
-nx :	128
-ny :	40
+nx :	512
+ny :	160
 nz :	1
 Stretching : 2.1
 
