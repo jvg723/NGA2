@@ -113,7 +113,6 @@ contains
          time=timetracker(amRoot=cfg%amRoot)
          call param_read('Max timestep size',time%dtmax)
          call param_read('Max cfl number',time%cflmax)
-         call param_read('Velocity profile output',vel_output)
          time%dt=time%dtmax
          time%itmax=2
       end block initialize_timetracker
@@ -127,8 +126,8 @@ contains
          real(WP) :: amp,vel
          ! Create flow solver
          fs=incomp(cfg=cfg,name='NS solver')
-         ! ! Assign constant viscosity
-         ! call param_read('Dynamic viscosity',visc); fs%visc=visc
+         ! Assign constant viscosity
+         call param_read('Dynamic viscosity',visc); fs%visc=visc
          ! Assign constant density
          call param_read('Density',fs%rho)
          ! Configure pressure solver
@@ -245,26 +244,26 @@ contains
          call time%adjust_dt()
          call time%increment()
          
-         ! Model non-Newtonian fluid
-         nonewt: block
-            integer :: i,j,k
-            real(WP) :: SRmag
-            real(WP), parameter :: C=1.0e-2_WP
-            real(WP), parameter :: n=0.3_WP
-            ! Calculate SR
-            call fs%get_strainrate(Ui,Vi,Wi,SR)
-            ! Update viscosity
-            do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-               do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                  do i=fs%cfg%imino_,fs%cfg%imaxo_
-                     SRmag=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-                     SRmag=max(SRmag,100.0_WP**(1.0_WP/(n-1.0_WP)))
-                     fs%visc(i,j,k)=C*SRmag**(n-1.0_WP)
-                  end do
-               end do
-            end do
-            call fs%cfg%sync(fs%visc)
-         end block nonewt
+         ! ! Model non-Newtonian fluid
+         ! nonewt: block
+         !    integer :: i,j,k
+         !    real(WP) :: SRmag
+         !    real(WP), parameter :: C=1.0e-2_WP
+         !    real(WP), parameter :: n=0.3_WP
+         !    ! Calculate SR
+         !    call fs%get_strainrate(Ui,Vi,Wi,SR)
+         !    ! Update viscosity
+         !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+         !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+         !          do i=fs%cfg%imino_,fs%cfg%imaxo_
+         !             SRmag=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+         !             SRmag=max(SRmag,100.0_WP**(1.0_WP/(n-1.0_WP)))
+         !             fs%visc(i,j,k)=C*SRmag**(n-1.0_WP)
+         !          end do
+         !       end do
+         !    end do
+         !    call fs%cfg%sync(fs%visc)
+         ! end block nonewt
 
          ! Remember old velocity
          fs%Uold=fs%U
