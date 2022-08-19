@@ -3,6 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use incomp_class,      only: incomp
+   use tensor_class,      only: tensor
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use event_class,       only: event
@@ -10,8 +11,9 @@ module simulation
    implicit none
    private
    
-   !> Single-phase incompressible flow solver and corresponding time tracker
+   !> Single-phase incompressible flow solver, conformation tensor solver and corresponding time tracker
    type(incomp),      public :: fs
+   type(tensor),      public :: ct     
    type(timetracker), public :: time
    
    !> Ensight postprocessing
