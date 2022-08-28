@@ -115,6 +115,7 @@ module incomp_class
       procedure :: get_cfl                                !< Calculate maximum CFL
       procedure :: get_max                                !< Calculate maximum field values
       procedure :: interp_vel                             !< Calculate interpolated velocity
+      procedure :: get_gradU                              !< Calculate velocity gradient in cell center
       procedure :: get_strainrate                         !< Calculate strain rate tensor
       procedure :: get_mfr                                !< Calculate outgoing MFR through each bcond
       procedure :: correct_mfr                            !< Correct for mfr mismatch to ensure global conservation
@@ -1213,6 +1214,44 @@ contains
       call this%cfg%sync(Vi)
       call this%cfg%sync(Wi)
    end subroutine interp_vel
+
+   !> Calculate the velocity divergence based on U/V/W for cell
+   subroutine get_gradU(this,gradU)
+      implicit none
+      class(incomp), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(out) :: gradU
+      integer :: i,j,k
+      real(WP) :: Uxm,Uxp,Uym,Uyp,Uzm,Uzp
+      real(WP) :: Vxm,Vxp,Vym,Vyp,Vzm,Vzp
+      real(WP) :: Wxm,Wxp,Wym,Wyp,Wzm,Wzp
+      real(WP), dimension(3,3) :: dUdx
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Rebuild face velocities from interpolated velocities
+               Uxm=sum(this%itp_xm(:,i,j,k)*this%U(i-1:i,j,k)); Uxp=sum(this%itp_xp(:,i+1,j,k)*this%U(i:i+1,j,k)); Uym=sum(this%itp_ym(:,i,j,k)*this%U(i,j-1:j,k)); Uyp=sum(this%itp_yp(:,i,j+1,k)*this%U(i,j:j+1,k)); Uzm=sum(this%itp_zm(:,i,j,k)*this%U(i,j,k-1:k)); Uzp=sum(this%itp_zp(:,i,j,k+1)*this%U(i,j,k:k+1))
+               Vxm=sum(this%itp_xm(:,i,j,k)*this%V(i-1:i,j,k)); Vxp=sum(this%itp_xp(:,i+1,j,k)*this%V(i:i+1,j,k)); Vym=sum(this%itp_ym(:,i,j,k)*this%V(i,j-1:j,k)); Vyp=sum(this%itp_yp(:,i,j+1,k)*this%V(i,j:j+1,k)); Vzm=sum(this%itp_zm(:,i,j,k)*this%V(i,j,k-1:k)); Vzp=sum(this%itp_zp(:,i,j,k+1)*this%V(i,j,k:k+1))
+               Wxm=sum(this%itp_xm(:,i,j,k)*this%W(i-1:i,j,k)); Wxp=sum(this%itp_xp(:,i+1,j,k)*this%W(i:i+1,j,k)); Wym=sum(this%itp_ym(:,i,j,k)*this%W(i,j-1:j,k)); Wyp=sum(this%itp_yp(:,i,j+1,k)*this%W(i,j:j+1,k)); Wzm=sum(this%itp_zm(:,i,j,k)*this%W(i,j,k-1:k)); Wzp=sum(this%itp_zp(:,i,j,k+1)*this%W(i,j,k:k+1))
+               ! Get velocity gradient tensor
+               dUdx(1,1)=this%cfg%dxi(i)*(Uxp-Uxm); dUdx(1,2)=this%cfg%dyi(j)*(Uyp-Uym); dUdx(1,3)=this%cfg%dzi(k)*(Uzp-Uzm)
+               dUdx(2,1)=this%cfg%dxi(i)*(Vxp-Vxm); dUdx(2,2)=this%cfg%dyi(j)*(Vyp-Vym); dUdx(2,3)=this%cfg%dzi(k)*(Vzp-Vzm)
+               dUdx(3,1)=this%cfg%dxi(i)*(Wxp-Wxm); dUdx(3,2)=this%cfg%dyi(j)*(Wyp-Wym); dUdx(3,3)=this%cfg%dzi(k)*(Wzp-Wzm)
+               ! Store velocity gradient components
+               gradU(i,j,k,1)=dUdx(1,1) ! dUx/dx
+               gradU(i,j,k,2)=dUdx(1,2) ! dUy/dy
+               gradU(i,j,k,3)=dUdx(1,3) ! dUz/dz
+               gradU(i,j,k,4)=dUdx(2,1) ! dVx/dx
+               gradU(i,j,k,5)=dUdx(2,2) ! dVy/dy
+               gradU(i,j,k,6)=dUdx(2,3) ! dVz/dz
+               gradU(i,j,k,7)=dUdx(3,1) ! dWx/dx
+               gradU(i,j,k,8)=dUdx(3,2) ! dWy/dy
+               gradU(i,j,k,9)=dUdx(3,3) ! dWz/dz
+            end do
+         end do
+      end do
+      ! Sync it
+      call this%cfg%sync(gradU)
+   end subroutine get_gradU
    
    
    !> Calculate the strain rate tensor, including approximations for domain overlap
