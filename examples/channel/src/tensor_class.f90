@@ -1,4 +1,4 @@
-!> Conformation tensor solver class:
+!> Tensor solver class:
 !> Provides support for various BC, RHS calculation, implicit solver
 !> Assumes constant diffusivity and density.
 module tensor_class
@@ -19,8 +19,7 @@ module tensor_class
    
    ! List of available advection schemes for tensor transport
    integer, parameter, public :: quick =1             !< Quick scheme
-   integer, parameter, public :: bquick=2             !< Bquick scheme
-   
+   integer, parameter, public :: upwind=2             !< Upwind scheme
    
    !> Boundary conditions for the incompressible solver
    type :: bcond
@@ -44,18 +43,18 @@ module tensor_class
       character(len=str_medium) :: name='UNNAMED_tensor'  !< Solver name (default=UNNAMED_tensor)
       
       ! Constant property fluid, but diffusivity is still a field due to LES modeling
-      real(WP) :: rho                                     !< This is our constant fluid density
-      real(WP), dimension(:,:,:), allocatable :: diff     !< These is our constant+SGS dynamic diffusivity for the tensor
+      real(WP) :: rho                                       !< This is our constant fluid density
+      real(WP), dimension(:,:,:,:), allocatable :: diff     !< These is our constant+SGS dynamic diffusivity for the tensor
       
       ! Boundary condition list
       integer :: nbc                                      !< Number of bcond for our solver
       type(bcond), pointer :: first_bc                    !< List of bcond for our solver
       
       ! tensor variable
-      real(WP), dimension(:,:,:), allocatable :: TN       !< TN array
+      real(WP), dimension(:,:,:,:), allocatable :: TN       !< TN array
       
       ! Old tensor variable
-      real(WP), dimension(:,:,:), allocatable :: TNold    !< TNold array
+      real(WP), dimension(:,:,:,:), allocatable :: TNold    !< TNold array
       
       ! Implicit tensor solver
       type(ils) :: implicit                               !< Iterative linear solver object for an implicit prediction of the tensor residual
@@ -66,14 +65,14 @@ module tensor_class
       integer :: nst                                      !< Scheme order (and elemental stencil size)
       integer :: stp1,stp2                                !< Plus interpolation stencil extent for tensor advection
       integer :: stm1,stm2                                !< Minus interpolation stencil extent for tensor advection
-      real(WP), dimension(:,:,:,:), allocatable :: itptn_xp,itptn_yp,itptn_zp   !< Plus interpolation for TN
-      real(WP), dimension(:,:,:,:), allocatable :: itptn_xm,itptn_ym,itptn_zm   !< Minus interpolation for TN
-      real(WP), dimension(:,:,:,:), allocatable :: divtn_x ,divtn_y ,divtn_z    !< Divergence for TN
-      real(WP), dimension(:,:,:,:), allocatable :: grdtn_x ,grdtn_y ,grdtn_z    !< tensor gradient for TN
-      real(WP), dimension(:,:,:,:), allocatable :: itp_x   ,itp_y   ,itp_z      !< Second order interpolation for TN diffusivity
+      real(WP), dimension(:,:,:,:,:), allocatable :: itptn_xp,itptn_yp,itptn_zp   !< Plus interpolation for TN
+      real(WP), dimension(:,:,:,:,:), allocatable :: itptn_xm,itptn_ym,itptn_zm   !< Minus interpolation for TN
+      real(WP), dimension(:,:,:,:,:), allocatable :: divtn_x ,divtn_y ,divtn_z    !< Divergence for TN
+      real(WP), dimension(:,:,:,:,:), allocatable :: grdtn_x ,grdtn_y ,grdtn_z    !< tensor gradient for TN
+      real(WP), dimension(:,:,:,:,:), allocatable :: itp_x   ,itp_y   ,itp_z      !< Second order interpolation for TN diffusivity
       
       ! Masking info for metric modification
-      integer, dimension(:,:,:), allocatable :: mask      !< Integer array used for modifying TN metrics
+      integer, dimension(:,:,:,:), allocatable :: mask    !< Integer array used for modifying TN metrics
       
       ! Monitoring quantities
       real(WP) :: TNmax,TNmin,TNint                       !< Maximum and minimum, integral tensor
@@ -88,7 +87,7 @@ module tensor_class
       procedure :: adjust_metrics                         !< Adjust metrics
       procedure :: get_drhoTNdt                           !< Calculate drhoTN/dt
       procedure :: get_max                                !< Calculate maximum field values
-      procedure :: get_int                                !< Calculate integral field values
+      ! procedure :: get_int                                !< Calculate integral field values
       procedure :: solve_implicit                         !< Solve for the tensor residuals implicitly
    end type tensor
    
@@ -122,9 +121,9 @@ contains
       self%first_bc=>NULL()
       
       ! Allocate variables
-      allocate(self%TN   (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%TN   =0.0_WP
-      allocate(self%TNold(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%TNold=0.0_WP
-      allocate(self%diff (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%diff =0.0_WP
+      allocate(self%TN   (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_),6); self%TN   =0.0_WP
+      allocate(self%TNold(6,self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%TNold=0.0_WP
+      allocate(self%diff (6,self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%diff =0.0_WP
       
       ! Prepare advection scheme
       self%scheme=scheme
@@ -134,6 +133,13 @@ contains
          if (self%cfg%no.lt.2) call die('[tensor constructor] tensor transport scheme requires larger overlap')
          ! Set interpolation stencil sizes
          self%nst=3
+         self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
+         self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
+      case (upwind)
+         ! Check current overlap
+         if (self%cfg%no.lt.2) call die('[tensor constructor] tensor transport scheme requires larger overlap')
+         ! Set interpolation stencil sizes
+         self%nst=1
          self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
          self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
       case default
@@ -147,27 +153,67 @@ contains
       call self%init_metrics()
       
       ! Prepare mask for TN
-      allocate(self%mask(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%mask=0
+      allocate(self%mask(6,self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%mask=0
       if (.not.self%cfg%xper) then
-         if (self%cfg%iproc.eq.           1) self%mask(:self%cfg%imin-1,:,:)=2
-         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(self%cfg%imax+1:,:,:)=2
+         if (self%cfg%iproc.eq.           1) self%mask(1,:self%cfg%imin-1,:,:)=2
+         if (self%cfg%iproc.eq.           1) self%mask(2,:self%cfg%imin-1,:,:)=2
+         if (self%cfg%iproc.eq.           1) self%mask(3,:self%cfg%imin-1,:,:)=2
+         if (self%cfg%iproc.eq.           1) self%mask(4,:self%cfg%imin-1,:,:)=2
+         if (self%cfg%iproc.eq.           1) self%mask(5,:self%cfg%imin-1,:,:)=2
+         if (self%cfg%iproc.eq.           1) self%mask(6,:self%cfg%imin-1,:,:)=2
+         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(1,self%cfg%imax+1:,:,:)=2
+         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(2,self%cfg%imax+1:,:,:)=2
+         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(3,self%cfg%imax+1:,:,:)=2
+         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(4,self%cfg%imax+1:,:,:)=2
+         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(5,self%cfg%imax+1:,:,:)=2
+         if (self%cfg%iproc.eq.self%cfg%npx) self%mask(6,self%cfg%imax+1:,:,:)=2
       end if
       if (.not.self%cfg%yper) then
-         if (self%cfg%jproc.eq.           1) self%mask(:,:self%cfg%jmin-1,:)=2
-         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(:,self%cfg%jmax+1:,:)=2
+         if (self%cfg%jproc.eq.           1) self%mask(1,:,:self%cfg%jmin-1,:)=2
+         if (self%cfg%jproc.eq.           1) self%mask(2,:,:self%cfg%jmin-1,:)=2
+         if (self%cfg%jproc.eq.           1) self%mask(3,:,:self%cfg%jmin-1,:)=2
+         if (self%cfg%jproc.eq.           1) self%mask(4,:,:self%cfg%jmin-1,:)=2
+         if (self%cfg%jproc.eq.           1) self%mask(5,:,:self%cfg%jmin-1,:)=2
+         if (self%cfg%jproc.eq.           1) self%mask(6,:,:self%cfg%jmin-1,:)=2
+         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(1,:,self%cfg%jmax+1:,:)=2
+         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(2,:,self%cfg%jmax+1:,:)=2
+         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(3,:,self%cfg%jmax+1:,:)=2
+         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(4,:,self%cfg%jmax+1:,:)=2
+         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(5,:,self%cfg%jmax+1:,:)=2
+         if (self%cfg%jproc.eq.self%cfg%npy) self%mask(6,:,self%cfg%jmax+1:,:)=2
       end if
       if (.not.self%cfg%zper) then
-         if (self%cfg%kproc.eq.           1) self%mask(:,:,:self%cfg%kmin-1)=2
-         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(:,:,self%cfg%kmax+1:)=2
+         if (self%cfg%kproc.eq.           1) self%mask(1,:,:,:self%cfg%kmin-1)=2
+         if (self%cfg%kproc.eq.           1) self%mask(2,:,:,:self%cfg%kmin-1)=2
+         if (self%cfg%kproc.eq.           1) self%mask(3,:,:,:self%cfg%kmin-1)=2
+         if (self%cfg%kproc.eq.           1) self%mask(4,:,:,:self%cfg%kmin-1)=2
+         if (self%cfg%kproc.eq.           1) self%mask(5,:,:,:self%cfg%kmin-1)=2
+         if (self%cfg%kproc.eq.           1) self%mask(6,:,:,:self%cfg%kmin-1)=2
+         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(1,:,:,self%cfg%kmax+1:)=2
+         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(2,:,:,self%cfg%kmax+1:)=2
+         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(3,:,:,self%cfg%kmax+1:)=2
+         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(4,:,:,self%cfg%kmax+1:)=2
+         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(5,:,:,self%cfg%kmax+1:)=2
+         if (self%cfg%kproc.eq.self%cfg%npz) self%mask(6,:,:,self%cfg%kmax+1:)=2
       end if
       do k=self%cfg%kmino_,self%cfg%kmaxo_
          do j=self%cfg%jmino_,self%cfg%jmaxo_
             do i=self%cfg%imino_,self%cfg%imaxo_
-               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(i,j,k)=1
+               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(1,i,j,k)=1
+               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(2,i,j,k)=1
+               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(3,i,j,k)=1
+               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(4,i,j,k)=1
+               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(5,i,j,k)=1
+               if (self%cfg%VF(i,j,k).eq.0.0_WP) self%mask(6,i,j,k)=1
             end do
          end do
       end do
-      call self%cfg%sync(self%mask)
+      call self%cfg%sync(self%mask(1,:,:,:))
+      call self%cfg%sync(self%mask(2,:,:,:))
+      call self%cfg%sync(self%mask(3,:,:,:))
+      call self%cfg%sync(self%mask(4,:,:,:))
+      call self%cfg%sync(self%mask(5,:,:,:))
+      call self%cfg%sync(self%mask(6,:,:,:))
       
    end function constructor
       
@@ -180,27 +226,42 @@ contains
       integer :: i,j,k
       
       ! Allocate finite difference diffusivity interpolation coefficients
-      allocate(this%itp_x(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
-      allocate(this%itp_y(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
-      allocate(this%itp_z(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
+      allocate(this%itp_x(6,-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
+      allocate(this%itp_y(6,-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
+      allocate(this%itp_z(6,-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
       ! Create diffusivity interpolation coefficients to cell face
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
-               this%itp_x(:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
-               this%itp_y(:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
-               this%itp_z(:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
+               this%itp_x(1,:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
+               this%itp_x(2,:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
+               this%itp_x(3,:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
+               this%itp_x(4,:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
+               this%itp_x(5,:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
+               this%itp_x(6,:,i,j,k)=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)] !< Linear interpolation in x from [xm,ym,zm] to [x,ym,zm]
+               this%itp_y(1,:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
+               this%itp_y(2,:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
+               this%itp_y(3,:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
+               this%itp_y(4,:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
+               this%itp_y(5,:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
+               this%itp_y(6,:,i,j,k)=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)] !< Linear interpolation in y from [xm,ym,zm] to [xm,y,zm]
+               this%itp_z(1,:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
+               this%itp_z(2,:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
+               this%itp_z(3,:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
+               this%itp_z(4,:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
+               this%itp_z(5,:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
+               this%itp_z(6,:,i,j,k)=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)] !< Linear interpolation in z from [xm,ym,zm] to [xm,ym,z]
             end do
          end do
       end do
       
       ! Allocate finite difference tensor interpolation coefficients
-      allocate(this%itptn_xp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
-      allocate(this%itptn_xm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
-      allocate(this%itptn_yp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
-      allocate(this%itptn_ym(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
-      allocate(this%itptn_zp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
-      allocate(this%itptn_zm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
+      allocate(this%itptn_xp(6,this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
+      allocate(this%itptn_xm(6,this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
+      allocate(this%itptn_yp(6,this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
+      allocate(this%itptn_ym(6,this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
+      allocate(this%itptn_zp(6,this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
+      allocate(this%itptn_zm(6,this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
       ! Create tensor interpolation coefficients to cell faces
       select case (this%scheme)
       case (quick)
@@ -208,45 +269,151 @@ contains
             do j=this%cfg%jmin_,this%cfg%jmax_+1
                do i=this%cfg%imin_,this%cfg%imax_+1
                   ! Interpolation to x-face
-                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(:,i,j,k))
-                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(1,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(2,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(3,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(4,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(5,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(6,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(1,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(2,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(3,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(4,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(5,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(6,:,i,j,k))
                   ! Interpolation to y-face
-                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(:,i,j,k))
-                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(1,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(2,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(3,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(4,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(5,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(6,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(1,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(2,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(3,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(4,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(5,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(6,:,i,j,k))
                   ! Interpolation to z-face
-                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(:,i,j,k))
-                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(1,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(2,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(3,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(4,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(5,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(6,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(1,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(2,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(3,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(4,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(5,:,i,j,k))
+                  call fv_itp_build(n=3,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(6,:,i,j,k))
+               end do
+            end do
+         end do
+      case (upwind)
+      do k=this%cfg%kmin_,this%cfg%kmax_+1
+            do j=this%cfg%jmin_,this%cfg%jmax_+1
+               do i=this%cfg%imin_,this%cfg%imax_+1
+                  ! Interpolation to x-face
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(1,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(2,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(3,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(4,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(5,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stp1:i+this%stp2+1),xp=this%cfg%x(i),coeff=this%itptn_xp(6,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(1,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(2,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(3,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(4,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(5,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%x(i+this%stm1:i+this%stm2+1),xp=this%cfg%x(i),coeff=this%itptn_xm(6,:,i,j,k))
+                  ! Interpolation to y-face
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(1,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(2,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(3,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(4,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(5,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stp1:j+this%stp2+1),xp=this%cfg%y(j),coeff=this%itptn_yp(6,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(1,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(2,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(3,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(4,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(5,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%y(j+this%stm1:j+this%stm2+1),xp=this%cfg%y(j),coeff=this%itptn_ym(6,:,i,j,k))
+                  ! Interpolation to z-face
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(1,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(2,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(3,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(4,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(5,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stp1:k+this%stp2+1),xp=this%cfg%z(k),coeff=this%itptn_zp(6,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(1,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(2,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(3,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(4,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(5,:,i,j,k))
+                  call fv_itp_build(n=1,x=this%cfg%z(k+this%stm1:k+this%stm2+1),xp=this%cfg%z(k),coeff=this%itptn_zm(6,:,i,j,k))
                end do
             end do
          end do
       end select
       
       ! Allocate finite volume divergence operators
-      allocate(this%divtn_x(0:+1,this%cfg%imin_:this%cfg%imax_,this%cfg%jmin_:this%cfg%jmax_,this%cfg%kmin_:this%cfg%kmax_)) !< Cell-centered
-      allocate(this%divtn_y(0:+1,this%cfg%imin_:this%cfg%imax_,this%cfg%jmin_:this%cfg%jmax_,this%cfg%kmin_:this%cfg%kmax_)) !< Cell-centered
-      allocate(this%divtn_z(0:+1,this%cfg%imin_:this%cfg%imax_,this%cfg%jmin_:this%cfg%jmax_,this%cfg%kmin_:this%cfg%kmax_)) !< Cell-centered
+      allocate(this%divtn_x(6,0:+1,this%cfg%imin_:this%cfg%imax_,this%cfg%jmin_:this%cfg%jmax_,this%cfg%kmin_:this%cfg%kmax_)) !< Cell-centered
+      allocate(this%divtn_y(6,0:+1,this%cfg%imin_:this%cfg%imax_,this%cfg%jmin_:this%cfg%jmax_,this%cfg%kmin_:this%cfg%kmax_)) !< Cell-centered
+      allocate(this%divtn_z(6,0:+1,this%cfg%imin_:this%cfg%imax_,this%cfg%jmin_:this%cfg%jmax_,this%cfg%kmin_:this%cfg%kmax_)) !< Cell-centered
       ! Create divergence operator to cell center [xm,ym,zm]
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               this%divtn_x(:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
-               this%divtn_y(:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
-               this%divtn_z(:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
+               this%divtn_x(1,:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
+               this%divtn_x(2,:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
+               this%divtn_x(3,:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
+               this%divtn_x(4,:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
+               this%divtn_x(5,:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
+               this%divtn_x(6,:,i,j,k)=this%cfg%dxi(i)*[-1.0_WP,+1.0_WP] !< FV divergence from [x ,ym,zm]
+               this%divtn_y(1,:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
+               this%divtn_y(2,:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
+               this%divtn_y(3,:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
+               this%divtn_y(4,:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
+               this%divtn_y(5,:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
+               this%divtn_y(6,:,i,j,k)=this%cfg%dyi(j)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,y ,zm]
+               this%divtn_z(1,:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
+               this%divtn_z(2,:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
+               this%divtn_z(3,:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
+               this%divtn_z(4,:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
+               this%divtn_z(5,:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
+               this%divtn_z(6,:,i,j,k)=this%cfg%dzi(k)*[-1.0_WP,+1.0_WP] !< FV divergence from [xm,ym,z ]
             end do
          end do
       end do
       
       ! Allocate finite difference velocity gradient operators
-      allocate(this%grdtn_x(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
-      allocate(this%grdtn_y(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
-      allocate(this%grdtn_z(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
+      allocate(this%grdtn_x(6,-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
+      allocate(this%grdtn_y(6,-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
+      allocate(this%grdtn_z(6,-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
       ! Create gradient coefficients to cell faces
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
-               this%grdtn_x(:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
-               this%grdtn_y(:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
-               this%grdtn_z(:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
+               this%grdtn_x(1,:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
+               this%grdtn_x(2,:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
+               this%grdtn_x(3,:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
+               this%grdtn_x(4,:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
+               this%grdtn_x(5,:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
+               this%grdtn_x(6,:,i,j,k)=this%cfg%dxmi(i)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in x from [xm,ym,zm] to [x,ym,zm]
+               this%grdtn_y(1,:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
+               this%grdtn_y(2,:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
+               this%grdtn_y(3,:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
+               this%grdtn_y(4,:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
+               this%grdtn_y(5,:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
+               this%grdtn_y(6,:,i,j,k)=this%cfg%dymi(j)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in y from [xm,ym,zm] to [xm,y,zm]
+               this%grdtn_z(1,:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
+               this%grdtn_z(2,:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
+               this%grdtn_z(3,:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
+               this%grdtn_z(4,:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
+               this%grdtn_z(5,:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
+               this%grdtn_z(6,:,i,j,k)=this%cfg%dzmi(k)*[-1.0_WP,+1.0_WP] !< FD gradient of TN in z from [xm,ym,zm] to [xm,ym,z]
             end do
          end do
       end do
@@ -261,21 +428,56 @@ contains
       integer :: i,j,k
       
       ! Sync up masks
-      call this%cfg%sync(this%mask)
+      call this%cfg%sync(this%mask(1,:,:,:))
+      call this%cfg%sync(this%mask(2,:,:,:))
+      call this%cfg%sync(this%mask(3,:,:,:))
+      call this%cfg%sync(this%mask(4,:,:,:))
+      call this%cfg%sync(this%mask(5,:,:,:))
+      call this%cfg%sync(this%mask(6,:,:,:))
       
       ! Adjust interpolation coefficients to cell faces
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
                ! Linear interpolation in x
-               if (this%mask(i,j,k).eq.0.and.this%mask(i-1,j,k).gt.0) this%itp_x(:,i,j,k)=[0.0_WP,1.0_WP]
-               if (this%mask(i,j,k).gt.0.and.this%mask(i-1,j,k).eq.0) this%itp_x(:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(1,i,j,k).eq.0.and.this%mask(1,i-1,j,k).gt.0) this%itp_x(1,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(2,i,j,k).eq.0.and.this%mask(2,i-1,j,k).gt.0) this%itp_x(2,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(3,i,j,k).eq.0.and.this%mask(3,i-1,j,k).gt.0) this%itp_x(3,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(4,i,j,k).eq.0.and.this%mask(4,i-1,j,k).gt.0) this%itp_x(4,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(5,i,j,k).eq.0.and.this%mask(5,i-1,j,k).gt.0) this%itp_x(5,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(6,i,j,k).eq.0.and.this%mask(6,i-1,j,k).gt.0) this%itp_x(6,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(1,i,j,k).gt.0.and.this%mask(1,i-1,j,k).eq.0) this%itp_x(1,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(2,i,j,k).gt.0.and.this%mask(2,i-1,j,k).eq.0) this%itp_x(2,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(3,i,j,k).gt.0.and.this%mask(3,i-1,j,k).eq.0) this%itp_x(3,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(4,i,j,k).gt.0.and.this%mask(4,i-1,j,k).eq.0) this%itp_x(4,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(5,i,j,k).gt.0.and.this%mask(5,i-1,j,k).eq.0) this%itp_x(5,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(6,i,j,k).gt.0.and.this%mask(6,i-1,j,k).eq.0) this%itp_x(6,:,i,j,k)=[1.0_WP,0.0_WP]
                ! Linear interpolation in y
-               if (this%mask(i,j,k).eq.0.and.this%mask(i,j-1,k).gt.0) this%itp_y(:,i,j,k)=[0.0_WP,1.0_WP]
-               if (this%mask(i,j,k).gt.0.and.this%mask(i,j-1,k).eq.0) this%itp_y(:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(1,i,j,k).eq.0.and.this%mask(1,i,j-1,k).gt.0) this%itp_y(1,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(2,i,j,k).eq.0.and.this%mask(2,i,j-1,k).gt.0) this%itp_y(2,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(3,i,j,k).eq.0.and.this%mask(3,i,j-1,k).gt.0) this%itp_y(3,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(4,i,j,k).eq.0.and.this%mask(4,i,j-1,k).gt.0) this%itp_y(4,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(5,i,j,k).eq.0.and.this%mask(5,i,j-1,k).gt.0) this%itp_y(5,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(6,i,j,k).eq.0.and.this%mask(6,i,j-1,k).gt.0) this%itp_y(6,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(1,i,j,k).gt.0.and.this%mask(1,i,j-1,k).eq.0) this%itp_y(1,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(2,i,j,k).gt.0.and.this%mask(2,i,j-1,k).eq.0) this%itp_y(2,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(3,i,j,k).gt.0.and.this%mask(3,i,j-1,k).eq.0) this%itp_y(3,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(4,i,j,k).gt.0.and.this%mask(4,i,j-1,k).eq.0) this%itp_y(4,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(5,i,j,k).gt.0.and.this%mask(5,i,j-1,k).eq.0) this%itp_y(5,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(6,i,j,k).gt.0.and.this%mask(6,i,j-1,k).eq.0) this%itp_y(6,:,i,j,k)=[1.0_WP,0.0_WP]
                ! Linear interpolation in z
-               if (this%mask(i,j,k).eq.0.and.this%mask(i,j,k-1).gt.0) this%itp_z(:,i,j,k)=[0.0_WP,1.0_WP]
-               if (this%mask(i,j,k).gt.0.and.this%mask(i,j,k-1).eq.0) this%itp_z(:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(1,i,j,k).eq.0.and.this%mask(1,i,j,k-1).gt.0) this%itp_z(1,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(2,i,j,k).eq.0.and.this%mask(2,i,j,k-1).gt.0) this%itp_z(2,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(3,i,j,k).eq.0.and.this%mask(3,i,j,k-1).gt.0) this%itp_z(3,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(4,i,j,k).eq.0.and.this%mask(4,i,j,k-1).gt.0) this%itp_z(4,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(5,i,j,k).eq.0.and.this%mask(5,i,j,k-1).gt.0) this%itp_z(5,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(6,i,j,k).eq.0.and.this%mask(6,i,j,k-1).gt.0) this%itp_z(6,:,i,j,k)=[0.0_WP,1.0_WP]
+               if (this%mask(1,i,j,k).gt.0.and.this%mask(1,i,j,k-1).eq.0) this%itp_z(1,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(2,i,j,k).gt.0.and.this%mask(2,i,j,k-1).eq.0) this%itp_z(2,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(3,i,j,k).gt.0.and.this%mask(3,i,j,k-1).eq.0) this%itp_z(3,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(4,i,j,k).gt.0.and.this%mask(4,i,j,k-1).eq.0) this%itp_z(4,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(5,i,j,k).gt.0.and.this%mask(5,i,j,k-1).eq.0) this%itp_z(5,:,i,j,k)=[1.0_WP,0.0_WP]
+               if (this%mask(6,i,j,k).gt.0.and.this%mask(6,i,j,k-1).eq.0) this%itp_z(6,:,i,j,k)=[1.0_WP,0.0_WP]
             end do
          end do
       end do
@@ -284,32 +486,167 @@ contains
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
-               ! X face
-               if (this%mask(i-1,j,k).eq.2) then
-                  this%itptn_xm(:,i,j,k)=0.0_WP; this%itptn_xm(-1,i,j,k)=1.0_WP
-                  this%itptn_xp(:,i,j,k)=0.0_WP; this%itptn_xp(-1,i,j,k)=1.0_WP
+               ! X face - 1
+               if (this%mask(1,i-1,j,k).eq.2) then
+                  this%itptn_xm(1,:,i,j,k)=0.0_WP; this%itptn_xm(1,-1,i,j,k)=1.0_WP
+                  this%itptn_xp(1,:,i,j,k)=0.0_WP; this%itptn_xp(1,-1,i,j,k)=1.0_WP
                end if
-               if (this%mask(i  ,j,k).eq.2) then
-                  this%itptn_xm(:,i,j,k)=0.0_WP; this%itptn_xm( 0,i,j,k)=1.0_WP
-                  this%itptn_xp(:,i,j,k)=0.0_WP; this%itptn_xp( 0,i,j,k)=1.0_WP
+               if (this%mask(1,i  ,j,k).eq.2) then
+                  this%itptn_xm(1,:,i,j,k)=0.0_WP; this%itptn_xm(1, 0,i,j,k)=1.0_WP
+                  this%itptn_xp(1,:,i,j,k)=0.0_WP; this%itptn_xp(1, 0,i,j,k)=1.0_WP
                end if
-               ! Y face
-               if (this%mask(i,j-1,k).eq.2) then
-                  this%itptn_ym(:,i,j,k)=0.0_WP; this%itptn_ym(-1,i,j,k)=1.0_WP
-                  this%itptn_yp(:,i,j,k)=0.0_WP; this%itptn_yp(-1,i,j,k)=1.0_WP
+               ! X face - 2
+               if (this%mask(2,i-1,j,k).eq.2) then
+                  this%itptn_xm(2,:,i,j,k)=0.0_WP; this%itptn_xm(2,-1,i,j,k)=1.0_WP
+                  this%itptn_xp(2,:,i,j,k)=0.0_WP; this%itptn_xp(2,-1,i,j,k)=1.0_WP
                end if
-               if (this%mask(i,j  ,k).eq.2) then
-                  this%itptn_ym(:,i,j,k)=0.0_WP; this%itptn_ym( 0,i,j,k)=1.0_WP
-                  this%itptn_yp(:,i,j,k)=0.0_WP; this%itptn_yp( 0,i,j,k)=1.0_WP
+               if (this%mask(2,i  ,j,k).eq.2) then
+                  this%itptn_xm(2,:,i,j,k)=0.0_WP; this%itptn_xm(2, 0,i,j,k)=1.0_WP
+                  this%itptn_xp(2,:,i,j,k)=0.0_WP; this%itptn_xp(2, 0,i,j,k)=1.0_WP
                end if
-               ! Z face
-               if (this%mask(i,j,k-1).eq.2) then
-                  this%itptn_zm(:,i,j,k)=0.0_WP; this%itptn_zm(-1,i,j,k)=1.0_WP
-                  this%itptn_zp(:,i,j,k)=0.0_WP; this%itptn_zp(-1,i,j,k)=1.0_WP
+               ! X face - 3
+               if (this%mask(3,i-1,j,k).eq.2) then
+                  this%itptn_xm(3,:,i,j,k)=0.0_WP; this%itptn_xm(3,-1,i,j,k)=1.0_WP
+                  this%itptn_xp(3,:,i,j,k)=0.0_WP; this%itptn_xp(3,-1,i,j,k)=1.0_WP
                end if
-               if (this%mask(i,j,k  ).eq.2) then
-                  this%itptn_zm(:,i,j,k)=0.0_WP; this%itptn_zm( 0,i,j,k)=1.0_WP
-                  this%itptn_zp(:,i,j,k)=0.0_WP; this%itptn_zp( 0,i,j,k)=1.0_WP
+               if (this%mask(3,i  ,j,k).eq.2) then
+                  this%itptn_xm(3,:,i,j,k)=0.0_WP; this%itptn_xm(3, 0,i,j,k)=1.0_WP
+                  this%itptn_xp(3,:,i,j,k)=0.0_WP; this%itptn_xp(3, 0,i,j,k)=1.0_WP
+               end if
+               ! X face - 4
+               if (this%mask(4,i-1,j,k).eq.2) then
+                  this%itptn_xm(4,:,i,j,k)=0.0_WP; this%itptn_xm(4,-1,i,j,k)=1.0_WP
+                  this%itptn_xp(4,:,i,j,k)=0.0_WP; this%itptn_xp(4,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(4,i  ,j,k).eq.2) then
+                  this%itptn_xm(4,:,i,j,k)=0.0_WP; this%itptn_xm(4, 0,i,j,k)=1.0_WP
+                  this%itptn_xp(4,:,i,j,k)=0.0_WP; this%itptn_xp(4, 0,i,j,k)=1.0_WP
+               end if
+               ! X face - 5
+               if (this%mask(5,i-1,j,k).eq.2) then
+                  this%itptn_xm(5,:,i,j,k)=0.0_WP; this%itptn_xm(5,-1,i,j,k)=1.0_WP
+                  this%itptn_xp(5,:,i,j,k)=0.0_WP; this%itptn_xp(5,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(5,i  ,j,k).eq.2) then
+                  this%itptn_xm(5,:,i,j,k)=0.0_WP; this%itptn_xm(5, 0,i,j,k)=1.0_WP
+                  this%itptn_xp(5,:,i,j,k)=0.0_WP; this%itptn_xp(5, 0,i,j,k)=1.0_WP
+               end if
+               ! X face - 6
+               if (this%mask(6,i-1,j,k).eq.2) then
+                  this%itptn_xm(6,:,i,j,k)=0.0_WP; this%itptn_xm(6,-1,i,j,k)=1.0_WP
+                  this%itptn_xp(6,:,i,j,k)=0.0_WP; this%itptn_xp(6,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(6,i  ,j,k).eq.2) then
+                  this%itptn_xm(6,:,i,j,k)=0.0_WP; this%itptn_xm(6, 0,i,j,k)=1.0_WP
+                  this%itptn_xp(6,:,i,j,k)=0.0_WP; this%itptn_xp(6, 0,i,j,k)=1.0_WP
+               end if
+               ! Y face - 1
+               if (this%mask(1,i,j-1,k).eq.2) then
+                  this%itptn_ym(1,:,i,j,k)=0.0_WP; this%itptn_ym(1,-1,i,j,k)=1.0_WP
+                  this%itptn_yp(1,:,i,j,k)=0.0_WP; this%itptn_yp(1,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(1,i,j  ,k).eq.2) then
+                  this%itptn_ym(1,:,i,j,k)=0.0_WP; this%itptn_ym(1, 0,i,j,k)=1.0_WP
+                  this%itptn_yp(1,:,i,j,k)=0.0_WP; this%itptn_yp(1, 0,i,j,k)=1.0_WP
+               end if
+               ! Y face - 2
+               if (this%mask(2,i,j-1,k).eq.2) then
+                  this%itptn_ym(2,:,i,j,k)=0.0_WP; this%itptn_ym(2,-1,i,j,k)=1.0_WP
+                  this%itptn_yp(2,:,i,j,k)=0.0_WP; this%itptn_yp(2,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(2,i,j  ,k).eq.2) then
+                  this%itptn_ym(2,:,i,j,k)=0.0_WP; this%itptn_ym(2, 0,i,j,k)=1.0_WP
+                  this%itptn_yp(2,:,i,j,k)=0.0_WP; this%itptn_yp(2, 0,i,j,k)=1.0_WP
+               end if
+               ! Y face - 3
+               if (this%mask(3,i,j-1,k).eq.2) then
+                  this%itptn_ym(3,:,i,j,k)=0.0_WP; this%itptn_ym(3,-1,i,j,k)=1.0_WP
+                  this%itptn_yp(3,:,i,j,k)=0.0_WP; this%itptn_yp(3,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(3,i,j  ,k).eq.2) then
+                  this%itptn_ym(3,:,i,j,k)=0.0_WP; this%itptn_ym(3, 0,i,j,k)=1.0_WP
+                  this%itptn_yp(3,:,i,j,k)=0.0_WP; this%itptn_yp(3, 0,i,j,k)=1.0_WP
+               end if
+               ! Y face - 4
+               if (this%mask(4,i,j-1,k).eq.2) then
+                  this%itptn_ym(4,:,i,j,k)=0.0_WP; this%itptn_ym(4,-1,i,j,k)=1.0_WP
+                  this%itptn_yp(4,:,i,j,k)=0.0_WP; this%itptn_yp(4,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(4,i,j  ,k).eq.2) then
+                  this%itptn_ym(4,:,i,j,k)=0.0_WP; this%itptn_ym(4, 0,i,j,k)=1.0_WP
+                  this%itptn_yp(4,:,i,j,k)=0.0_WP; this%itptn_yp(4, 0,i,j,k)=1.0_WP
+               end if
+               ! Y face - 5
+               if (this%mask(5,i,j-1,k).eq.2) then
+                  this%itptn_ym(5,:,i,j,k)=0.0_WP; this%itptn_ym(5,-1,i,j,k)=1.0_WP
+                  this%itptn_yp(5,:,i,j,k)=0.0_WP; this%itptn_yp(5,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(5,i,j  ,k).eq.2) then
+                  this%itptn_ym(5,:,i,j,k)=0.0_WP; this%itptn_ym(5, 0,i,j,k)=1.0_WP
+                  this%itptn_yp(5,:,i,j,k)=0.0_WP; this%itptn_yp(5, 0,i,j,k)=1.0_WP
+               end if
+               ! Y face - 6
+               if (this%mask(6,i,j-1,k).eq.2) then
+                  this%itptn_ym(6,:,i,j,k)=0.0_WP; this%itptn_ym(6,-1,i,j,k)=1.0_WP
+                  this%itptn_yp(6,:,i,j,k)=0.0_WP; this%itptn_yp(6,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(6,i,j  ,k).eq.2) then
+                  this%itptn_ym(6,:,i,j,k)=0.0_WP; this%itptn_ym(6, 0,i,j,k)=1.0_WP
+                  this%itptn_yp(6,:,i,j,k)=0.0_WP; this%itptn_yp(6, 0,i,j,k)=1.0_WP
+               end if
+               ! Z face - 1
+               if (this%mask(1,i,j,k-1).eq.2) then
+                  this%itptn_zm(1,:,i,j,k)=0.0_WP; this%itptn_zm(1,-1,i,j,k)=1.0_WP
+                  this%itptn_zp(1,:,i,j,k)=0.0_WP; this%itptn_zp(1,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(1,i,j,k  ).eq.2) then
+                  this%itptn_zm(1,:,i,j,k)=0.0_WP; this%itptn_zm(1, 0,i,j,k)=1.0_WP
+                  this%itptn_zp(1,:,i,j,k)=0.0_WP; this%itptn_zp(1, 0,i,j,k)=1.0_WP
+               end if
+               ! Z face - 2
+               if (this%mask(2,i,j,k-1).eq.2) then
+                  this%itptn_zm(2,:,i,j,k)=0.0_WP; this%itptn_zm(2,-1,i,j,k)=1.0_WP
+                  this%itptn_zp(2,:,i,j,k)=0.0_WP; this%itptn_zp(2,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(2,i,j,k  ).eq.2) then
+                  this%itptn_zm(2,:,i,j,k)=0.0_WP; this%itptn_zm(2, 0,i,j,k)=1.0_WP
+                  this%itptn_zp(2,:,i,j,k)=0.0_WP; this%itptn_zp(2, 0,i,j,k)=1.0_WP
+               end if
+               ! Z face - 3
+               if (this%mask(3,i,j,k-1).eq.2) then
+                  this%itptn_zm(3,:,i,j,k)=0.0_WP; this%itptn_zm(3,-1,i,j,k)=1.0_WP
+                  this%itptn_zp(3,:,i,j,k)=0.0_WP; this%itptn_zp(3,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(3,i,j,k  ).eq.2) then
+                  this%itptn_zm(3,:,i,j,k)=0.0_WP; this%itptn_zm(3, 0,i,j,k)=1.0_WP
+                  this%itptn_zp(3,:,i,j,k)=0.0_WP; this%itptn_zp(3, 0,i,j,k)=1.0_WP
+               end if
+               ! Z face - 4
+               if (this%mask(4,i,j,k-1).eq.2) then
+                  this%itptn_zm(4,:,i,j,k)=0.0_WP; this%itptn_zm(4,-1,i,j,k)=1.0_WP
+                  this%itptn_zp(4,:,i,j,k)=0.0_WP; this%itptn_zp(4,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(4,i,j,k  ).eq.2) then
+                  this%itptn_zm(4,:,i,j,k)=0.0_WP; this%itptn_zm(4, 0,i,j,k)=1.0_WP
+                  this%itptn_zp(4,:,i,j,k)=0.0_WP; this%itptn_zp(4, 0,i,j,k)=1.0_WP
+               end if
+               ! Z face - 5
+               if (this%mask(5,i,j,k-1).eq.2) then
+                  this%itptn_zm(5,:,i,j,k)=0.0_WP; this%itptn_zm(5,-1,i,j,k)=1.0_WP
+                  this%itptn_zp(5,:,i,j,k)=0.0_WP; this%itptn_zp(5,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(5,i,j,k  ).eq.2) then
+                  this%itptn_zm(5,:,i,j,k)=0.0_WP; this%itptn_zm(5, 0,i,j,k)=1.0_WP
+                  this%itptn_zp(5,:,i,j,k)=0.0_WP; this%itptn_zp(5, 0,i,j,k)=1.0_WP
+               end if
+               ! Z face - 6
+               if (this%mask(6,i,j,k-1).eq.2) then
+                  this%itptn_zm(6,:,i,j,k)=0.0_WP; this%itptn_zm(6,-1,i,j,k)=1.0_WP
+                  this%itptn_zp(6,:,i,j,k)=0.0_WP; this%itptn_zp(6,-1,i,j,k)=1.0_WP
+               end if
+               if (this%mask(6,i,j,k  ).eq.2) then
+                  this%itptn_zm(6,:,i,j,k)=0.0_WP; this%itptn_zm(6, 0,i,j,k)=1.0_WP
+                  this%itptn_zp(6,:,i,j,k)=0.0_WP; this%itptn_zp(6, 0,i,j,k)=1.0_WP
                end if
             end do
          end do
@@ -319,10 +656,35 @@ contains
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               if (this%mask(i,j,k).gt.0) then
-                  this%divtn_x(:,i,j,k)=0.0_WP
-                  this%divtn_y(:,i,j,k)=0.0_WP
-                  this%divtn_z(:,i,j,k)=0.0_WP
+               if (this%mask(1,i,j,k).gt.0) then
+                  this%divtn_x(1,:,i,j,k)=0.0_WP
+                  this%divtn_y(1,:,i,j,k)=0.0_WP
+                  this%divtn_z(1,:,i,j,k)=0.0_WP
+               end if
+               if (this%mask(2,i,j,k).gt.0) then
+                  this%divtn_x(2,:,i,j,k)=0.0_WP
+                  this%divtn_y(2,:,i,j,k)=0.0_WP
+                  this%divtn_z(2,:,i,j,k)=0.0_WP
+               end if
+               if (this%mask(3,i,j,k).gt.0) then
+                  this%divtn_x(3,:,i,j,k)=0.0_WP
+                  this%divtn_y(3,:,i,j,k)=0.0_WP
+                  this%divtn_z(3,:,i,j,k)=0.0_WP
+               end if
+               if (this%mask(4,i,j,k).gt.0) then
+                  this%divtn_x(4,:,i,j,k)=0.0_WP
+                  this%divtn_y(4,:,i,j,k)=0.0_WP
+                  this%divtn_z(4,:,i,j,k)=0.0_WP
+               end if
+               if (this%mask(5,i,j,k).gt.0) then
+                  this%divtn_x(5,:,i,j,k)=0.0_WP
+                  this%divtn_y(5,:,i,j,k)=0.0_WP
+                  this%divtn_z(5,:,i,j,k)=0.0_WP
+               end if
+               if (this%mask(6,i,j,k).gt.0) then
+                  this%divtn_x(6,:,i,j,k)=0.0_WP
+                  this%divtn_y(6,:,i,j,k)=0.0_WP
+                  this%divtn_z(6,:,i,j,k)=0.0_WP
                end if
             end do
          end do
@@ -332,9 +694,24 @@ contains
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
-               if (this%mask(i,j,k).eq.1.or.this%mask(i-1,j,k).eq.1) this%grdtn_x(:,i,j,k)=0.0_WP     !< FD gradient in x of TN
-               if (this%mask(i,j,k).eq.1.or.this%mask(i,j-1,k).eq.1) this%grdtn_y(:,i,j,k)=0.0_WP     !< FD gradient in y of TN
-               if (this%mask(i,j,k).eq.1.or.this%mask(i,j,k-1).eq.1) this%grdtn_z(:,i,j,k)=0.0_WP     !< FD gradient in z of TN
+               if (this%mask(1,i,j,k).eq.1.or.this%mask(1,i-1,j,k).eq.1) this%grdtn_x(1,:,i,j,k)=0.0_WP     !< FD gradient in x of TN
+               if (this%mask(2,i,j,k).eq.1.or.this%mask(2,i-1,j,k).eq.1) this%grdtn_x(2,:,i,j,k)=0.0_WP     !< FD gradient in x of TN
+               if (this%mask(3,i,j,k).eq.1.or.this%mask(3,i-1,j,k).eq.1) this%grdtn_x(3,:,i,j,k)=0.0_WP     !< FD gradient in x of TN
+               if (this%mask(4,i,j,k).eq.1.or.this%mask(4,i-1,j,k).eq.1) this%grdtn_x(4,:,i,j,k)=0.0_WP     !< FD gradient in x of TN
+               if (this%mask(5,i,j,k).eq.1.or.this%mask(5,i-1,j,k).eq.1) this%grdtn_x(5,:,i,j,k)=0.0_WP     !< FD gradient in x of TN
+               if (this%mask(6,i,j,k).eq.1.or.this%mask(6,i-1,j,k).eq.1) this%grdtn_x(6,:,i,j,k)=0.0_WP     !< FD gradient in x of TN
+               if (this%mask(1,i,j,k).eq.1.or.this%mask(1,i,j-1,k).eq.1) this%grdtn_y(1,:,i,j,k)=0.0_WP     !< FD gradient in y of TN
+               if (this%mask(2,i,j,k).eq.1.or.this%mask(2,i,j-1,k).eq.1) this%grdtn_y(2,:,i,j,k)=0.0_WP     !< FD gradient in y of TN
+               if (this%mask(3,i,j,k).eq.1.or.this%mask(3,i,j-1,k).eq.1) this%grdtn_y(3,:,i,j,k)=0.0_WP     !< FD gradient in y of TN
+               if (this%mask(4,i,j,k).eq.1.or.this%mask(4,i,j-1,k).eq.1) this%grdtn_y(4,:,i,j,k)=0.0_WP     !< FD gradient in y of TN
+               if (this%mask(5,i,j,k).eq.1.or.this%mask(5,i,j-1,k).eq.1) this%grdtn_y(5,:,i,j,k)=0.0_WP     !< FD gradient in y of TN
+               if (this%mask(6,i,j,k).eq.1.or.this%mask(6,i,j-1,k).eq.1) this%grdtn_y(6,:,i,j,k)=0.0_WP     !< FD gradient in y of TN
+               if (this%mask(1,i,j,k).eq.1.or.this%mask(1,i,j,k-1).eq.1) this%grdtn_z(1,:,i,j,k)=0.0_WP     !< FD gradient in z of TN
+               if (this%mask(2,i,j,k).eq.1.or.this%mask(2,i,j,k-1).eq.1) this%grdtn_z(2,:,i,j,k)=0.0_WP     !< FD gradient in z of TN
+               if (this%mask(3,i,j,k).eq.1.or.this%mask(3,i,j,k-1).eq.1) this%grdtn_z(3,:,i,j,k)=0.0_WP     !< FD gradient in z of TN
+               if (this%mask(4,i,j,k).eq.1.or.this%mask(4,i,j,k-1).eq.1) this%grdtn_z(4,:,i,j,k)=0.0_WP     !< FD gradient in z of TN
+               if (this%mask(5,i,j,k).eq.1.or.this%mask(5,i,j,k-1).eq.1) this%grdtn_z(5,:,i,j,k)=0.0_WP     !< FD gradient in z of TN
+               if (this%mask(6,i,j,k).eq.1.or.this%mask(6,i,j,k-1).eq.1) this%grdtn_z(6,:,i,j,k)=0.0_WP     !< FD gradient in z of TN
             end do
          end do
       end do
@@ -438,7 +815,12 @@ contains
       case (dirichlet)
          do n=1,new_bc%itr%n_
             i=new_bc%itr%map(1,n); j=new_bc%itr%map(2,n); k=new_bc%itr%map(3,n)
-            this%mask(i,j,k)=2
+            this%mask(1,i,j,k)=2
+            this%mask(2,i,j,k)=2
+            this%mask(3,i,j,k)=2
+            this%mask(4,i,j,k)=2
+            this%mask(5,i,j,k)=2
+            this%mask(6,i,j,k)=2
          end do
       case (neumann)
          ! No modification - this assumes Neumann is only applied at walls or domain boundaries
@@ -496,7 +878,12 @@ contains
                ! Implement based on bcond direction
                do n=1,my_bc%itr%n_
                   i=my_bc%itr%map(1,n); j=my_bc%itr%map(2,n); k=my_bc%itr%map(3,n)
-                  this%TN(i,j,k)=this%TN(i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
+                  this%TN(1,i,j,k)=this%TN(1,i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
+                  this%TN(2,i,j,k)=this%TN(2,i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
+                  this%TN(3,i,j,k)=this%TN(3,i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
+                  this%TN(4,i,j,k)=this%TN(4,i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
+                  this%TN(5,i,j,k)=this%TN(5,i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
+                  this%TN(6,i,j,k)=this%TN(6,i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir))
                end do
                
             case default
@@ -520,32 +907,92 @@ contains
    subroutine get_drhoTNdt(this,drhoTNdt,rhoU,rhoV,rhoW)
       implicit none
       class(tensor), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: drhoTNdt !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)  :: rhoU     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)  :: rhoV     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)  :: rhoW     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: drhoTNdt !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)  :: rhoU     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)  :: rhoV     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)  :: rhoW     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       integer :: i,j,k
-      real(WP), dimension(:,:,:), allocatable :: FX,FY,FZ
+      real(WP), dimension(:,:,:,:), allocatable :: FX,FY,FZ
       ! Allocate flux arrays
-      allocate(FX(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-      allocate(FY(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-      allocate(FZ(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FX(6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FY(6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FZ(6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       ! Flux of rhoTN
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
-               ! Fluxes on x-face
-               FX(i,j,k)=-0.5_WP*(rhoU(i,j,k)+abs(rhoU(i,j,k)))*sum(this%itptn_xp(:,i,j,k)*this%TN(i+this%stp1:i+this%stp2,j,k)) &
-               &         -0.5_WP*(rhoU(i,j,k)-abs(rhoU(i,j,k)))*sum(this%itptn_xm(:,i,j,k)*this%TN(i+this%stm1:i+this%stm2,j,k)) &
-               &         +sum(this%itp_x(:,i,j,k)*this%diff(i-1:i,j,k))*sum(this%grdtn_x(:,i,j,k)*this%TN(i-1:i,j,k))
-               ! Fluxes on y-face
-               FY(i,j,k)=-0.5_WP*(rhoV(i,j,k)+abs(rhoV(i,j,k)))*sum(this%itptn_yp(:,i,j,k)*this%TN(i,j+this%stp1:j+this%stp2,k)) &
-               &         -0.5_WP*(rhoV(i,j,k)-abs(rhoV(i,j,k)))*sum(this%itptn_ym(:,i,j,k)*this%TN(i,j+this%stm1:j+this%stm2,k)) &
-               &         +sum(this%itp_y(:,i,j,k)*this%diff(i,j-1:j,k))*sum(this%grdtn_y(:,i,j,k)*this%TN(i,j-1:j,k))
-               ! Fluxes on z-face
-               FZ(i,j,k)=-0.5_WP*(rhoW(i,j,k)+abs(rhoW(i,j,k)))*sum(this%itptn_zp(:,i,j,k)*this%TN(i,j,k+this%stp1:k+this%stp2)) &
-               &         -0.5_WP*(rhoW(i,j,k)-abs(rhoW(i,j,k)))*sum(this%itptn_zm(:,i,j,k)*this%TN(i,j,k+this%stm1:k+this%stm2)) &
-               &         +sum(this%itp_z(:,i,j,k)*this%diff(i,j,k-1:k))*sum(this%grdtn_z(:,i,j,k)*this%TN(i,j,k-1:k))
+               ! Fluxes on x-face - 1
+               FX(1,i,j,k)=-0.5_WP*(rhoU(1,i,j,k)+abs(rhoU(1,i,j,k)))*sum(this%itptn_xp(1,:,i,j,k)*this%TN(1,i+this%stp1:i+this%stp2,j,k)) &
+               &           -0.5_WP*(rhoU(1,i,j,k)-abs(rhoU(1,i,j,k)))*sum(this%itptn_xm(1,:,i,j,k)*this%TN(1,i+this%stm1:i+this%stm2,j,k)) &
+               &           +sum(this%itp_x(1,:,i,j,k)*this%diff(1,i-1:i,j,k))*sum(this%grdtn_x(1,:,i,j,k)*this%TN(1,i-1:i,j,k))
+               ! Fluxes on x-face - 2
+               FX(2,i,j,k)=-0.5_WP*(rhoU(2,i,j,k)+abs(rhoU(2,i,j,k)))*sum(this%itptn_xp(2,:,i,j,k)*this%TN(2,i+this%stp1:i+this%stp2,j,k)) &
+               &           -0.5_WP*(rhoU(2,i,j,k)-abs(rhoU(2,i,j,k)))*sum(this%itptn_xm(2,:,i,j,k)*this%TN(2,i+this%stm1:i+this%stm2,j,k)) &
+               &           +sum(this%itp_x(2,:,i,j,k)*this%diff(2,i-1:i,j,k))*sum(this%grdtn_x(2,:,i,j,k)*this%TN(2,i-1:i,j,k))
+               ! Fluxes on x-face - 3
+               FX(3,i,j,k)=-0.5_WP*(rhoU(3,i,j,k)+abs(rhoU(3,i,j,k)))*sum(this%itptn_xp(3,:,i,j,k)*this%TN(3,i+this%stp1:i+this%stp2,j,k)) &
+               &           -0.5_WP*(rhoU(3,i,j,k)-abs(rhoU(3,i,j,k)))*sum(this%itptn_xm(3,:,i,j,k)*this%TN(3,i+this%stm1:i+this%stm2,j,k)) &
+               &           +sum(this%itp_x(3,:,i,j,k)*this%diff(3,i-1:i,j,k))*sum(this%grdtn_x(3,:,i,j,k)*this%TN(3,i-1:i,j,k))
+               ! Fluxes on x-face - 4
+               FX(4,i,j,k)=-0.5_WP*(rhoU(4,i,j,k)+abs(rhoU(4,i,j,k)))*sum(this%itptn_xp(4,:,i,j,k)*this%TN(4,i+this%stp1:i+this%stp2,j,k)) &
+               &           -0.5_WP*(rhoU(4,i,j,k)-abs(rhoU(4,i,j,k)))*sum(this%itptn_xm(4,:,i,j,k)*this%TN(4,i+this%stm1:i+this%stm2,j,k)) &
+               &           +sum(this%itp_x(4,:,i,j,k)*this%diff(4,i-1:i,j,k))*sum(this%grdtn_x(4,:,i,j,k)*this%TN(4,i-1:i,j,k))
+               ! Fluxes on x-face - 5
+               FX(5,i,j,k)=-0.5_WP*(rhoU(5,i,j,k)+abs(rhoU(5,i,j,k)))*sum(this%itptn_xp(5,:,i,j,k)*this%TN(5,i+this%stp1:i+this%stp2,j,k)) &
+               &           -0.5_WP*(rhoU(5,i,j,k)-abs(rhoU(5,i,j,k)))*sum(this%itptn_xm(5,:,i,j,k)*this%TN(5,i+this%stm1:i+this%stm2,j,k)) &
+               &           +sum(this%itp_x(5,:,i,j,k)*this%diff(5,i-1:i,j,k))*sum(this%grdtn_x(5,:,i,j,k)*this%TN(5,i-1:i,j,k))
+               ! Fluxes on x-face - 6
+               FX(6,i,j,k)=-0.5_WP*(rhoU(6,i,j,k)+abs(rhoU(6,i,j,k)))*sum(this%itptn_xp(6,:,i,j,k)*this%TN(6,i+this%stp1:i+this%stp2,j,k)) &
+               &           -0.5_WP*(rhoU(6,i,j,k)-abs(rhoU(6,i,j,k)))*sum(this%itptn_xm(6,:,i,j,k)*this%TN(6,i+this%stm1:i+this%stm2,j,k)) &
+               &           +sum(this%itp_x(6,:,i,j,k)*this%diff(6,i-1:i,j,k))*sum(this%grdtn_x(6,:,i,j,k)*this%TN(6,i-1:i,j,k))
+               ! Fluxes on y-face - 1
+               FY(1,i,j,k)=-0.5_WP*(rhoV(1,i,j,k)+abs(rhoV(1,i,j,k)))*sum(this%itptn_yp(1,:,i,j,k)*this%TN(1,i,j+this%stp1:j+this%stp2,k)) &
+               &           -0.5_WP*(rhoV(1,i,j,k)-abs(rhoV(1,i,j,k)))*sum(this%itptn_ym(1,:,i,j,k)*this%TN(1,i,j+this%stm1:j+this%stm2,k)) &
+               &           +sum(this%itp_y(1,:,i,j,k)*this%diff(1,i,j-1:j,k))*sum(this%grdtn_y(1,:,i,j,k)*this%TN(1,i,j-1:j,k))
+               ! Fluxes on y-face - 2
+               FY(2,i,j,k)=-0.5_WP*(rhoV(2,i,j,k)+abs(rhoV(2,i,j,k)))*sum(this%itptn_yp(2,:,i,j,k)*this%TN(2,i,j+this%stp1:j+this%stp2,k)) &
+               &           -0.5_WP*(rhoV(2,i,j,k)-abs(rhoV(2,i,j,k)))*sum(this%itptn_ym(2,:,i,j,k)*this%TN(2,i,j+this%stm1:j+this%stm2,k)) &
+               &           +sum(this%itp_y(2,:,i,j,k)*this%diff(2,i,j-1:j,k))*sum(this%grdtn_y(2,:,i,j,k)*this%TN(2,i,j-1:j,k))
+               ! Fluxes on y-face - 3
+               FY(3,i,j,k)=-0.5_WP*(rhoV(3,i,j,k)+abs(rhoV(3,i,j,k)))*sum(this%itptn_yp(3,:,i,j,k)*this%TN(3,i,j+this%stp1:j+this%stp2,k)) &
+               &           -0.5_WP*(rhoV(3,i,j,k)-abs(rhoV(3,i,j,k)))*sum(this%itptn_ym(3,:,i,j,k)*this%TN(3,i,j+this%stm1:j+this%stm2,k)) &
+               &           +sum(this%itp_y(3,:,i,j,k)*this%diff(3,i,j-1:j,k))*sum(this%grdtn_y(3,:,i,j,k)*this%TN(3,i,j-1:j,k))
+               ! Fluxes on y-face - 4
+               FY(4,i,j,k)=-0.5_WP*(rhoV(4,i,j,k)+abs(rhoV(4,i,j,k)))*sum(this%itptn_yp(4,:,i,j,k)*this%TN(4,i,j+this%stp1:j+this%stp2,k)) &
+               &           -0.5_WP*(rhoV(4,i,j,k)-abs(rhoV(4,i,j,k)))*sum(this%itptn_ym(4,:,i,j,k)*this%TN(4,i,j+this%stm1:j+this%stm2,k)) &
+               &           +sum(this%itp_y(4,:,i,j,k)*this%diff(4,i,j-1:j,k))*sum(this%grdtn_y(4,:,i,j,k)*this%TN(4,i,j-1:j,k))
+               ! Fluxes on y-face - 5
+               FY(5,i,j,k)=-0.5_WP*(rhoV(5,i,j,k)+abs(rhoV(5,i,j,k)))*sum(this%itptn_yp(5,:,i,j,k)*this%TN(5,i,j+this%stp1:j+this%stp2,k)) &
+               &           -0.5_WP*(rhoV(5,i,j,k)-abs(rhoV(5,i,j,k)))*sum(this%itptn_ym(5,:,i,j,k)*this%TN(5,i,j+this%stm1:j+this%stm2,k)) &
+               &           +sum(this%itp_y(5,:,i,j,k)*this%diff(5,i,j-1:j,k))*sum(this%grdtn_y(5,:,i,j,k)*this%TN(5,i,j-1:j,k))
+               ! Fluxes on y-face - 6
+               FY(6,i,j,k)=-0.5_WP*(rhoV(6,i,j,k)+abs(rhoV(6,i,j,k)))*sum(this%itptn_yp(6,:,i,j,k)*this%TN(6,i,j+this%stp1:j+this%stp2,k)) &
+               &           -0.5_WP*(rhoV(6,i,j,k)-abs(rhoV(6,i,j,k)))*sum(this%itptn_ym(6,:,i,j,k)*this%TN(6,i,j+this%stm1:j+this%stm2,k)) &
+               &           +sum(this%itp_y(6,:,i,j,k)*this%diff(6,i,j-1:j,k))*sum(this%grdtn_y(6,:,i,j,k)*this%TN(6,i,j-1:j,k))
+               ! Fluxes on z-face - 1
+               FZ(1,i,j,k)=-0.5_WP*(rhoW(1,i,j,k)+abs(rhoW(1,i,j,k)))*sum(this%itptn_zp(1,:,i,j,k)*this%TN(1,i,j,k+this%stp1:k+this%stp2)) &
+               &           -0.5_WP*(rhoW(1,i,j,k)-abs(rhoW(1,i,j,k)))*sum(this%itptn_zm(1,:,i,j,k)*this%TN(1,i,j,k+this%stm1:k+this%stm2)) &
+               &           +sum(this%itp_z(1,:,i,j,k)*this%diff(1,i,j,k-1:k))*sum(this%grdtn_z(1,:,i,j,k)*this%TN(1,i,j,k-1:k))
+               ! Fluxes on z-face - 2
+               FZ(2,i,j,k)=-0.5_WP*(rhoW(2,i,j,k)+abs(rhoW(2,i,j,k)))*sum(this%itptn_zp(2,:,i,j,k)*this%TN(2,i,j,k+this%stp1:k+this%stp2)) &
+               &           -0.5_WP*(rhoW(2,i,j,k)-abs(rhoW(2,i,j,k)))*sum(this%itptn_zm(2,:,i,j,k)*this%TN(2,i,j,k+this%stm1:k+this%stm2)) &
+               &           +sum(this%itp_z(2,:,i,j,k)*this%diff(2,i,j,k-1:k))*sum(this%grdtn_z(2,:,i,j,k)*this%TN(2,i,j,k-1:k))
+               ! Fluxes on z-face - 3
+               FZ(3,i,j,k)=-0.5_WP*(rhoW(3,i,j,k)+abs(rhoW(3,i,j,k)))*sum(this%itptn_zp(3,:,i,j,k)*this%TN(3,i,j,k+this%stp1:k+this%stp2)) &
+               &           -0.5_WP*(rhoW(3,i,j,k)-abs(rhoW(3,i,j,k)))*sum(this%itptn_zm(3,:,i,j,k)*this%TN(3,i,j,k+this%stm1:k+this%stm2)) &
+               &           +sum(this%itp_z(3,:,i,j,k)*this%diff(3,i,j,k-1:k))*sum(this%grdtn_z(3,:,i,j,k)*this%TN(3,i,j,k-1:k))
+               ! Fluxes on z-face - 4
+               FZ(4,i,j,k)=-0.5_WP*(rhoW(4,i,j,k)+abs(rhoW(4,i,j,k)))*sum(this%itptn_zp(4,:,i,j,k)*this%TN(4,i,j,k+this%stp1:k+this%stp2)) &
+               &           -0.5_WP*(rhoW(4,i,j,k)-abs(rhoW(4,i,j,k)))*sum(this%itptn_zm(4,:,i,j,k)*this%TN(4,i,j,k+this%stm1:k+this%stm2)) &
+               &           +sum(this%itp_z(4,:,i,j,k)*this%diff(4,i,j,k-1:k))*sum(this%grdtn_z(4,:,i,j,k)*this%TN(4,i,j,k-1:k))
+               ! Fluxes on z-face - 5
+               FZ(5,i,j,k)=-0.5_WP*(rhoW(5,i,j,k)+abs(rhoW(5,i,j,k)))*sum(this%itptn_zp(5,:,i,j,k)*this%TN(5,i,j,k+this%stp1:k+this%stp2)) &
+               &           -0.5_WP*(rhoW(5,i,j,k)-abs(rhoW(5,i,j,k)))*sum(this%itptn_zm(5,:,i,j,k)*this%TN(5,i,j,k+this%stm1:k+this%stm2)) &
+               &           +sum(this%itp_z(5,:,i,j,k)*this%diff(5,i,j,k-1:k))*sum(this%grdtn_z(5,:,i,j,k)*this%TN(5,i,j,k-1:k))
+               ! Fluxes on z-face - 6
+               FZ(6,i,j,k)=-0.5_WP*(rhoW(6,i,j,k)+abs(rhoW(6,i,j,k)))*sum(this%itptn_zp(6,:,i,j,k)*this%TN(6,i,j,k+this%stp1:k+this%stp2)) &
+               &           -0.5_WP*(rhoW(6,i,j,k)-abs(rhoW(6,i,j,k)))*sum(this%itptn_zm(6,:,i,j,k)*this%TN(6,i,j,k+this%stm1:k+this%stm2)) &
+               &           +sum(this%itp_z(6,:,i,j,k)*this%diff(6,i,j,k-1:k))*sum(this%grdtn_z(6,:,i,j,k)*this%TN(6,i,j,k-1:k))
             end do
          end do
       end do
@@ -553,9 +1000,24 @@ contains
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               drhoTNdt(i,j,k)=sum(this%divtn_x(:,i,j,k)*FX(i:i+1,j,k))+&
-               &               sum(this%divtn_y(:,i,j,k)*FY(i,j:j+1,k))+&
-               &               sum(this%divtn_z(:,i,j,k)*FZ(i,j,k:k+1))
+               drhoTNdt(1,i,j,k)=sum(this%divtn_x(1,:,i,j,k)*FX(1,i:i+1,j,k))+&
+               &                 sum(this%divtn_y(1,:,i,j,k)*FY(1,i,j:j+1,k))+&
+               &                 sum(this%divtn_z(1,:,i,j,k)*FZ(1,i,j,k:k+1))
+               drhoTNdt(2,i,j,k)=sum(this%divtn_x(2,:,i,j,k)*FX(2,i:i+1,j,k))+&
+               &                 sum(this%divtn_y(2,:,i,j,k)*FY(2,i,j:j+1,k))+&
+               &                 sum(this%divtn_z(2,:,i,j,k)*FZ(2,i,j,k:k+1))
+               drhoTNdt(3,i,j,k)=sum(this%divtn_x(3,:,i,j,k)*FX(3,i:i+1,j,k))+&
+               &                 sum(this%divtn_y(3,:,i,j,k)*FY(3,i,j:j+1,k))+&
+               &                 sum(this%divtn_z(3,:,i,j,k)*FZ(3,i,j,k:k+1))
+               drhoTNdt(4,i,j,k)=sum(this%divtn_x(4,:,i,j,k)*FX(4,i:i+1,j,k))+&
+               &                 sum(this%divtn_y(4,:,i,j,k)*FY(4,i,j:j+1,k))+&
+               &                 sum(this%divtn_z(4,:,i,j,k)*FZ(4,i,j,k:k+1))
+               drhoTNdt(5,i,j,k)=sum(this%divtn_x(5,:,i,j,k)*FX(5,i:i+1,j,k))+&
+               &                 sum(this%divtn_y(5,:,i,j,k)*FY(5,i,j:j+1,k))+&
+               &                 sum(this%divtn_z(5,:,i,j,k)*FZ(5,i,j,k:k+1))
+               drhoTNdt(6,i,j,k)=sum(this%divtn_x(6,:,i,j,k)*FX(6,i:i+1,j,k))+&
+               &                 sum(this%divtn_y(6,:,i,j,k)*FY(6,i,j:j+1,k))+&
+               &                 sum(this%divtn_z(6,:,i,j,k)*FZ(6,i,j,k:k+1))
             end do
          end do
       end do
@@ -579,12 +1041,12 @@ contains
    end subroutine get_max
    
    
-   !> Calculate the integral of our TN field
-   subroutine get_int(this)
-      implicit none
-      class(tensor), intent(inout) :: this
-      call this%cfg%integrate(this%TN,integral=this%TNint)
-   end subroutine get_int
+   ! !> Calculate the integral of our TN field
+   ! subroutine get_int(this)
+   !    implicit none
+   !    class(tensor), intent(inout) :: this
+   !    call this%cfg%integrate(this%TN(1,:,:,:),integral=this%TNint(1,:,:,:))
+   ! end subroutine get_int
    
    
    !> Solve for implicit tensor residual
@@ -592,14 +1054,17 @@ contains
       implicit none
       class(tensor), intent(inout) :: this
       real(WP), intent(in) :: dt
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: resTN !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: rhoU  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: rhoV  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: rhoW  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      integer :: i,j,k,sti,std
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: resTN !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: rhoU  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: rhoV  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: rhoW  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: i,j,k,n,sti,std
       
-      ! Prepare convective operator
+      ! Prescribe density
       this%implicit%opr(1,:,:,:)=this%rho; this%implicit%opr(2:,:,:,:)=0.0_WP
+
+      !> Tensor component 1
+      ! Prepare convective operator
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
@@ -607,47 +1072,302 @@ contains
                do std=0,1
                   ! Loop over plus interpolation stencil
                   do sti=this%stp1,this%stp2
-                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(std,i,j,k)*0.5_WP*(rhoU(i+std,j,k)+abs(rhoU(i+std,j,k)))*this%itptn_xp(sti,i+std,j,k)
-                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(std,i,j,k)*0.5_WP*(rhoV(i,j+std,k)+abs(rhoV(i,j+std,k)))*this%itptn_yp(sti,i,j+std,k)
-                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(std,i,j,k)*0.5_WP*(rhoW(i,j,k+std)+abs(rhoW(i,j,k+std)))*this%itptn_zp(sti,i,j,k+std)
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(1,std,i,j,k)*0.5_WP*(rhoU(1,i+std,j,k)+abs(rhoU(1,i+std,j,k)))*this%itptn_xp(1,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(1,std,i,j,k)*0.5_WP*(rhoV(1,i,j+std,k)+abs(rhoV(1,i,j+std,k)))*this%itptn_yp(1,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(1,std,i,j,k)*0.5_WP*(rhoW(1,i,j,k+std)+abs(rhoW(1,i,j,k+std)))*this%itptn_zp(1,sti,i,j,k+std)
                   end do
                   ! Loop over minus interpolation stencil
                   do sti=this%stm1,this%stm2
-                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(std,i,j,k)*0.5_WP*(rhoU(i+std,j,k)-abs(rhoU(i+std,j,k)))*this%itptn_xm(sti,i+std,j,k)
-                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(std,i,j,k)*0.5_WP*(rhoV(i,j+std,k)-abs(rhoV(i,j+std,k)))*this%itptn_ym(sti,i,j+std,k)
-                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(std,i,j,k)*0.5_WP*(rhoW(i,j,k+std)-abs(rhoW(i,j,k+std)))*this%itptn_zm(sti,i,j,k+std)
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(1,std,i,j,k)*0.5_WP*(rhoU(1,i+std,j,k)-abs(rhoU(1,i+std,j,k)))*this%itptn_xm(1,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(1,std,i,j,k)*0.5_WP*(rhoV(1,i,j+std,k)-abs(rhoV(1,i,j+std,k)))*this%itptn_ym(1,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(1,std,i,j,k)*0.5_WP*(rhoW(1,i,j,k+std)-abs(rhoW(1,i,j,k+std)))*this%itptn_zm(1,sti,i,j,k+std)
                   end do
                end do
             end do
          end do
       end do
-      
+         
       ! Prepare diffusive operator
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(+1,i,j,k)*sum(this%itp_x(:,i+1,j,k)*this%diff(i  :i+1,j,k))*this%grdtn_x(-1,i+1,j,k)+&
-               &                                                                this%divtn_x( 0,i,j,k)*sum(this%itp_x(:,i  ,j,k)*this%diff(i-1:i  ,j,k))*this%grdtn_x( 0,i  ,j,k)+&
-               &                                                                this%divtn_y(+1,i,j,k)*sum(this%itp_y(:,i,j+1,k)*this%diff(i,j  :j+1,k))*this%grdtn_y(-1,i,j+1,k)+&
-               &                                                                this%divtn_y( 0,i,j,k)*sum(this%itp_y(:,i,j  ,k)*this%diff(i,j-1:j  ,k))*this%grdtn_y( 0,i,j  ,k)+&
-               &                                                                this%divtn_z(+1,i,j,k)*sum(this%itp_z(:,i,j,k+1)*this%diff(i,j,k  :k+1))*this%grdtn_z(-1,i,j,k+1)+&
-               &                                                                this%divtn_z( 0,i,j,k)*sum(this%itp_z(:,i,j,k  )*this%diff(i,j,k-1:k  ))*this%grdtn_z( 0,i,j,k  ))
-               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(+1,i,j,k)*sum(this%itp_x(:,i+1,j,k)*this%diff(i  :i+1,j,k))*this%grdtn_x( 0,i+1,j,k))
-               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x( 0,i,j,k)*sum(this%itp_x(:,i  ,j,k)*this%diff(i-1:i  ,j,k))*this%grdtn_x(-1,i  ,j,k))
-               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(+1,i,j,k)*sum(this%itp_y(:,i,j+1,k)*this%diff(i,j  :j+1,k))*this%grdtn_y( 0,i,j+1,k))
-               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y( 0,i,j,k)*sum(this%itp_y(:,i,j  ,k)*this%diff(i,j-1:j  ,k))*this%grdtn_y(-1,i,j  ,k))
-               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(+1,i,j,k)*sum(this%itp_z(:,i,j,k+1)*this%diff(i,j,k  :k+1))*this%grdtn_z( 0,i,j,k+1))
-               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z( 0,i,j,k)*sum(this%itp_z(:,i,j,k  )*this%diff(i,j,k-1:k  ))*this%grdtn_z(-1,i,j,k  ))
+               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(1,+1,i,j,k)*sum(this%itp_x(1,:,i+1,j,k)*this%diff(1,i  :i+1,j,k))*this%grdtn_x(1,-1,i+1,j,k)+&
+               &                                                                this%divtn_x(1, 0,i,j,k)*sum(this%itp_x(1,:,i  ,j,k)*this%diff(1,i-1:i  ,j,k))*this%grdtn_x(1, 0,i  ,j,k)+&
+               &                                                                this%divtn_y(1,+1,i,j,k)*sum(this%itp_y(1,:,i,j+1,k)*this%diff(1,i,j  :j+1,k))*this%grdtn_y(1,-1,i,j+1,k)+&
+               &                                                                this%divtn_y(1, 0,i,j,k)*sum(this%itp_y(1,:,i,j  ,k)*this%diff(1,i,j-1:j  ,k))*this%grdtn_y(1, 0,i,j  ,k)+&
+               &                                                                this%divtn_z(1,+1,i,j,k)*sum(this%itp_z(1,:,i,j,k+1)*this%diff(1,i,j,k  :k+1))*this%grdtn_z(1,-1,i,j,k+1)+&
+               &                                                                this%divtn_z(1, 0,i,j,k)*sum(this%itp_z(1,:,i,j,k  )*this%diff(1,i,j,k-1:k  ))*this%grdtn_z(1, 0,i,j,k  ))
+               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(1,+1,i,j,k)*sum(this%itp_x(1,:,i+1,j,k)*this%diff(1,i  :i+1,j,k))*this%grdtn_x(1, 0,i+1,j,k))
+               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x(1, 0,i,j,k)*sum(this%itp_x(1,:,i  ,j,k)*this%diff(1,i-1:i  ,j,k))*this%grdtn_x(1,-1,i  ,j,k))
+               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(1,+1,i,j,k)*sum(this%itp_y(1,:,i,j+1,k)*this%diff(1,i,j  :j+1,k))*this%grdtn_y(1, 0,i,j+1,k))
+               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y(1, 0,i,j,k)*sum(this%itp_y(1,:,i,j  ,k)*this%diff(1,i,j-1:j  ,k))*this%grdtn_y(1,-1,i,j  ,k))
+               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(1,+1,i,j,k)*sum(this%itp_z(1,:,i,j,k+1)*this%diff(1,i,j,k  :k+1))*this%grdtn_z(1, 0,i,j,k+1))
+               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z(1, 0,i,j,k)*sum(this%itp_z(1,:,i,j,k  )*this%diff(1,i,j,k-1:k  ))*this%grdtn_z(1,-1,i,j,k  ))
             end do
          end do
       end do
-      
+         
       ! Solve the linear system
       call this%implicit%setup()
-      this%implicit%rhs=resTN
+      this%implicit%rhs=resTN(1,:,:,:)
       this%implicit%sol=0.0_WP
       call this%implicit%solve()
-      resTN=this%implicit%sol
+      resTN(1,:,:,:)=this%implicit%sol
+
+      !> Tensor component 2
+      ! Prepare convective operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Loop over divergence stencil
+               do std=0,1
+                  ! Loop over plus interpolation stencil
+                  do sti=this%stp1,this%stp2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(2,std,i,j,k)*0.5_WP*(rhoU(2,i+std,j,k)+abs(rhoU(2,i+std,j,k)))*this%itptn_xp(2,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(2,std,i,j,k)*0.5_WP*(rhoV(2,i,j+std,k)+abs(rhoV(2,i,j+std,k)))*this%itptn_yp(2,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(2,std,i,j,k)*0.5_WP*(rhoW(2,i,j,k+std)+abs(rhoW(2,i,j,k+std)))*this%itptn_zp(2,sti,i,j,k+std)
+                  end do
+                  ! Loop over minus interpolation stencil
+                  do sti=this%stm1,this%stm2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(2,std,i,j,k)*0.5_WP*(rhoU(2,i+std,j,k)-abs(rhoU(2,i+std,j,k)))*this%itptn_xm(2,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(2,std,i,j,k)*0.5_WP*(rhoV(2,i,j+std,k)-abs(rhoV(2,i,j+std,k)))*this%itptn_ym(2,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(2,std,i,j,k)*0.5_WP*(rhoW(2,i,j,k+std)-abs(rhoW(2,i,j,k+std)))*this%itptn_zm(2,sti,i,j,k+std)
+                  end do
+               end do
+            end do
+         end do
+      end do
+         
+      ! Prepare diffusive operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(2,+1,i,j,k)*sum(this%itp_x(2,:,i+1,j,k)*this%diff(2,i  :i+1,j,k))*this%grdtn_x(2,-1,i+1,j,k)+&
+               &                                                                this%divtn_x(2, 0,i,j,k)*sum(this%itp_x(2,:,i  ,j,k)*this%diff(2,i-1:i  ,j,k))*this%grdtn_x(2, 0,i  ,j,k)+&
+               &                                                                this%divtn_y(2,+1,i,j,k)*sum(this%itp_y(2,:,i,j+1,k)*this%diff(2,i,j  :j+1,k))*this%grdtn_y(2,-1,i,j+1,k)+&
+               &                                                                this%divtn_y(2, 0,i,j,k)*sum(this%itp_y(2,:,i,j  ,k)*this%diff(2,i,j-1:j  ,k))*this%grdtn_y(2, 0,i,j  ,k)+&
+               &                                                                this%divtn_z(2,+1,i,j,k)*sum(this%itp_z(2,:,i,j,k+1)*this%diff(2,i,j,k  :k+1))*this%grdtn_z(2,-1,i,j,k+1)+&
+               &                                                                this%divtn_z(2, 0,i,j,k)*sum(this%itp_z(2,:,i,j,k  )*this%diff(2,i,j,k-1:k  ))*this%grdtn_z(2, 0,i,j,k  ))
+               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(2,+1,i,j,k)*sum(this%itp_x(2,:,i+1,j,k)*this%diff(2,i  :i+1,j,k))*this%grdtn_x(2, 0,i+1,j,k))
+               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x(2, 0,i,j,k)*sum(this%itp_x(2,:,i  ,j,k)*this%diff(2,i-1:i  ,j,k))*this%grdtn_x(2,-1,i  ,j,k))
+               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(2,+1,i,j,k)*sum(this%itp_y(2,:,i,j+1,k)*this%diff(2,i,j  :j+1,k))*this%grdtn_y(2, 0,i,j+1,k))
+               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y(2, 0,i,j,k)*sum(this%itp_y(2,:,i,j  ,k)*this%diff(2,i,j-1:j  ,k))*this%grdtn_y(2,-1,i,j  ,k))
+               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(2,+1,i,j,k)*sum(this%itp_z(2,:,i,j,k+1)*this%diff(2,i,j,k  :k+1))*this%grdtn_z(2, 0,i,j,k+1))
+               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z(2, 0,i,j,k)*sum(this%itp_z(2,:,i,j,k  )*this%diff(2,i,j,k-1:k  ))*this%grdtn_z(2,-1,i,j,k  ))
+            end do
+         end do
+      end do
+         
+      ! Solve the linear system
+      call this%implicit%setup()
+      this%implicit%rhs=resTN(2,:,:,:)
+      this%implicit%sol=0.0_WP
+      call this%implicit%solve()
+      resTN(2,:,:,:)=this%implicit%sol
+
+      !> Tensor component 3
+      ! Prepare convective operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Loop over divergence stencil
+               do std=0,1
+                  ! Loop over plus interpolation stencil
+                  do sti=this%stp1,this%stp2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(3,std,i,j,k)*0.5_WP*(rhoU(3,i+std,j,k)+abs(rhoU(3,i+std,j,k)))*this%itptn_xp(3,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(3,std,i,j,k)*0.5_WP*(rhoV(3,i,j+std,k)+abs(rhoV(3,i,j+std,k)))*this%itptn_yp(3,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(3,std,i,j,k)*0.5_WP*(rhoW(3,i,j,k+std)+abs(rhoW(3,i,j,k+std)))*this%itptn_zp(3,sti,i,j,k+std)
+                  end do
+                  ! Loop over minus interpolation stencil
+                  do sti=this%stm1,this%stm2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(3,std,i,j,k)*0.5_WP*(rhoU(3,i+std,j,k)-abs(rhoU(3,i+std,j,k)))*this%itptn_xm(3,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(3,std,i,j,k)*0.5_WP*(rhoV(3,i,j+std,k)-abs(rhoV(3,i,j+std,k)))*this%itptn_ym(3,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(3,std,i,j,k)*0.5_WP*(rhoW(3,i,j,k+std)-abs(rhoW(3,i,j,k+std)))*this%itptn_zm(3,sti,i,j,k+std)
+                  end do
+               end do
+            end do
+         end do
+      end do
+         
+      ! Prepare diffusive operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(3,+1,i,j,k)*sum(this%itp_x(3,:,i+1,j,k)*this%diff(3,i  :i+1,j,k))*this%grdtn_x(3,-1,i+1,j,k)+&
+               &                                                                this%divtn_x(3, 0,i,j,k)*sum(this%itp_x(3,:,i  ,j,k)*this%diff(3,i-1:i  ,j,k))*this%grdtn_x(3, 0,i  ,j,k)+&
+               &                                                                this%divtn_y(3,+1,i,j,k)*sum(this%itp_y(3,:,i,j+1,k)*this%diff(3,i,j  :j+1,k))*this%grdtn_y(3,-1,i,j+1,k)+&
+               &                                                                this%divtn_y(3, 0,i,j,k)*sum(this%itp_y(3,:,i,j  ,k)*this%diff(3,i,j-1:j  ,k))*this%grdtn_y(3, 0,i,j  ,k)+&
+               &                                                                this%divtn_z(3,+1,i,j,k)*sum(this%itp_z(3,:,i,j,k+1)*this%diff(3,i,j,k  :k+1))*this%grdtn_z(3,-1,i,j,k+1)+&
+               &                                                                this%divtn_z(3, 0,i,j,k)*sum(this%itp_z(3,:,i,j,k  )*this%diff(3,i,j,k-1:k  ))*this%grdtn_z(3, 0,i,j,k  ))
+               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(3,+1,i,j,k)*sum(this%itp_x(3,:,i+1,j,k)*this%diff(3,i  :i+1,j,k))*this%grdtn_x(3, 0,i+1,j,k))
+               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x(3, 0,i,j,k)*sum(this%itp_x(3,:,i  ,j,k)*this%diff(3,i-1:i  ,j,k))*this%grdtn_x(3,-1,i  ,j,k))
+               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(3,+1,i,j,k)*sum(this%itp_y(3,:,i,j+1,k)*this%diff(3,i,j  :j+1,k))*this%grdtn_y(3, 0,i,j+1,k))
+               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y(3, 0,i,j,k)*sum(this%itp_y(3,:,i,j  ,k)*this%diff(3,i,j-1:j  ,k))*this%grdtn_y(3,-1,i,j  ,k))
+               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(3,+1,i,j,k)*sum(this%itp_z(3,:,i,j,k+1)*this%diff(3,i,j,k  :k+1))*this%grdtn_z(3, 0,i,j,k+1))
+               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z(3, 0,i,j,k)*sum(this%itp_z(3,:,i,j,k  )*this%diff(3,i,j,k-1:k  ))*this%grdtn_z(3,-1,i,j,k  ))
+            end do
+         end do
+      end do
+         
+      ! Solve the linear system
+      call this%implicit%setup()
+      this%implicit%rhs=resTN(3,:,:,:)
+      this%implicit%sol=0.0_WP
+      call this%implicit%solve()
+      resTN(3,:,:,:)=this%implicit%sol
+
+      !> Tensor component 4
+      ! Prepare convective operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Loop over divergence stencil
+               do std=0,1
+                  ! Loop over plus interpolation stencil
+                  do sti=this%stp1,this%stp2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(4,std,i,j,k)*0.5_WP*(rhoU(4,i+std,j,k)+abs(rhoU(4,i+std,j,k)))*this%itptn_xp(4,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(4,std,i,j,k)*0.5_WP*(rhoV(4,i,j+std,k)+abs(rhoV(4,i,j+std,k)))*this%itptn_yp(4,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(4,std,i,j,k)*0.5_WP*(rhoW(4,i,j,k+std)+abs(rhoW(4,i,j,k+std)))*this%itptn_zp(4,sti,i,j,k+std)
+                  end do
+                  ! Loop over minus interpolation stencil
+                  do sti=this%stm1,this%stm2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(4,std,i,j,k)*0.5_WP*(rhoU(4,i+std,j,k)-abs(rhoU(4,i+std,j,k)))*this%itptn_xm(4,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(4,std,i,j,k)*0.5_WP*(rhoV(4,i,j+std,k)-abs(rhoV(4,i,j+std,k)))*this%itptn_ym(4,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(4,std,i,j,k)*0.5_WP*(rhoW(4,i,j,k+std)-abs(rhoW(4,i,j,k+std)))*this%itptn_zm(4,sti,i,j,k+std)
+                  end do
+               end do
+            end do
+         end do
+      end do
+         
+      ! Prepare diffusive operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(4,+1,i,j,k)*sum(this%itp_x(4,:,i+1,j,k)*this%diff(4,i  :i+1,j,k))*this%grdtn_x(4,-1,i+1,j,k)+&
+               &                                                                this%divtn_x(4, 0,i,j,k)*sum(this%itp_x(4,:,i  ,j,k)*this%diff(4,i-1:i  ,j,k))*this%grdtn_x(4, 0,i  ,j,k)+&
+               &                                                                this%divtn_y(4,+1,i,j,k)*sum(this%itp_y(4,:,i,j+1,k)*this%diff(4,i,j  :j+1,k))*this%grdtn_y(4,-1,i,j+1,k)+&
+               &                                                                this%divtn_y(4, 0,i,j,k)*sum(this%itp_y(4,:,i,j  ,k)*this%diff(4,i,j-1:j  ,k))*this%grdtn_y(4, 0,i,j  ,k)+&
+               &                                                                this%divtn_z(4,+1,i,j,k)*sum(this%itp_z(4,:,i,j,k+1)*this%diff(4,i,j,k  :k+1))*this%grdtn_z(4,-1,i,j,k+1)+&
+               &                                                                this%divtn_z(4, 0,i,j,k)*sum(this%itp_z(4,:,i,j,k  )*this%diff(4,i,j,k-1:k  ))*this%grdtn_z(4, 0,i,j,k  ))
+               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(4,+1,i,j,k)*sum(this%itp_x(4,:,i+1,j,k)*this%diff(4,i  :i+1,j,k))*this%grdtn_x(4, 0,i+1,j,k))
+               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x(4, 0,i,j,k)*sum(this%itp_x(4,:,i  ,j,k)*this%diff(4,i-1:i  ,j,k))*this%grdtn_x(4,-1,i  ,j,k))
+               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(4,+1,i,j,k)*sum(this%itp_y(4,:,i,j+1,k)*this%diff(4,i,j  :j+1,k))*this%grdtn_y(4, 0,i,j+1,k))
+               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y(4, 0,i,j,k)*sum(this%itp_y(4,:,i,j  ,k)*this%diff(4,i,j-1:j  ,k))*this%grdtn_y(4,-1,i,j  ,k))
+               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(4,+1,i,j,k)*sum(this%itp_z(4,:,i,j,k+1)*this%diff(4,i,j,k  :k+1))*this%grdtn_z(4, 0,i,j,k+1))
+               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z(4, 0,i,j,k)*sum(this%itp_z(4,:,i,j,k  )*this%diff(4,i,j,k-1:k  ))*this%grdtn_z(4,-1,i,j,k  ))
+            end do
+         end do
+      end do
+         
+      ! Solve the linear system
+      call this%implicit%setup()
+      this%implicit%rhs=resTN(4,:,:,:)
+      this%implicit%sol=0.0_WP
+      call this%implicit%solve()
+      resTN(4,:,:,:)=this%implicit%sol
+
+      !> Tensor component 5
+      ! Prepare convective operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Loop over divergence stencil
+               do std=0,1
+                  ! Loop over plus interpolation stencil
+                  do sti=this%stp1,this%stp2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(5,std,i,j,k)*0.5_WP*(rhoU(5,i+std,j,k)+abs(rhoU(5,i+std,j,k)))*this%itptn_xp(5,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(5,std,i,j,k)*0.5_WP*(rhoV(5,i,j+std,k)+abs(rhoV(5,i,j+std,k)))*this%itptn_yp(5,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(5,std,i,j,k)*0.5_WP*(rhoW(5,i,j,k+std)+abs(rhoW(5,i,j,k+std)))*this%itptn_zp(5,sti,i,j,k+std)
+                  end do
+                  ! Loop over minus interpolation stencil
+                  do sti=this%stm1,this%stm2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(5,std,i,j,k)*0.5_WP*(rhoU(5,i+std,j,k)-abs(rhoU(5,i+std,j,k)))*this%itptn_xm(5,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(5,std,i,j,k)*0.5_WP*(rhoV(5,i,j+std,k)-abs(rhoV(5,i,j+std,k)))*this%itptn_ym(5,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(5,std,i,j,k)*0.5_WP*(rhoW(5,i,j,k+std)-abs(rhoW(5,i,j,k+std)))*this%itptn_zm(5,sti,i,j,k+std)
+                  end do
+               end do
+            end do
+         end do
+      end do
+         
+      ! Prepare diffusive operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(5,+1,i,j,k)*sum(this%itp_x(5,:,i+1,j,k)*this%diff(5,i  :i+1,j,k))*this%grdtn_x(5,-1,i+1,j,k)+&
+               &                                                                this%divtn_x(5, 0,i,j,k)*sum(this%itp_x(5,:,i  ,j,k)*this%diff(5,i-1:i  ,j,k))*this%grdtn_x(5, 0,i  ,j,k)+&
+               &                                                                this%divtn_y(5,+1,i,j,k)*sum(this%itp_y(5,:,i,j+1,k)*this%diff(5,i,j  :j+1,k))*this%grdtn_y(5,-1,i,j+1,k)+&
+               &                                                                this%divtn_y(5, 0,i,j,k)*sum(this%itp_y(5,:,i,j  ,k)*this%diff(5,i,j-1:j  ,k))*this%grdtn_y(5, 0,i,j  ,k)+&
+               &                                                                this%divtn_z(5,+1,i,j,k)*sum(this%itp_z(5,:,i,j,k+1)*this%diff(5,i,j,k  :k+1))*this%grdtn_z(5,-1,i,j,k+1)+&
+               &                                                                this%divtn_z(5, 0,i,j,k)*sum(this%itp_z(5,:,i,j,k  )*this%diff(5,i,j,k-1:k  ))*this%grdtn_z(5, 0,i,j,k  ))
+               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(5,+1,i,j,k)*sum(this%itp_x(5,:,i+1,j,k)*this%diff(5,i  :i+1,j,k))*this%grdtn_x(5, 0,i+1,j,k))
+               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x(5, 0,i,j,k)*sum(this%itp_x(5,:,i  ,j,k)*this%diff(5,i-1:i  ,j,k))*this%grdtn_x(5,-1,i  ,j,k))
+               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(5,+1,i,j,k)*sum(this%itp_y(5,:,i,j+1,k)*this%diff(5,i,j  :j+1,k))*this%grdtn_y(5, 0,i,j+1,k))
+               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y(5, 0,i,j,k)*sum(this%itp_y(5,:,i,j  ,k)*this%diff(5,i,j-1:j  ,k))*this%grdtn_y(5,-1,i,j  ,k))
+               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(5,+1,i,j,k)*sum(this%itp_z(5,:,i,j,k+1)*this%diff(5,i,j,k  :k+1))*this%grdtn_z(5, 0,i,j,k+1))
+               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z(5, 0,i,j,k)*sum(this%itp_z(5,:,i,j,k  )*this%diff(5,i,j,k-1:k  ))*this%grdtn_z(5,-1,i,j,k  ))
+            end do
+         end do
+      end do
+         
+      ! Solve the linear system
+      call this%implicit%setup()
+      this%implicit%rhs=resTN(5,:,:,:)
+      this%implicit%sol=0.0_WP
+      call this%implicit%solve()
+      resTN(5,:,:,:)=this%implicit%sol
+
+      !> Tensor component 6
+      ! Prepare convective operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Loop over divergence stencil
+               do std=0,1
+                  ! Loop over plus interpolation stencil
+                  do sti=this%stp1,this%stp2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(6,std,i,j,k)*0.5_WP*(rhoU(6,i+std,j,k)+abs(rhoU(6,i+std,j,k)))*this%itptn_xp(6,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(6,std,i,j,k)*0.5_WP*(rhoV(6,i,j+std,k)+abs(rhoV(6,i,j+std,k)))*this%itptn_yp(6,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(6,std,i,j,k)*0.5_WP*(rhoW(6,i,j,k+std)+abs(rhoW(6,i,j,k+std)))*this%itptn_zp(6,sti,i,j,k+std)
+                  end do
+                  ! Loop over minus interpolation stencil
+                  do sti=this%stm1,this%stm2
+                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%divtn_x(6,std,i,j,k)*0.5_WP*(rhoU(6,i+std,j,k)-abs(rhoU(6,i+std,j,k)))*this%itptn_xm(6,sti,i+std,j,k)
+                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%divtn_y(6,std,i,j,k)*0.5_WP*(rhoV(6,i,j+std,k)-abs(rhoV(6,i,j+std,k)))*this%itptn_ym(6,sti,i,j+std,k)
+                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%divtn_z(6,std,i,j,k)*0.5_WP*(rhoW(6,i,j,k+std)-abs(rhoW(6,i,j,k+std)))*this%itptn_zm(6,sti,i,j,k+std)
+                  end do
+               end do
+            end do
+         end do
+      end do
+         
+      ! Prepare diffusive operator
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%divtn_x(6,+1,i,j,k)*sum(this%itp_x(6,:,i+1,j,k)*this%diff(6,i  :i+1,j,k))*this%grdtn_x(6,-1,i+1,j,k)+&
+               &                                                                this%divtn_x(6, 0,i,j,k)*sum(this%itp_x(6,:,i  ,j,k)*this%diff(6,i-1:i  ,j,k))*this%grdtn_x(6, 0,i  ,j,k)+&
+               &                                                                this%divtn_y(6,+1,i,j,k)*sum(this%itp_y(6,:,i,j+1,k)*this%diff(6,i,j  :j+1,k))*this%grdtn_y(6,-1,i,j+1,k)+&
+               &                                                                this%divtn_y(6, 0,i,j,k)*sum(this%itp_y(6,:,i,j  ,k)*this%diff(6,i,j-1:j  ,k))*this%grdtn_y(6, 0,i,j  ,k)+&
+               &                                                                this%divtn_z(6,+1,i,j,k)*sum(this%itp_z(6,:,i,j,k+1)*this%diff(6,i,j,k  :k+1))*this%grdtn_z(6,-1,i,j,k+1)+&
+               &                                                                this%divtn_z(6, 0,i,j,k)*sum(this%itp_z(6,:,i,j,k  )*this%diff(6,i,j,k-1:k  ))*this%grdtn_z(6, 0,i,j,k  ))
+               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%divtn_x(6,+1,i,j,k)*sum(this%itp_x(6,:,i+1,j,k)*this%diff(6,i  :i+1,j,k))*this%grdtn_x(6, 0,i+1,j,k))
+               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%divtn_x(6, 0,i,j,k)*sum(this%itp_x(6,:,i  ,j,k)*this%diff(6,i-1:i  ,j,k))*this%grdtn_x(6,-1,i  ,j,k))
+               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%divtn_y(6,+1,i,j,k)*sum(this%itp_y(6,:,i,j+1,k)*this%diff(6,i,j  :j+1,k))*this%grdtn_y(6, 0,i,j+1,k))
+               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%divtn_y(6, 0,i,j,k)*sum(this%itp_y(6,:,i,j  ,k)*this%diff(6,i,j-1:j  ,k))*this%grdtn_y(6,-1,i,j  ,k))
+               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%divtn_z(6,+1,i,j,k)*sum(this%itp_z(6,:,i,j,k+1)*this%diff(6,i,j,k  :k+1))*this%grdtn_z(6, 0,i,j,k+1))
+               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%divtn_z(6, 0,i,j,k)*sum(this%itp_z(6,:,i,j,k  )*this%diff(6,i,j,k-1:k  ))*this%grdtn_z(6,-1,i,j,k  ))
+            end do
+         end do
+      end do
+         
+      ! Solve the linear system
+      call this%implicit%setup()
+      this%implicit%rhs=resTN(6,:,:,:)
+      this%implicit%sol=0.0_WP
+      call this%implicit%solve()
+      resTN(6,:,:,:)=this%implicit%sol
       
       ! Sync up residual
       call this%cfg%sync(resTN)

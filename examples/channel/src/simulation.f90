@@ -3,7 +3,8 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use incomp_class,      only: incomp
-   use tensor_class,      only: tensor
+   ! use tensor_class,      only: tensor
+   use fene_class,        only: fene
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use event_class,       only: event
@@ -11,9 +12,11 @@ module simulation
    implicit none
    private
    
-   !> Single-phase incompressible flow solver, conformation tensor solver and corresponding time tracker
+   !> Single-phase incompressible flow solver, conformation tensor solvers and corresponding time tracker
    type(incomp),      public :: fs
-   type(tensor),      public :: ct     
+   type(fene),        public :: fm
+   ! type(tensor),      public :: ctquick
+   ! type(tensor),      public :: ctupwind    
    type(timetracker), public :: time
    
    !> Ensight postprocessing
@@ -29,6 +32,9 @@ module simulation
    real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:), allocatable :: SR
+   ! real(WP), dimension(:,:,:,:), allocatable :: rhoU,rhoV,rhoW
+   ! real(WP), dimension(:,:,:,:), allocatable :: resCT,resCTupwind,resCTquick
+   ! real(WP), dimension(:,:,:,:), allocatable :: CT,CTstar,CTold
    
    !> Fluid viscosity
    real(WP) :: visc
@@ -39,6 +45,9 @@ module simulation
 
    !> Event for post-processing
    type(event) :: ppevt
+
+   ! !> Conformation tensor max and min thresholds and magnitude
+   ! real(WP) :: CTmag_max,CTmag_min
    
 contains
    
@@ -97,16 +106,24 @@ contains
       use param, only: param_read
       implicit none
       
-      
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR(6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resU       (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV       (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW       (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui         (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi         (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi         (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR         (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(rhoU       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(rhoV       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(rhoW       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(resCT      (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(resCTquick (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(resCTupwind(6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(CT         (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(CTold      (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! allocate(CTstar     (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
 
@@ -164,7 +181,27 @@ contains
       end block create_and_initialize_flow_solver
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_amg
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_smg
-      
+
+      ! Create a fene model solver
+      create_fene_model_solver: block
+         use ils_class,  only: pcg_pfmg
+         use fene_class, only: bquick
+         integer  :: i,j,k
+         real(WP) :: Lmax,Wi
+         ! Maximum extensibility of polymer chain
+         call param_read('Maximum extension of polymer chain',Lmax)
+         ! Weissenberg number for polymer
+         call param_read('Weissenberg number',Wi)
+         ! Create FENE model solver with bquick scheme
+         fm=fene(cfg=cfg, scheme=bquick, extension=Lmax,weisnum=Wi, name= 'fene model solver')
+         ! Configure implicit tensor solvers for QUICK scheme
+         call param_read('FENE model iteration',fm%implicit%maxit)
+         call param_read('FENE model tolerance',fm%implicit%rcvg)
+         ! Assign constant density for tensor solver
+         fm%rho=fs%rho
+         ! Setup the solvers
+         call fm%setup(implicit_ils=pcg_pfmg)
+      end block create_fene_model_solver
       
       ! Add Ensight output
       create_ensight: block
@@ -246,35 +283,92 @@ contains
          call time%adjust_dt()
          call time%increment()
          
-         ! Model non-Newtonian fluid
-         nonewt: block
-            integer :: i,j,k
-            real(WP) :: SRmag
-            real(WP), parameter :: C=1.0e-2_WP
-            real(WP), parameter :: n=0.3_WP
-            ! Calculate SR
-            call fs%get_strainrate(Ui,Vi,Wi,SR)
-            ! Update viscosity
-            do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-               do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                  do i=fs%cfg%imino_,fs%cfg%imaxo_
-                     SRmag=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-                     SRmag=max(SRmag,1000.0_WP**(1.0_WP/(n-1.0_WP)))
-                     fs%visc(i,j,k)=C*SRmag**(n-1.0_WP)
-                  end do
-               end do
-            end do
-            call fs%cfg%sync(fs%visc)
-         end block nonewt
+         ! ! Model non-Newtonian fluid
+         ! nonewt: block
+         !    integer :: i,j,k
+         !    real(WP) :: SRmag
+         !    real(WP), parameter :: C=1.0e-2_WP
+         !    real(WP), parameter :: n=0.3_WP
+         !    ! Calculate SR
+         !    call fs%get_strainrate(Ui,Vi,Wi,SR)
+         !    ! Update viscosity
+         !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+         !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+         !          do i=fs%cfg%imino_,fs%cfg%imaxo_
+         !             SRmag=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+         !             SRmag=max(SRmag,1000.0_WP**(1.0_WP/(n-1.0_WP)))
+         !             fs%visc(i,j,k)=C*SRmag**(n-1.0_WP)
+         !          end do
+         !       end do
+         !    end do
+         !    call fs%cfg%sync(fs%visc)
+         ! end block nonewt
+
+         ! ! Remember old tensor
+         ! ctquick%TNold=ctquick%TN
+         ! ctupwind%TNold=ctupwind%TN
+         ! CTold=CT
 
          ! Remember old velocity
          fs%Uold=fs%U
          fs%Vold=fs%V
          fs%Wold=fs%W
-         
+
+         ! ! Advance the conformation tensor using BQUICK
+         ! advance_tensor: block
+         !    integer :: i,j,k
+         !    real(WP) :: CTmag
+         !    ! Remember old conformation tensor
+            
+         !    ! ! Explicit calculation of drhoTNdt (based on QUICK scheme)
+         !    ! call ctquick%get_drhoTNdt(drhoTNdtquick,rhoU,rhoV,rhoW)
+         !    ! ! Explicit calculation of drhoTNdt (based on Upwind scheme)
+         !    ! call ctupwind%get_drhoTNdt(drhoTNdtupwind,rhoU,rhoV,rhoW)
+         !    ! Form implicit residuals for tensor (based on QUICK scheme)
+         !    call ctquick%solve_implicit(time%dt,resCTquick,resU,resV,resW)
+         !    ! Form implicit residuals for tensor (based on Upwind scheme)
+         !    call ctupwind%solve_implicit(time%dt,resCTupwind,resU,resV,resW)
+         !    ! Apply the residual to get predictor conformation tensor (based on QUICK scheme)
+         !    CTstar=2.0_WP*ctquick%TN-CTold+resCTquick
+         !    ! Check boundedness of conformation tensor and adjust CT calculation
+         !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+         !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+         !          do i=fs%cfg%imino_,fs%cfg%imaxo_
+         !             ! Calculate the magnitude of the conformation tensor
+         !             CTmag=sqrt(CTstar(1,i,j,k)**2+CTstar(2,i,j,k)**2+CTstar(3,i,j,k)**2+2.0_WP*(CTstar(4,i,j,k)**2+CTstar(5,i,j,k)**2+CTstar(6,i,j,k)**2))
+         !             if (CTmag.gt.CTmag_max.or.CTmag.lt.CTmag_min) then
+         !                ! Advance CT in cell with 1st order upwind scheme
+         !                CT(:,i,j,k)=2.0_WP*ctupwind%TN(:,i,j,k)-CTold(:,i,j,k)+resCTupwind(:,i,j,k)
+         !                resCT(:,i,j,k)=resCTupwind(:,i,j,k)
+         !             else 
+         !                ! Keep CT value in cell based on QUICK scheme
+         !                CT(:,i,j,k)=CTstar(:,i,j,k)
+         !                resCT(:,i,j,k)=resCTquick(:,i,j,k)
+         !             end if 
+         !          end do
+         !       end do
+         !    end do
+
+         !    call fs%cfg%sync(CT)
+            
+         !    !Assign current CT to arrays stored in solvers
+         !    ctquick%TN =CT
+         !    ctupwind%TN=CT
+         !    call fs%cfg%sync( ctquick%TN)
+         !    call fs%cfg%sync(ctupwind%TN)
+            
+         !    ! Assign current resCT to parameters used in solvers
+         !    resCTquick =resCT
+         !    resCTupwind=resCT
+         !    call fs%cfg%sync( resCTquick)
+         !    call fs%cfg%sync(resCTupwind)
+            
+         ! end block advance_tensor
+
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
-            
+
+
             ! Build mid-time velocity
             fs%U=0.5_WP*(fs%U+fs%Uold)
             fs%V=0.5_WP*(fs%V+fs%Vold)
@@ -316,7 +410,7 @@ contains
                call MPI_ALLREDUCE(myW   ,meanW,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanW=meanW/Wvol
                where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
             end block forcing   
-            
+
             ! Form implicit residuals
             call fs%solve_implicit(time%dt,resU,resV,resW)
             

@@ -29,6 +29,18 @@ Pressure iteration : 100
 Implicit tolerance : 1e-6
 Implicit iteration : 100
 
+# FENE model properties
+FENE model tolerance               : 1e-6
+FENE model iteration               : 100
+Maximum extension of polymer chain : 1
+Weissenberg number                 : 1
+
+
+# Tensor maximum and minimum magnitudes
+Maximum magnitude : 2
+Minimum magnitude : 1
+
+
 # Ensight output
 Ensight output period :  1e-1
 Postproc output period : 10
