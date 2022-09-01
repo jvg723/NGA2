@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	4 2 1
+Partition :	1 1 1
 
 # Mesh definition
 Lx :	5
@@ -34,6 +34,8 @@ FENE model tolerance               : 1e-6
 FENE model iteration               : 100
 Maximum extension of polymer chain : 1
 Weissenberg number                 : 1
+Conformation Tensor upper bound    : 2
+Conformation Tensor lower bound    : 1
 
 
 # Tensor maximum and minimum magnitudes

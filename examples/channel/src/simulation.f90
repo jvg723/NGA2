@@ -3,7 +3,6 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use incomp_class,      only: incomp
-   ! use tensor_class,      only: tensor
    use fene_class,        only: fene
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
@@ -14,9 +13,7 @@ module simulation
    
    !> Single-phase incompressible flow solver, conformation tensor solvers and corresponding time tracker
    type(incomp),      public :: fs
-   type(fene),        public :: fm
-   ! type(tensor),      public :: ctquick
-   ! type(tensor),      public :: ctupwind    
+   type(fene),        public :: fm  
    type(timetracker), public :: time
    
    !> Ensight postprocessing
@@ -29,12 +26,9 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: SR
-   ! real(WP), dimension(:,:,:,:), allocatable :: rhoU,rhoV,rhoW
-   ! real(WP), dimension(:,:,:,:), allocatable :: resCT,resCTupwind,resCTquick
-   ! real(WP), dimension(:,:,:,:), allocatable :: CT,CTstar,CTold
+   real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:), allocatable :: SR,gradU,resCT,resCTupwind 
    
    !> Fluid viscosity
    real(WP) :: visc
@@ -46,8 +40,8 @@ module simulation
    !> Event for post-processing
    type(event) :: ppevt
 
-   ! !> Conformation tensor max and min thresholds and magnitude
-   ! real(WP) :: CTmag_max,CTmag_min
+   !> FENE model parameters
+   real(WP) :: Lmax,We,CTmax,CTmin
    
 contains
    
@@ -108,22 +102,18 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(resU       (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV       (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW       (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui         (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi         (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi         (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR         (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(rhoU       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(rhoV       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(rhoW       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(resCT      (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(resCTquick (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(resCTupwind(6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(CT         (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(CTold      (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! allocate(CTstar     (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! Flow solver
+         allocate(resU (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(gradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,9))
+         ! Conformation tensor solver
+         allocate(resCT      (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,9))
+         allocate(resCTupwind(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,9))
       end block allocate_work_arrays
       
 
@@ -185,23 +175,28 @@ contains
       ! Create a fene model solver
       create_fene_model_solver: block
          use ils_class,  only: pcg_pfmg
-         use fene_class, only: bquick
+         use fene_class, only: quick,bquick
          integer  :: i,j,k
-         real(WP) :: Lmax,Wi
          ! Maximum extensibility of polymer chain
          call param_read('Maximum extension of polymer chain',Lmax)
          ! Weissenberg number for polymer
-         call param_read('Weissenberg number',Wi)
-         ! Create FENE model solver with bquick scheme
-         fm=fene(cfg=cfg, scheme=bquick, extension=Lmax,weisnum=Wi, name= 'fene model solver')
-         ! Configure implicit tensor solvers for QUICK scheme
-         call param_read('FENE model iteration',fm%implicit%maxit)
-         call param_read('FENE model tolerance',fm%implicit%rcvg)
+         call param_read('Weissenberg number',We)
+         ! Max and min conformation tensor boundaries
+         call param_read('Conformation Tensor upper bound',CTmax)
+         call param_read('Conformation Tensor lower bound',CTmin)
+         ! Create FENE model solver with quick scheme
+         fm=fene(cfg=cfg, scheme=bquick, name= 'fene model solver')
+         ! Configure implicit FENE model solvers
+         fm%implicit%maxit=fs%implicit%maxit
+         fm%implicit%rcvg=fs%implicit%rcvg
          ! Assign constant density for tensor solver
          fm%rho=fs%rho
          ! Setup the solvers
          call fm%setup(implicit_ils=pcg_pfmg)
       end block create_fene_model_solver
+
+      initialize_fene_model: block
+      end block initialize_fene_model
       
       ! Add Ensight output
       create_ensight: block
@@ -267,6 +262,7 @@ contains
          if (ppevt%occurs()) call postproc_vel()
       end block create_postproc
       
+      print *, 'Done init'
       
    end subroutine simulation_init
    
@@ -304,71 +300,133 @@ contains
          !    call fs%cfg%sync(fs%visc)
          ! end block nonewt
 
-         ! ! Remember old tensor
-         ! ctquick%TNold=ctquick%TN
-         ! ctupwind%TNold=ctupwind%TN
-         ! CTold=CT
+         ! Remember old conformation tensors and residuals
+         fm%CTold=fm%CT
+         fm%CTupwind=fm%CT
+         resCTupwind=resCT
 
          ! Remember old velocity
          fs%Uold=fs%U
          fs%Vold=fs%V
          fs%Wold=fs%W
 
-         ! ! Advance the conformation tensor using BQUICK
-         ! advance_tensor: block
-         !    integer :: i,j,k
-         !    real(WP) :: CTmag
-         !    ! Remember old conformation tensor
-            
-         !    ! ! Explicit calculation of drhoTNdt (based on QUICK scheme)
-         !    ! call ctquick%get_drhoTNdt(drhoTNdtquick,rhoU,rhoV,rhoW)
-         !    ! ! Explicit calculation of drhoTNdt (based on Upwind scheme)
-         !    ! call ctupwind%get_drhoTNdt(drhoTNdtupwind,rhoU,rhoV,rhoW)
-         !    ! Form implicit residuals for tensor (based on QUICK scheme)
-         !    call ctquick%solve_implicit(time%dt,resCTquick,resU,resV,resW)
-         !    ! Form implicit residuals for tensor (based on Upwind scheme)
-         !    call ctupwind%solve_implicit(time%dt,resCTupwind,resU,resV,resW)
-         !    ! Apply the residual to get predictor conformation tensor (based on QUICK scheme)
-         !    CTstar=2.0_WP*ctquick%TN-CTold+resCTquick
-         !    ! Check boundedness of conformation tensor and adjust CT calculation
-         !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-         !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-         !          do i=fs%cfg%imino_,fs%cfg%imaxo_
-         !             ! Calculate the magnitude of the conformation tensor
-         !             CTmag=sqrt(CTstar(1,i,j,k)**2+CTstar(2,i,j,k)**2+CTstar(3,i,j,k)**2+2.0_WP*(CTstar(4,i,j,k)**2+CTstar(5,i,j,k)**2+CTstar(6,i,j,k)**2))
-         !             if (CTmag.gt.CTmag_max.or.CTmag.lt.CTmag_min) then
-         !                ! Advance CT in cell with 1st order upwind scheme
-         !                CT(:,i,j,k)=2.0_WP*ctupwind%TN(:,i,j,k)-CTold(:,i,j,k)+resCTupwind(:,i,j,k)
-         !                resCT(:,i,j,k)=resCTupwind(:,i,j,k)
-         !             else 
-         !                ! Keep CT value in cell based on QUICK scheme
-         !                CT(:,i,j,k)=CTstar(:,i,j,k)
-         !                resCT(:,i,j,k)=resCTquick(:,i,j,k)
-         !             end if 
-         !          end do
-         !       end do
-         !    end do
+         ! Set QUICK stencil
+         fm%qnst=fm%nst
+         fm%stp1=fm%qstp1
+         fm%stp2=fm%qstp2
+         fm%stm1=fm%qstm1
+         fm%stm2=fm%qstm2
 
-         !    call fs%cfg%sync(CT)
-            
-         !    !Assign current CT to arrays stored in solvers
-         !    ctquick%TN =CT
-         !    ctupwind%TN=CT
-         !    call fs%cfg%sync( ctquick%TN)
-         !    call fs%cfg%sync(ctupwind%TN)
-            
-         !    ! Assign current resCT to parameters used in solvers
-         !    resCTquick =resCT
-         !    resCTupwind=resCT
-         !    call fs%cfg%sync( resCTquick)
-         !    call fs%cfg%sync(resCTupwind)
-            
-         ! end block advance_tensor
+         ! Set interpolation coefficents to QUICK
+         fm%qitp_xp=fm%itp_xp
+         fm%qitp_xm=fm%itp_xm
+         fm%qitp_yp=fm%itp_yp
+         fm%qitp_ym=fm%itp_ym
+         fm%qitp_zp=fm%itp_zp
+         fm%qitp_zm=fm%itp_zm
+
+         print *, 'pre gradU'
+         ! Cacluate velocity gradient field at the cell center
+         call fs%get_gradU(Ui,Vi,Wi,gradU) !< Need to update
+         print *, 'post gradU'
 
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
 
+         print *, 'in sub it'
 
+            ! ======= FENE MODEL SOLVER ======= !
+
+            ! First pass at solving for CT with QUICK scheme
+            QUICK: block
+               use fene_class, only: quick
+               integer :: ii,jj,kk
+               ! Build mid time conformation tensor
+               fm%CT=0.5_WP*(fm%CT+fm%CTold)
+               print *, 'post mid time CT'
+               ! Form source terms for CT evolution equaiton
+               call fm%get_CTgradU(quick,gradU,ii,jj,kk)
+               call fm%get_stressTensor(quick,We,Lmax,ii,jj,kk)
+               print *,'post source CT'
+               ! Explicit calculation of drhoCT/dt from CT equation
+               call fm%get_drhoCTdt(quick,resCT,resU,resV,resW,ii,jj,kk)
+               print *, 'post explicit'
+               ! Assemble explicit residual
+               resCT=-2.0_WP*(fm%rho*fm%CT-fm%rho*fm%CTold)+time%dt*resCT
+               print *, 'assemble exp res'
+               ! Form implicit residuals
+               call fm%solve_implicit(quick,time%dt,resCT,resU,resV,resW,ii,jj,kk)
+               print *, 'imp res'
+               ! Apply these residuals
+               fm%CT=2.0_WP*fm%CT-fm%CTold+resCT
+               print *, 'post apply res'
+            end block QUICK
+
+            print *, 'post quick'
+
+            ! Evaluate the magnitude of the conformation tensor and update wtih 1st Order upwind if necessary
+            eval_CT: block
+               use fene_class, only: upwind
+               integer  :: i,j,k
+               real(WP) :: CTmag
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        ! Calculate the determinant of the conformation tensor
+                        CTmag=fm%CT(i,j,k,1)*(fm%CT(i,j,k,5)*fm%CT(i,j,k,9)-fm%CT(i,j,k,6)*fm%CT(i,j,k,8))-fm%CT(i,j,k,2)*(fm%CT(i,j,k,4)*fm%CT(i,j,k,9)-fm%CT(i,j,k,6)*fm%CT(i,j,k,7))+fm%CT(i,j,k,3)*(fm%CT(i,j,k,4)*fm%CT(i,j,k,8)-fm%CT(i,j,k,5)*fm%CT(i,j,k,7))
+                        if (CTmag.gt.CTmax.or.CTmag.lt.CTmin) then
+                           ! Recompute interpolation coefficents with 1st order upwind scheme
+                           call fm%upwind_metrics(i,j,k)
+                           
+                           ! Build mid time conformation tensor
+                           fm%CT(i,j,k,:)=0.5_WP*(fm%CTupwind(i,j,k,:)+fm%CTold(i,j,k,:))
+
+                           ! Form source terms for CT evolution equation
+                           call fm%get_CTgradU(upwind,gradU,i,j,k)
+                           call fm%get_stressTensor(upwind,We,Lmax,i,j,k)
+
+                           ! Explicit calculation of drhoCT/dt from CT equation
+                           call fm%get_drhoCTdt(upwind,resCTupwind,resU,resV,resW,i,j,k)
+
+                           ! Assemble explicit residual
+                           resCT(i,j,k,:)=-2.0_WP*(fm%rho*fm%CT(i,j,k,:)-fm%rho*fm%CTold(i,j,k,:))+time%dt*resCTupwind(i,j,k,:)
+
+                           ! Form implicit residuals
+                           call fm%solve_implicit(upwind,time%dt,resCT,resU,resV,resW,i,j,k)
+
+                           ! Apply these residuals
+                           fm%CT(i,j,k,:)=2.0_WP*fm%CT(i,j,k,:)-fm%CTold(i,j,k,:)+resCT(i,j,k,:)
+                        else 
+                           cycle ! Keep CT value in cell based on QUICK scheme  
+                        end if 
+                     end do
+                  end do
+               end do
+            end block eval_CT
+
+            print *, 'post eval_CT'
+
+            ! Updated Viscoelastic stress tensor for NS
+            viscoelastic_tensor: block
+               use fene_class, only: quick
+               integer  :: ii,jj,kk
+
+               ! Build new tensor
+               call fm%get_stressTensor(quick,We,Lmax,ii,jj,kk)
+
+               ! Get divergence
+               call fm%get_divT()
+
+            end block viscoelastic_tensor
+
+            print *, 'post visc_tensor'
+
+
+            ! ================================= !
+
+
+            ! ========== FLOW SOLVER ========== !
+            
             ! Build mid-time velocity
             fs%U=0.5_WP*(fs%U+fs%Uold)
             fs%V=0.5_WP*(fs%V+fs%Vold)
@@ -437,6 +495,8 @@ contains
             fs%V=fs%V-time%dt*resV/fs%rho
             fs%W=fs%W-time%dt*resW/fs%rho
             
+            ! ================================= !
+            
             ! Increment sub-iteration counter
             time%it=time%it+1
             
@@ -474,7 +534,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU,resCT)
       
    end subroutine simulation_final
    
