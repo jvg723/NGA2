@@ -17,6 +17,7 @@ Ubulk : 1
 Wbulk : 0
 Perturbation : 0
 
+
 # Time integration
 Max timestep size : 2e-2
 Max cfl number :    0.9
@@ -34,8 +35,11 @@ FENE model tolerance               : 1e-6
 FENE model iteration               : 100
 Maximum extension of polymer chain : 1
 Weissenberg number                 : 1
-Conformation Tensor upper bound    : 2
-Conformation Tensor lower bound    : 1
+
+# Scalar solver
+Scalar upper bound  : 2
+Scalar lower bound  : 1
+Dynamic diffusivity : 0
 
 
 # Tensor maximum and minimum magnitudes

@@ -3,6 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use incomp_class,      only: incomp
+   use scalar_class,      only: scalar
    use fene_class,        only: fene
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
@@ -11,9 +12,10 @@ module simulation
    implicit none
    private
    
-   !> Single-phase incompressible flow solver, conformation tensor solvers and corresponding time tracker
+   !> Single-phase incompressible flow solver, scalar solver, fene model and corresponding time tracker
    type(incomp),      public :: fs
-   type(fene),        public :: fm  
+   type(scalar),      public :: sc
+   type(fene),        public :: fm
    type(timetracker), public :: time
    
    !> Ensight postprocessing
@@ -26,9 +28,12 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: SR,gradU,resCT,resCTupwind 
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW,resSC
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
+   real(WP), dimension(:,:,:,:,:), allocatable :: gradu
+   real(WP), dimension(:,:,:,:),   allocatable :: qitpsc_xp,qitpsc_yp,qitpsc_zp   !< Stored plus interpolation for SC with QUICK scheme
+   real(WP), dimension(:,:,:,:),   allocatable :: qitpsc_xm,qitpsc_ym,qitpsc_zm   !< Stored minus interpolation for SC with QUICK scheme 
    
    !> Fluid viscosity
    real(WP) :: visc
@@ -40,8 +45,14 @@ module simulation
    !> Event for post-processing
    type(event) :: ppevt
 
+   !> Stencil and for setting QUICK scheme
+   integer :: qnst,qstp1,qstp2,qstm1,qstm2           
+
+   !> BQUICK scheme parameters
+   real(WP) :: SCmax,SCmin
+   
    !> FENE model parameters
-   real(WP) :: Lmax,We,CTmax,CTmin
+   real(WP) :: Lmax,We
    
 contains
    
@@ -103,17 +114,16 @@ contains
       ! Allocate work arrays
       allocate_work_arrays: block
          ! Flow solver
-         allocate(resU (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(gradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,9))
-         ! Conformation tensor solver
-         allocate(resCT      (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,9))
-         allocate(resCTupwind(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,9))
+         allocate(resU (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui   (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi   (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi   (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR   (6,  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(gradu(3,3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         ! Scalar solver
+         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
 
@@ -172,31 +182,49 @@ contains
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_amg
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_smg
 
-      ! Create a fene model solver
-      create_fene_model_solver: block
+      ! Create a scalar solver with a BQUICK scheme to solve for tensor components
+      create_scalar: block
          use ils_class,  only: pcg_pfmg
-         use fene_class, only: quick,bquick
-         integer  :: i,j,k
+         use scalar_class, only: bquick
+         real(WP) :: diffusivity
+         ! Create scalar solver
+         sc=scalar(cfg=cfg,scheme=bquick,name='C tensor components')
+         ! Max and min scalar bounds for BQUICK scehem
+         call param_read('Scalar upper bound',SCmax)
+         call param_read('Scalar lower bound',SCmin)
+         ! Store stencil for reseting to QUICK scheme
+         qnst=sc%nst
+         qstp1=sc%stp1; qstp2=sc%stp2
+         qstm1=sc%stm1; qstm2=sc%stm2
+         ! Store metrics for reseting to QUICK scheme
+         qitpsc_xp=sc%itpsc_xp; qitpsc_xm=sc%itpsc_xm
+         qitpsc_yp=sc%itpsc_yp; qitpsc_ym=sc%itpsc_ym
+         qitpsc_zp=sc%itpsc_zp; qitpsc_zm=sc%itpsc_zm
+         ! Assign constant diffusivity
+         call param_read('Dynamic diffusivity',diffusivity)
+         sc%diff=diffusivity
+         ! Assign constant density
+         sc%rho=fs%rho
+         ! Configure implicit scalar solver
+         sc%implicit%maxit=fs%implicit%maxit; sc%implicit%rcvg=fs%implicit%rcvg
+         ! Setup the solver
+         call sc%setup(implicit_ils=pcg_pfmg)
+      end block create_scalar
+
+      initialize_scalar: block
+      end block initialize_scalar
+
+      ! Create a fene model solver
+      create_fene_model: block
          ! Maximum extensibility of polymer chain
          call param_read('Maximum extension of polymer chain',Lmax)
          ! Weissenberg number for polymer
          call param_read('Weissenberg number',We)
-         ! Max and min conformation tensor boundaries
-         call param_read('Conformation Tensor upper bound',CTmax)
-         call param_read('Conformation Tensor lower bound',CTmin)
-         ! Create FENE model solver with quick scheme
-         fm=fene(cfg=cfg, scheme=bquick, name= 'fene model solver')
-         ! Configure implicit FENE model solvers
-         fm%implicit%maxit=fs%implicit%maxit
-         fm%implicit%rcvg=fs%implicit%rcvg
-         ! Assign constant density for tensor solver
-         fm%rho=fs%rho
+         ! Create FENE model solver 
+         fm=fene(cfg=cfg, name= 'fene model solver')
          ! Setup the solvers
-         call fm%setup(implicit_ils=pcg_pfmg)
-      end block create_fene_model_solver
-
-      initialize_fene_model: block
-      end block initialize_fene_model
+         call fm%setup()
+      end block create_fene_model
       
       ! Add Ensight output
       create_ensight: block
@@ -262,8 +290,6 @@ contains
          if (ppevt%occurs()) call postproc_vel()
       end block create_postproc
       
-      print *, 'Done init'
-      
    end subroutine simulation_init
    
    
@@ -300,132 +326,89 @@ contains
          !    call fs%cfg%sync(fs%visc)
          ! end block nonewt
 
-         ! Remember old conformation tensors and residuals
-         fm%CTold=fm%CT
-         fm%CTupwind=fm%CT
-         resCTupwind=resCT
+         ! Remember old conformation tensor
+         fm%C(:,:,:,1)=fm%Cold(:,:,:,1) ! C11
+         fm%C(:,:,:,2)=fm%Cold(:,:,:,2) ! C21/C12
+         fm%C(:,:,:,3)=fm%Cold(:,:,:,3) ! C31/C13
+         fm%C(:,:,:,4)=fm%Cold(:,:,:,4) ! C22
+         fm%C(:,:,:,5)=fm%Cold(:,:,:,5) ! C23/C32
+         fm%C(:,:,:,6)=fm%Cold(:,:,:,6) ! C33
 
          ! Remember old velocity
          fs%Uold=fs%U
          fs%Vold=fs%V
-         fs%Wold=fs%W
-
-         ! Set QUICK stencil
-         fm%qnst=fm%nst
-         fm%stp1=fm%qstp1
-         fm%stp2=fm%qstp2
-         fm%stm1=fm%qstm1
-         fm%stm2=fm%qstm2
-
-         ! Set interpolation coefficents to QUICK
-         fm%qitp_xp=fm%itp_xp
-         fm%qitp_xm=fm%itp_xm
-         fm%qitp_yp=fm%itp_yp
-         fm%qitp_ym=fm%itp_ym
-         fm%qitp_zp=fm%itp_zp
-         fm%qitp_zm=fm%itp_zm
-
-         print *, 'pre gradU'
-         ! Cacluate velocity gradient field at the cell center
-         call fs%get_gradU(Ui,Vi,Wi,gradU) !< Need to update
-         print *, 'post gradU'
+         fs%Wold=fs%W      
 
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
 
-         print *, 'in sub it'
+            ! Form velocity gradient
+            call fs%get_gradu(gradu)
 
-            ! ======= FENE MODEL SOLVER ======= !
-
-            ! First pass at solving for CT with QUICK scheme
-            QUICK: block
-               use fene_class, only: quick
-               integer :: ii,jj,kk
-               ! Build mid time conformation tensor
-               fm%CT=0.5_WP*(fm%CT+fm%CTold)
-               print *, 'post mid time CT'
-               ! Form source terms for CT evolution equaiton
-               call fm%get_CTgradU(quick,gradU,ii,jj,kk)
-               call fm%get_stressTensor(quick,We,Lmax,ii,jj,kk)
-               print *,'post source CT'
-               ! Explicit calculation of drhoCT/dt from CT equation
-               call fm%get_drhoCTdt(quick,resCT,resU,resV,resW,ii,jj,kk)
-               print *, 'post explicit'
-               ! Assemble explicit residual
-               resCT=-2.0_WP*(fm%rho*fm%CT-fm%rho*fm%CTold)+time%dt*resCT
-               print *, 'assemble exp res'
-               ! Form implicit residuals
-               call fm%solve_implicit(quick,time%dt,resCT,resU,resV,resW,ii,jj,kk)
-               print *, 'imp res'
-               ! Apply these residuals
-               fm%CT=2.0_WP*fm%CT-fm%CTold+resCT
-               print *, 'post apply res'
-            end block QUICK
-
-            print *, 'post quick'
-
-            ! Evaluate the magnitude of the conformation tensor and update wtih 1st Order upwind if necessary
-            eval_CT: block
-               use fene_class, only: upwind
-               integer  :: i,j,k
-               real(WP) :: CTmag
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        ! Calculate the determinant of the conformation tensor
-                        CTmag=fm%CT(i,j,k,1)*(fm%CT(i,j,k,5)*fm%CT(i,j,k,9)-fm%CT(i,j,k,6)*fm%CT(i,j,k,8))-fm%CT(i,j,k,2)*(fm%CT(i,j,k,4)*fm%CT(i,j,k,9)-fm%CT(i,j,k,6)*fm%CT(i,j,k,7))+fm%CT(i,j,k,3)*(fm%CT(i,j,k,4)*fm%CT(i,j,k,8)-fm%CT(i,j,k,5)*fm%CT(i,j,k,7))
-                        if (CTmag.gt.CTmax.or.CTmag.lt.CTmin) then
-                           ! Recompute interpolation coefficents with 1st order upwind scheme
-                           call fm%upwind_metrics(i,j,k)
-                           
-                           ! Build mid time conformation tensor
-                           fm%CT(i,j,k,:)=0.5_WP*(fm%CTupwind(i,j,k,:)+fm%CTold(i,j,k,:))
-
-                           ! Form source terms for CT evolution equation
-                           call fm%get_CTgradU(upwind,gradU,i,j,k)
-                           call fm%get_stressTensor(upwind,We,Lmax,i,j,k)
-
-                           ! Explicit calculation of drhoCT/dt from CT equation
-                           call fm%get_drhoCTdt(upwind,resCTupwind,resU,resV,resW,i,j,k)
-
-                           ! Assemble explicit residual
-                           resCT(i,j,k,:)=-2.0_WP*(fm%rho*fm%CT(i,j,k,:)-fm%rho*fm%CTold(i,j,k,:))+time%dt*resCTupwind(i,j,k,:)
-
-                           ! Form implicit residuals
-                           call fm%solve_implicit(upwind,time%dt,resCT,resU,resV,resW,i,j,k)
-
-                           ! Apply these residuals
-                           fm%CT(i,j,k,:)=2.0_WP*fm%CT(i,j,k,:)-fm%CTold(i,j,k,:)+resCT(i,j,k,:)
-                        else 
-                           cycle ! Keep CT value in cell based on QUICK scheme  
-                        end if 
+            ! solve for nth component of conformation tensor
+            scalar_solver: block
+               use scalar_class, only: upwind
+               integer :: n,i,j,k
+               do n=1,fm%Celem
+                  ! Reset stencil to QUICK scheme
+                  sc%nst=qnst
+                  sc%stp1=qstp1; sc%stp2=qstp2
+                  sc%stm1=qstm1; sc%stm2=qstm2
+                  ! Reset metric to QUICK scheme
+                  sc%itpsc_xp=qitpsc_xp; sc%itpsc_xm=qitpsc_xm
+                  sc%itpsc_yp=qitpsc_yp; sc%itpsc_ym=qitpsc_ym
+                  sc%itpsc_zp=qitpsc_zp; sc%itpsc_zm=qitpsc_zm
+                  ! Set SC array for nth element of conformation tensor
+                  sc%SC=fm%C(:,:,:,n); sc%SCold=fm%Cold(:,:,:,n)
+                  ! Store SC array to be used for  1st order upwind scheme (when needed)
+                  sc%SClocal=sc%SC                
+                  ! Build mid-time scalar
+                  sc%SC=0.5_WP*(sc%SC+sc%SCold)
+                  ! Explicit calculation of drhoSC/dt from scalar equation
+                  call sc%get_drhoSCdt(resSC,resU,resV,resW)
+                  ! Assemble explicit residuals (using QUICK scheme)
+                  resSC=-2.0_WP*(sc%rho*sc%SC-sc%rho*sc%SCold)+time%dt*resSC
+                  ! Evaluate boundedness of SC and adjust to 1st upwind scheme when necessary
+                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                        do i=fs%cfg%imino_,fs%cfg%imaxo_
+                           if (resSC(i,j,k).gt.SCmax.or.resSC(i,j,k).lt.SCmin) then
+                              ! Adjust interpolation metric for cell i,j,k to 1st order upwind
+                              call sc%local_metrics(upwind,i,j,k)
+                              ! Build mid-time scalar
+                              sc%SC(i,j,k)=0.5_WP*(sc%SClocal(i,j,k)+sc%SCold(i,j,k))
+                              ! Explicit calculation of drhoSC/dt from scalar equation
+                              call sc%get_drhoSCdt(resSC,resU,resV,resW,i,j,k)
+                              ! Assemble explicit residuals (using 1st order Upwind scheme)
+                              resSC(i,j,k)=-2.0_WP*(sc%rho*sc%SC(i,j,k)-sc%rho*sc%SCold(i,j,k))+time%dt*resSC(i,j,k)
+                           else 
+                              cycle ! Keep SC calculated from QUICK scheme
+                           end if
+                        end do
                      end do
                   end do
+                  ! Sync explicit residuals
+                  call fs%cfg%sync(resSC)
+                  ! Calculate CgradU terms
+                  call fm%get_CgradU(n,gradu)
+                  ! Calculate T terms
+                  call fm%get_stressTensor(We,Lmax,n)
+                  ! Add source terms to calculated residual
+                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                        do i=fs%cfg%imino_,fs%cfg%imaxo_
+                           resSC(i,j,k)=resSC(i,j,k)+fm%CgradU(i,j,k,n)-fm%T(i,j,k,n)
+                        end do
+                     end do
+                  end do
+                  ! Form implicit residuals
+                  call sc%solve_implicit(time%dt,resSC,resU,resV,resW)
+                  ! Apply this residual
+                  sc%SC=2.0_WP*sc%SC-sc%SCold+resSC
+                  ! Update SC array for nth element of conformation tensor 
+                  fm%C(:,:,:,n)=sc%SC
                end do
-            end block eval_CT
-
-            print *, 'post eval_CT'
-
-            ! Updated Viscoelastic stress tensor for NS
-            viscoelastic_tensor: block
-               use fene_class, only: quick
-               integer  :: ii,jj,kk
-
-               ! Build new tensor
-               call fm%get_stressTensor(quick,We,Lmax,ii,jj,kk)
-
-               ! Get divergence
-               call fm%get_divT()
-
-            end block viscoelastic_tensor
-
-            print *, 'post visc_tensor'
-
-
-            ! ================================= !
-
-
-            ! ========== FLOW SOLVER ========== !
+            end block scalar_solver
             
             ! Build mid-time velocity
             fs%U=0.5_WP*(fs%U+fs%Uold)
@@ -467,7 +450,28 @@ contains
                call MPI_ALLREDUCE(myWvol,Wvol ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
                call MPI_ALLREDUCE(myW   ,meanW,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanW=meanW/Wvol
                where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
-            end block forcing   
+            end block forcing
+
+            ! Add source term from polymer to flow residual
+            polymer: block
+               integer :: i,j,k
+               call fm%get_divT()
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
+                           resU(i,j,k)=resU(i,j,k)+fm%divT(i,j,k,1)
+                        end if
+                        if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
+                           resV(i,j,k)=resV(i,j,k)+fm%divT(i,j,k,2)
+                        end if
+                        if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
+                           resW(i,j,k)=resW(i,j,k)+fm%divT(i,j,k,3)
+                        end if
+                     end do
+                  end do
+               end do
+            end block polymer   
 
             ! Form implicit residuals
             call fs%solve_implicit(time%dt,resU,resV,resW)
@@ -494,8 +498,6 @@ contains
             fs%U=fs%U-time%dt*resU/fs%rho
             fs%V=fs%V-time%dt*resV/fs%rho
             fs%W=fs%W-time%dt*resW/fs%rho
-            
-            ! ================================= !
             
             ! Increment sub-iteration counter
             time%it=time%it+1
@@ -534,7 +536,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU,resCT)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC)
       
    end subroutine simulation_final
    
