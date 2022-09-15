@@ -3,7 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use incomp_class,      only: incomp
-   use scalar_class,      only: scalar
+   use multiscalar_class, only: multiscalar
    use fene_class,        only: fene
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
@@ -14,7 +14,7 @@ module simulation
    
    !> Single-phase incompressible flow solver, scalar solver, fene model and corresponding time tracker
    type(incomp),      public :: fs
-   type(scalar),      public :: sc
+   type(multiscalar), public :: sc
    type(fene),        public :: fm
    type(timetracker), public :: time
    
@@ -28,12 +28,10 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW,resSC
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),   allocatable :: SR
+   real(WP), dimension(:,:,:,:),   allocatable :: SR,resSC,SC_
    real(WP), dimension(:,:,:,:,:), allocatable :: gradu
-   real(WP), dimension(:,:,:,:),   allocatable :: qitpsc_xp,qitpsc_yp,qitpsc_zp   !< Stored plus interpolation for SC with QUICK scheme
-   real(WP), dimension(:,:,:,:),   allocatable :: qitpsc_xm,qitpsc_ym,qitpsc_zm   !< Stored minus interpolation for SC with QUICK scheme 
    
    !> Fluid viscosity
    real(WP) :: visc
@@ -43,10 +41,7 @@ module simulation
    real(WP) :: meanU,meanW
 
    !> Event for post-processing
-   type(event) :: ppevt
-
-   !> Stencil and for setting QUICK scheme
-   integer :: qnst,qstp1,qstp2,qstm1,qstm2           
+   type(event) :: ppevt    
 
    !> BQUICK scheme parameters
    real(WP) :: SCmax,SCmin
@@ -123,13 +118,14 @@ contains
          allocate(SR   (6,  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradu(3,3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          ! Scalar solver
-         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
+         allocate(SC_  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bounds
       end block allocate_work_arrays
       
 
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
-         time=timetracker(amRoot=cfg%amRoot)
+         time=timetracker(amRoot=cfg%amRoot,name='Channel Flow')
          call param_read('Max timestep size',time%dtmax)
          call param_read('Max cfl number',time%cflmax)
          time%dt=time%dtmax
@@ -184,22 +180,14 @@ contains
 
       ! Create a scalar solver with a BQUICK scheme to solve for tensor components
       create_scalar: block
-         use ils_class,  only: pcg_pfmg
+         use ils_class,  only: gmres_amg
          use scalar_class, only: bquick
          real(WP) :: diffusivity
          ! Create scalar solver
-         sc=scalar(cfg=cfg,scheme=bquick,name='C tensor components')
+         sc=multiscalar(cfg=cfg,scheme=bquick,nscalar=6,name='C tensor components')
          ! Max and min scalar bounds for BQUICK scehem
          call param_read('Scalar upper bound',SCmax)
          call param_read('Scalar lower bound',SCmin)
-         ! Store stencil for reseting to QUICK scheme
-         qnst=sc%nst
-         qstp1=sc%stp1; qstp2=sc%stp2
-         qstm1=sc%stm1; qstm2=sc%stm2
-         ! Store metrics for reseting to QUICK scheme
-         qitpsc_xp=sc%itpsc_xp; qitpsc_xm=sc%itpsc_xm
-         qitpsc_yp=sc%itpsc_yp; qitpsc_ym=sc%itpsc_ym
-         qitpsc_zp=sc%itpsc_zp; qitpsc_zm=sc%itpsc_zm
          ! Assign constant diffusivity
          call param_read('Dynamic diffusivity',diffusivity)
          sc%diff=diffusivity
@@ -208,11 +196,26 @@ contains
          ! Configure implicit scalar solver
          sc%implicit%maxit=fs%implicit%maxit; sc%implicit%rcvg=fs%implicit%rcvg
          ! Setup the solver
-         call sc%setup(implicit_ils=pcg_pfmg)
+         call sc%setup(implicit_ils=gmres_amg)
       end block create_scalar
 
-      initialize_scalar: block
-      end block initialize_scalar
+      ! initialize_scalar: block
+      !    ! integer :: i,j,k
+      !    ! Set zero components for 2D channel flow
+      !    sc%SC(:,:,:,1)=1.00_WP
+      !    sc%SC(:,:,:,2)=1.00_WP
+      !    sc%SC(:,:,:,3)=0.00_WP ! C13/31 and T13/31
+      !    sc%SC(:,:,:,4)=0.00_WP ! C22 and T22
+      !    sc%SC(:,:,:,5)=0.00_WP ! C23/32 and T23/32
+      !    sc%SC(:,:,:,6)=0.00_WP ! C33 and T33
+      !    ! do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+      !    !    do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+      !    !       do i=fs%cfg%imino_,fs%cfg%imaxo_
+               
+      !    !       end do
+      !    !    end do
+      !    ! end do
+      ! end block initialize_scalar
 
       ! Create a fene model solver
       create_fene_model: block
@@ -239,7 +242,6 @@ contains
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
-      
       
       ! Create a monitor file
       create_monitor: block
@@ -280,7 +282,6 @@ contains
          call forcefile%write()
       end block create_monitor
       
-      
       ! Create a specialized post-processing file
       create_postproc: block
          ! Create event for data postprocessing
@@ -289,7 +290,7 @@ contains
          ! Perform the output
          if (ppevt%occurs()) call postproc_vel()
       end block create_postproc
-      
+
    end subroutine simulation_init
    
    
@@ -326,13 +327,8 @@ contains
          !    call fs%cfg%sync(fs%visc)
          ! end block nonewt
 
-         ! Remember old conformation tensor
-         fm%C(:,:,:,1)=fm%Cold(:,:,:,1) ! C11
-         fm%C(:,:,:,2)=fm%Cold(:,:,:,2) ! C21/C12
-         fm%C(:,:,:,3)=fm%Cold(:,:,:,3) ! C31/C13
-         fm%C(:,:,:,4)=fm%Cold(:,:,:,4) ! C22
-         fm%C(:,:,:,5)=fm%Cold(:,:,:,5) ! C23/C32
-         fm%C(:,:,:,6)=fm%Cold(:,:,:,6) ! C33
+         ! Remember old scalars
+         sc%SCold=sc%SC
 
          ! Remember old velocity
          fs%Uold=fs%U
@@ -342,74 +338,61 @@ contains
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
 
-            ! Form velocity gradient
-            call fs%get_gradu(gradu)
-
-            ! solve for nth component of conformation tensor
-            scalar_solver: block
-               use scalar_class, only: upwind
-               integer :: n,i,j,k
-               do n=1,fm%Celem
-                  ! Reset stencil to QUICK scheme
-                  sc%nst=qnst
-                  sc%stp1=qstp1; sc%stp2=qstp2
-                  sc%stm1=qstm1; sc%stm2=qstm2
-                  ! Reset metric to QUICK scheme
-                  sc%itpsc_xp=qitpsc_xp; sc%itpsc_xm=qitpsc_xm
-                  sc%itpsc_yp=qitpsc_yp; sc%itpsc_ym=qitpsc_ym
-                  sc%itpsc_zp=qitpsc_zp; sc%itpsc_zm=qitpsc_zm
-                  ! Set SC array for nth element of conformation tensor
-                  sc%SC=fm%C(:,:,:,n); sc%SCold=fm%Cold(:,:,:,n)
-                  ! Store SC array to be used for  1st order upwind scheme (when needed)
-                  sc%SClocal=sc%SC                
-                  ! Build mid-time scalar
-                  sc%SC=0.5_WP*(sc%SC+sc%SCold)
-                  ! Explicit calculation of drhoSC/dt from scalar equation
-                  call sc%get_drhoSCdt(resSC,resU,resV,resW)
-                  ! Assemble explicit residuals (using QUICK scheme)
-                  resSC=-2.0_WP*(sc%rho*sc%SC-sc%rho*sc%SCold)+time%dt*resSC
-                  ! Evaluate boundedness of SC and adjust to 1st upwind scheme when necessary
+            ! ============= SCALAR SOLVER =======================
+            ! Reset interpolation metrics to QUICK scheme
+            call sc%metric_reset()
+            ! Build mid-time scalar
+            sc%SC=0.5_WP*(sc%SC+sc%SCold)
+            ! Calculate explicit SC prior to checking bounds
+            pre_check: block
+               ! Explicit calculation of resSC from scalar equation
+               call sc%get_drhoSCdt(resSC,resU,resV,resW)
+               ! Assemble explicit residual
+               resSC=time%dt*resSC-(2.0_WP*sc%rho*sc%SC-sc%rho*sc%SCold)
+               ! Apply this residual
+               SC_=2.0_WP*sc%SC-sc%SCold+resSC
+            end block pre_check
+            ! Check boundedess of explicit SC calculation
+            call sc%metric_modification(SC_,SCmin,SCmax)
+            ! Calculate explicit SC post checking bounds
+            post_check: block
+               ! Explicit calculation of resSC from scalar equation
+               call sc%get_drhoSCdt(resSC,resU,resV,resW)
+               ! Assemble explicit residual
+               resSC=time%dt*resSC-(2.0_WP*sc%rho*sc%SC-sc%rho*sc%SCold)
+               ! Apply this residual
+               SC_=2.0_WP*sc%SC-sc%SCold+resSC
+            end block post_check
+            ! Add FENE source terms
+            fene: block
+               integer :: i,j,k,isc
+               ! Form velocity gradient
+               call fs%get_gradu(gradu)
+               ! Calculate CgradU terms
+               call fm%get_CgradU(SC_,gradu)
+               ! Calculate T terms
+               call fm%get_stressTensor(SC_,We,Lmax)
+               ! Add source terms to calculated residual
+               do isc=1,fm%Celem
                   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
                      do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                         do i=fs%cfg%imino_,fs%cfg%imaxo_
-                           if (resSC(i,j,k).gt.SCmax.or.resSC(i,j,k).lt.SCmin) then
-                              ! Adjust interpolation metric for cell i,j,k to 1st order upwind
-                              call sc%local_metrics(upwind,i,j,k)
-                              ! Build mid-time scalar
-                              sc%SC(i,j,k)=0.5_WP*(sc%SClocal(i,j,k)+sc%SCold(i,j,k))
-                              ! Explicit calculation of drhoSC/dt from scalar equation
-                              call sc%get_drhoSCdt(resSC,resU,resV,resW,i,j,k)
-                              ! Assemble explicit residuals (using 1st order Upwind scheme)
-                              resSC(i,j,k)=-2.0_WP*(sc%rho*sc%SC(i,j,k)-sc%rho*sc%SCold(i,j,k))+time%dt*resSC(i,j,k)
-                           else 
-                              cycle ! Keep SC calculated from QUICK scheme
-                           end if
+                           resSC(i,j,k,isc)=resSC(i,j,k,isc)+fm%CgradU(i,j,k,isc)-fm%T(i,j,k,isc)
                         end do
                      end do
                   end do
-                  ! Sync explicit residuals
-                  call fs%cfg%sync(resSC)
-                  ! Calculate CgradU terms
-                  call fm%get_CgradU(n,gradu)
-                  ! Calculate T terms
-                  call fm%get_stressTensor(We,Lmax,n)
-                  ! Add source terms to calculated residual
-                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                        do i=fs%cfg%imino_,fs%cfg%imaxo_
-                           resSC(i,j,k)=resSC(i,j,k)+fm%CgradU(i,j,k,n)-fm%T(i,j,k,n)
-                        end do
-                     end do
-                  end do
-                  ! Form implicit residuals
-                  call sc%solve_implicit(time%dt,resSC,resU,resV,resW)
-                  ! Apply this residual
-                  sc%SC=2.0_WP*sc%SC-sc%SCold+resSC
-                  ! Update SC array for nth element of conformation tensor 
-                  fm%C(:,:,:,n)=sc%SC
                end do
-            end block scalar_solver
-            
+            end block fene
+            ! Form implicit residual
+            call sc%solve_implicit(time%dt,resSC,resU,resV,resW)
+
+            ! Apply this residual
+            sc%SC=2.0_WP*sc%SC-sc%SCold+resSC
+
+            ! Apply other boundary conditions on the resulting field
+            call sc%apply_bcond(time%t,time%dt)
+            ! ===================================================
+
             ! Build mid-time velocity
             fs%U=0.5_WP*(fs%U+fs%Uold)
             fs%V=0.5_WP*(fs%V+fs%Vold)
@@ -536,7 +519,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC,SC_)
       
    end subroutine simulation_final
    

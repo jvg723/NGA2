@@ -33,12 +33,12 @@ Implicit iteration : 100
 # FENE model properties
 FENE model tolerance               : 1e-6
 FENE model iteration               : 100
-Maximum extension of polymer chain : 1
-Weissenberg number                 : 1
+Maximum extension of polymer chain : 100
+Weissenberg number                 : 1.67
 
 # Scalar solver
-Scalar upper bound  : 2
-Scalar lower bound  : 1
+Scalar upper bound  : -200
+Scalar lower bound  : 2000
 Dynamic diffusivity : 0
 
 

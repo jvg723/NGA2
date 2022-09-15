@@ -20,12 +20,6 @@ module fene_class
       
       ! This is the name of the solver
       character(len=str_medium) :: name='UNNAMED_FENE'      !< Solver name (default=UNNAMED_FENE)
-      
-      ! fene conformation tensor variable
-      real(WP), dimension(:,:,:,:), allocatable :: C       !< C array
-      
-      ! Old fene conformation tensor variable
-      real(WP), dimension(:,:,:,:), allocatable :: Cold    !< Cold array
 
       ! Source term arrays
       real(WP), dimension(:,:,:,:), allocatable :: CgradU  !< Sum of CdotU and (CdotU)T
@@ -78,8 +72,6 @@ contains
       self%cfg=>cfg
       
       ! Allocate variables
-      allocate(self%C     (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%Celem)); self%C     =0.0_WP
-      allocate(self%Cold  (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%Celem)); self%Cold  =0.0_WP
       allocate(self%CgradU(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%Celem)); self%CgradU=0.0_WP
       allocate(self%T     (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%Celem)); self%T     =0.0_WP
       allocate(self%divT  (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,3         )); self%divT  =0.0_WP
@@ -184,45 +176,43 @@ contains
    end subroutine setup
 
    !> Calculate component of tensor for (c*graduT)+(C*gradu)^T
-   subroutine get_CgradU(this,n,gradu)
+   subroutine get_CgradU(this,C,gradu)
       implicit none
       class(fene), intent(inout) :: this
-      integer, intent(in) :: n
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:   ), intent(in) :: C
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradu
       integer :: i,j,k
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               ! Check n value for tensor location and calculate corresponding entry
-               if (n.eq.1) then      ! 11 tensor component
-                  this%CgradU(i,j,k,n)=2.00_WP*(this%C(i,j,k,1)*gradu(1,1,i,j,k)+this%C(i,j,k,2)*gradu(1,2,i,j,k)+this%C(i,j,k,3)*gradu(1,3,i,j,k))
-               else if (n.eq.2) then ! 21/12 tensor component
-                  this%CgradU(i,j,k,n)=(this%C(i,j,k,2)*gradu(1,1,i,j,k)+this%C(i,j,k,4)*gradu(1,2,i,j,k)+this%C(i,j,k,5)*gradu(1,3,i,j,k))+&
-                  &                    (this%C(i,j,k,1)*gradu(2,1,i,j,k)+this%C(i,j,k,2)*gradu(2,2,i,j,k)+this%C(i,j,k,3)*gradu(2,3,i,j,k))
-               else if (n.eq.3) then ! 31/13 tensor component
-                  this%CgradU(i,j,k,n)=(this%C(i,j,k,3)*gradu(1,1,i,j,k)+this%C(i,j,k,5)*gradu(1,2,i,j,k)+this%C(i,j,k,6)*gradu(1,3,i,j,k))+&
-                  &                    (this%C(i,j,k,1)*gradu(3,1,i,j,k)+this%C(i,j,k,2)*gradu(3,2,i,j,k)+this%C(i,j,k,3)*gradu(3,3,i,j,k))
-               else if (n.eq.4) then ! 22 tensor component
-                  this%CgradU(i,j,k,n)=2.00_WP*(this%C(i,j,k,2)*gradu(2,1,i,j,k)+this%C(i,j,k,4)*gradu(2,2,i,j,k)+this%C(i,j,k,5)*gradu(3,3,i,j,k))
-               else if (n.eq.5) then ! 32/23 tensor component
-                  this%CgradU(i,j,k,n)=(this%C(i,j,k,2)*gradu(3,1,i,j,k)+this%C(i,j,k,4)*gradu(3,2,i,j,k)+this%C(i,j,k,5)*gradu(3,3,i,j,k))+&
-                  &                    (this%C(i,j,k,3)*gradu(2,1,i,j,k)+this%C(i,j,k,5)*gradu(2,2,i,j,k)+this%C(i,j,k,6)*gradu(2,3,i,j,k))
-               else if (n.eq.6) then ! 33 tensor component
-                  this%CgradU(i,j,k,n)=2.00_WP*(this%C(i,j,k,3)*gradu(3,1,i,j,k)+this%C(i,j,k,5)*gradu(3,2,i,j,k)+this%C(i,j,k,6)*gradu(3,3,i,j,k))
-               end if
+               ! 11 tensor component
+               this%CgradU(i,j,k,1)=2.00_WP*(C(i,j,k,1)*gradu(1,1,i,j,k)+C(i,j,k,2)*gradu(1,2,i,j,k)+C(i,j,k,3)*gradu(1,3,i,j,k))
+               ! 21/12 tensor component
+               this%CgradU(i,j,k,2)=(C(i,j,k,2)*gradu(1,1,i,j,k)+C(i,j,k,4)*gradu(1,2,i,j,k)+C(i,j,k,5)*gradu(1,3,i,j,k))+&
+               &                    (C(i,j,k,1)*gradu(2,1,i,j,k)+C(i,j,k,2)*gradu(2,2,i,j,k)+C(i,j,k,3)*gradu(2,3,i,j,k))
+               ! 31/13 tensor component
+               this%CgradU(i,j,k,3)=(C(i,j,k,3)*gradu(1,1,i,j,k)+C(i,j,k,5)*gradu(1,2,i,j,k)+C(i,j,k,6)*gradu(1,3,i,j,k))+&
+               &                    (C(i,j,k,1)*gradu(3,1,i,j,k)+C(i,j,k,2)*gradu(3,2,i,j,k)+C(i,j,k,3)*gradu(3,3,i,j,k))
+               ! 22 tensor component
+               this%CgradU(i,j,k,4)=2.00_WP*(C(i,j,k,2)*gradu(2,1,i,j,k)+C(i,j,k,4)*gradu(2,2,i,j,k)+C(i,j,k,5)*gradu(3,3,i,j,k))
+               ! 32/23 tensor component
+               this%CgradU(i,j,k,5)=(C(i,j,k,2)*gradu(3,1,i,j,k)+C(i,j,k,4)*gradu(3,2,i,j,k)+C(i,j,k,5)*gradu(3,3,i,j,k))+&
+               &                    (C(i,j,k,3)*gradu(2,1,i,j,k)+C(i,j,k,5)*gradu(2,2,i,j,k)+C(i,j,k,6)*gradu(2,3,i,j,k))
+               ! 33 tensor component
+               this%CgradU(i,j,k,6)=2.00_WP*(C(i,j,k,3)*gradu(3,1,i,j,k)+C(i,j,k,5)*gradu(3,2,i,j,k)+C(i,j,k,6)*gradu(3,3,i,j,k))
             end do
          end do
       end do
       ! Sync it
-      call this%cfg%sync(this%CgradU)
+      call this%cfg%pgrid_rsync_right_array(this%CgradU)
    end subroutine get_CgradU
 
    !> Calculate the viscoelastic stress tensor
-   subroutine get_stressTensor(this,We,Lmax,n)
+   subroutine get_stressTensor(this,C,We,Lmax)
       implicit none
       class(fene), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(in) :: C
       real(WP), intent(in) :: Lmax,We
-      integer, intent(in)  :: n
       real(WP) :: a,psi
       integer :: i,j,k
       ! a parameter
@@ -231,26 +221,24 @@ contains
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
                ! psi parameter
-               psi=1.00_WP-(this%C(i,j,k,1)+this%C(i,j,k,2)+this%C(i,j,k,6))/(Lmax**2)
-               ! Check n value for tensor location and calculate corresponding entry
-               if (n.eq.1) then      ! 11 tensor component
-                  this%T(i,j,k,n)=this%C(i,j,k,1)/psi-1.00_WP/a
-               else if (n.eq.2) then ! 21/12 tensor component
-                  this%T(i,j,k,n)=this%C(i,j,k,2)/psi-0.00_WP/a
-               else if (n.eq.3) then ! 31/13 tensor component
-                  this%T(i,j,k,n)=this%C(i,j,k,3)/psi-0.00_WP/a
-               else if (n.eq.4) then ! 22 tensor component
-                  this%T(i,j,k,n)=this%C(i,j,k,4)/psi-1.00_WP/a
-               else if (n.eq.5) then ! 32/23 tensor component
-                  this%T(i,j,k,n)=this%C(i,j,k,5)/psi-0.00_WP/a
-               else if (n.eq.6) then ! 33 tensor component
-                  this%T(i,j,k,n)=this%C(i,j,k,6)/psi-1.00_WP/a
-               end if   
+               psi=1.00_WP-(C(i,j,k,1)+C(i,j,k,2)+C(i,j,k,6))/(Lmax**2)
+               ! 11 tensor component
+               this%T(i,j,k,1)=C(i,j,k,1)/psi-1.00_WP/a
+               ! 21/12 tensor component
+               this%T(i,j,k,2)=C(i,j,k,2)/psi-0.00_WP/a
+               ! 31/13 tensor component
+               this%T(i,j,k,3)=C(i,j,k,3)/psi-0.00_WP/a
+               ! 22 tensor component
+               this%T(i,j,k,4)=C(i,j,k,4)/psi-1.00_WP/a
+               ! 32/23 tensor component
+               this%T(i,j,k,5)=C(i,j,k,5)/psi-0.00_WP/a
+               ! 33 tensor component
+               this%T(i,j,k,6)=C(i,j,k,6)/psi-1.00_WP/a 
             end do
          end do
       end do
       ! Sync it
-      call this%cfg%sync(this%T)
+      call this%cfg%pgrid_rsync_right_array(this%T)
    end subroutine get_stressTensor
    
 
@@ -275,7 +263,7 @@ contains
          end do
       end do
       ! Sync it
-      call this%cfg%sync(this%divT)
+      call this%cfg%pgrid_rsync_right_array(this%divT)
    end subroutine get_divT
    
    
