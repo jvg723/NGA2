@@ -19,7 +19,7 @@ module scalar_class
    
    ! List of available advection schemes for scalar transport
    integer, parameter, public :: upwind=0            !< First order upwind scheme
-   integer, parameter, public :: quick=1             !< Quick scheme
+   integer, parameter, public :: quick =1            !< Quick scheme
    integer, parameter, public :: bquick=2            !< BQuick scheme
    
    
@@ -74,7 +74,7 @@ module scalar_class
       real(WP), dimension(:,:,:,:), allocatable :: itp_x ,itp_y ,itp_z   !< Second order interpolation for SC diffusivity
       
       ! Bquick requires additional storage
-	  real(WP), dimension(:,:,:,:), allocatable :: bitp_xp,bitp_yp,bitp_zp  !< Plus interpolation for SC  - backup
+	   real(WP), dimension(:,:,:,:), allocatable :: bitp_xp,bitp_yp,bitp_zp  !< Plus interpolation for SC  - backup
       real(WP), dimension(:,:,:,:), allocatable :: bitp_xm,bitp_ym,bitp_zm  !< Minus interpolation for SC - backup
 
       ! Masking info for metric modification
@@ -91,8 +91,8 @@ module scalar_class
       procedure :: apply_bcond                            !< Apply all boundary conditions
       procedure :: init_metrics                           !< Initialize metrics
       procedure :: adjust_metrics                         !< Adjust metrics
-	  procedure :: metric_reset                           !< Reset adaptive metrics like bquick
-	  procedure :: metric_adjust                          !< Adjust adaptive metrics like bquick
+	   procedure :: metric_reset                           !< Reset adaptive metrics like bquick
+	   procedure :: metric_modification                    !< Modify adaptive metrics like bquick
       procedure :: get_drhoSCdt                           !< Calculate drhoSC/dt
       procedure :: get_max                                !< Calculate maximum field values
       procedure :: get_int                                !< Calculate integral field values
@@ -224,10 +224,10 @@ contains
       allocate(this%itp_zm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
       ! Create scalar interpolation coefficients to cell faces
       select case (this%scheme)
-	  case (upwind)
-		 this%itp_xp=1.0_WP; this%itp_xm=1.0_WP
-		 this%itp_yp=1.0_WP; this%itp_ym=1.0_WP
-		 this%itp_zp=1.0_WP; this%itp_zm=1.0_WP
+	   case (upwind)
+		   this%itp_xp=1.0_WP; this%itp_xm=1.0_WP
+		   this%itp_yp=1.0_WP; this%itp_ym=1.0_WP
+		   this%itp_zp=1.0_WP; this%itp_zm=1.0_WP
       case (quick,bquick)
          do k=this%cfg%kmin_,this%cfg%kmax_+1
             do j=this%cfg%jmin_,this%cfg%jmax_+1
@@ -707,8 +707,8 @@ contains
    end subroutine metric_reset
 
 
-   !> Adjust adaptive metrics like bquick
-   subroutine metric_adjust(this,SC,SCmin,SCmax)
+   !> Modify adaptive metrics like bquick
+   subroutine metric_modification(this,SC,SCmin,SCmax)
 	  implicit none
 	  class(scalar), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: SC !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
@@ -716,18 +716,24 @@ contains
 	  real(WP), optional :: SCmax
 	  integer :: i,j,k
 	  select case (this%scheme)
-	  case (bquick)
+	  case (bquick) ! Modifys metrics to first order upwind
 	     if (present(SCmin)) then
 		    do k=this%cfg%kmin_,this%cfg%kmax_+1
 		       do j=this%cfg%jmin_,this%cfg%jmax_+1
 			      do i=this%cfg%imin_,this%cfg%imax_+1
 			         if (SC(i,j,k).lt.SCmin) then
-					    !this%itp_xp(i:i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        !this%itp_xm(i:i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        !this%itp_yp(i,j:j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        !this%itp_ym(i,j:j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        !this%itp_zp(i,j,k:k+1)=[0.0_WP,1.0_WP,0.0_WP]
-                        !this%itp_zm(i,j,k:k+1)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xp(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xp(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xm(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xm(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_yp(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_yp(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_ym(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_ym(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zp(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zp(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zm(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zm(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
 					 end if
 			      end do
 			   end do
@@ -737,20 +743,26 @@ contains
 	        do k=this%cfg%kmin_,this%cfg%kmax_+1
 		       do j=this%cfg%jmin_,this%cfg%jmax_+1
 			      do i=this%cfg%imin_,this%cfg%imax_+1
-				     if (SC(i,j,k).gt.SCmax) then
-				        !this%itp_xp(i:i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-					    !this%itp_xm(i:i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-					    !this%itp_yp(i,j:j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-					    !this%itp_ym(i,j:j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-					    !this%itp_zp(i,j,k:k+1)=[0.0_WP,1.0_WP,0.0_WP]
-					    !this%itp_zm(i,j,k:k+1)=[0.0_WP,1.0_WP,0.0_WP]
-				     end if
+				      if (SC(i,j,k).gt.SCmax) then
+                     this%itp_xp(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xp(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xm(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xm(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_yp(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_yp(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_ym(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_ym(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zp(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zp(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zm(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zm(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
+				      end if
 			      end do
 		       end do
 		    end do
 	     end if
 	  end select
-   end subroutine metric_adjust
+   end subroutine metric_modification
 
    
    !> Print out info for scalar solver
