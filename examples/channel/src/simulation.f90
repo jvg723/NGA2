@@ -47,7 +47,7 @@ module simulation
    real(WP) :: SCmax,SCmin
    
    !> FENE model parameters
-   real(WP) :: Lmax,We
+   real(WP) :: Lmax,We,Re,Beta
    
 contains
    
@@ -180,8 +180,8 @@ contains
 
       ! Create a scalar solver with a BQUICK scheme to solve for tensor components
       create_scalar: block
-         use ils_class,  only: gmres_amg
-         use scalar_class, only: bquick
+         use ils_class,  only: gmres_amg,pcg_amg 
+         use multiscalar_class, only: bquick
          real(WP) :: diffusivity
          ! Create scalar solver
          sc=multiscalar(cfg=cfg,scheme=bquick,nscalar=6,name='C tensor components')
@@ -196,25 +196,32 @@ contains
          ! Configure implicit scalar solver
          sc%implicit%maxit=fs%implicit%maxit; sc%implicit%rcvg=fs%implicit%rcvg
          ! Setup the solver
-         call sc%setup(implicit_ils=gmres_amg)
+         call sc%setup(implicit_ils=pcg_amg)
       end block create_scalar
 
       ! initialize_scalar: block
-      !    ! integer :: i,j,k
-      !    ! Set zero components for 2D channel flow
-      !    sc%SC(:,:,:,1)=1.00_WP
-      !    sc%SC(:,:,:,2)=1.00_WP
-      !    sc%SC(:,:,:,3)=0.00_WP ! C13/31 and T13/31
-      !    sc%SC(:,:,:,4)=0.00_WP ! C22 and T22
-      !    sc%SC(:,:,:,5)=0.00_WP ! C23/32 and T23/32
-      !    sc%SC(:,:,:,6)=0.00_WP ! C33 and T33
-      !    ! do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-      !    !    do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-      !    !       do i=fs%cfg%imino_,fs%cfg%imaxo_
-               
-      !    !       end do
-      !    !    end do
-      !    ! end do
+      !    real(WP) :: a,psi
+      !    integer :: i,j,k
+      !    sc%SC(:,:,:,1)=100.00_WP
+      !    sc%SC(:,:,:,2)=10.00_WP
+      !    ! a parameter
+      !    a=1.00_WP-3.00_WP/(Lmax**2)
+      !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+      !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+      !          do i=fs%cfg%imin_,fs%cfg%imax_
+      !             ! psi parameter
+      !             psi=1.00_WP-(660.00_WP)/(Lmax**2)
+      !             ! C13/31 and T13/31
+      !             sc%SC(i,j,k,3)=0.00_WP 
+      !             ! C22 and T22
+      !             sc%SC(i,j,k,4)=psi/a 
+      !             ! C23/32 and T23/32
+      !             sc%SC(i,j,k,5)=0.00_WP 
+      !             ! C33 and T33
+      !             sc%SC(i,j,k,6)=psi/a 
+      !          end do
+      !       end do
+      !    end do
       ! end block initialize_scalar
 
       ! Create a fene model solver
@@ -223,6 +230,12 @@ contains
          call param_read('Maximum extension of polymer chain',Lmax)
          ! Weissenberg number for polymer
          call param_read('Weissenberg number',We)
+         ! Reynolds Number
+         call param_read('Reynolds number',Re)
+         ! Solvent/Polymer viscosity Ratio
+         call param_read('Beta',Beta)
+         ! Set flow solver visc to Beta/Re
+         fs%visc=Beta/Re
          ! Create FENE model solver 
          fm=fene(cfg=cfg, name= 'fene model solver')
          ! Setup the solvers
@@ -341,8 +354,10 @@ contains
             ! ============= SCALAR SOLVER =======================
             ! Reset interpolation metrics to QUICK scheme
             call sc%metric_reset()
+            
             ! Build mid-time scalar
             sc%SC=0.5_WP*(sc%SC+sc%SCold)
+            
             ! Calculate explicit SC prior to checking bounds
             pre_check: block
                ! Explicit calculation of resSC from scalar equation
@@ -352,8 +367,10 @@ contains
                ! Apply this residual
                SC_=2.0_WP*sc%SC-sc%SCold+resSC
             end block pre_check
+            
             ! Check boundedess of explicit SC calculation
             call sc%metric_modification(SC_,SCmin,SCmax)
+            
             ! Calculate explicit SC post checking bounds
             post_check: block
                ! Explicit calculation of resSC from scalar equation
@@ -363,6 +380,7 @@ contains
                ! Apply this residual
                SC_=2.0_WP*sc%SC-sc%SCold+resSC
             end block post_check
+            
             ! Add FENE source terms
             fene: block
                integer :: i,j,k,isc
@@ -383,6 +401,7 @@ contains
                   end do
                end do
             end block fene
+            
             ! Form implicit residual
             call sc%solve_implicit(time%dt,resSC,resU,resV,resW)
 
@@ -443,13 +462,13 @@ contains
                   do j=fs%cfg%jmin_,fs%cfg%jmax_
                      do i=fs%cfg%imin_,fs%cfg%imax_
                         if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-                           resU(i,j,k)=resU(i,j,k)+fm%divT(i,j,k,1)
+                           resU(i,j,k)=resU(i,j,k)+((1.00_WP-Beta)/Re)*fm%divT(i,j,k,1)
                         end if
-                        if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-                           resV(i,j,k)=resV(i,j,k)+fm%divT(i,j,k,2)
-                        end if
+                        ! if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
+                        !    resV(i,j,k)=resV(i,j,k)+((1.00_WP-Beta)/Re)*fm%divT(i,j,k,2)
+                        ! end if
                         if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-                           resW(i,j,k)=resW(i,j,k)+fm%divT(i,j,k,3)
+                           resW(i,j,k)=resW(i,j,k)+((1.00_WP-Beta)/Re)*fm%divT(i,j,k,3)
                         end if
                      end do
                   end do

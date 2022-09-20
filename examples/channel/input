@@ -5,8 +5,8 @@ Partition :	1 1 1
 Lx :	5
 Ly :	1
 Lz :	0.04
-nx :	512
-ny :	160
+nx :	128
+ny :	40
 nz :	1
 Stretching : 2.1
 
@@ -34,18 +34,14 @@ Implicit iteration : 100
 FENE model tolerance               : 1e-6
 FENE model iteration               : 100
 Maximum extension of polymer chain : 100
-Weissenberg number                 : 1.67
+Weissenberg number                 : 3.5
+Reynolds number                    : 100
+Beta                               : 0.9
 
 # Scalar solver
-Scalar upper bound  : -200
-Scalar lower bound  : 2000
+Scalar upper bound  : -15
+Scalar lower bound  : 1000
 Dynamic diffusivity : 0
-
-
-# Tensor maximum and minimum magnitudes
-Maximum magnitude : 2
-Minimum magnitude : 1
-
 
 # Ensight output
 Ensight output period :  1e-1

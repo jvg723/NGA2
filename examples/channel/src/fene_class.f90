@@ -175,7 +175,7 @@ contains
       
    end subroutine setup
 
-   !> Calculate component of tensor for (c*graduT)+(C*gradu)^T
+   !> Calculate components of tensor (c*graduT)+(C*gradu)^T
    subroutine get_CgradU(this,C,gradu)
       implicit none
       class(fene), intent(inout) :: this
@@ -194,7 +194,7 @@ contains
                this%CgradU(i,j,k,3)=(C(i,j,k,3)*gradu(1,1,i,j,k)+C(i,j,k,5)*gradu(1,2,i,j,k)+C(i,j,k,6)*gradu(1,3,i,j,k))+&
                &                    (C(i,j,k,1)*gradu(3,1,i,j,k)+C(i,j,k,2)*gradu(3,2,i,j,k)+C(i,j,k,3)*gradu(3,3,i,j,k))
                ! 22 tensor component
-               this%CgradU(i,j,k,4)=2.00_WP*(C(i,j,k,2)*gradu(2,1,i,j,k)+C(i,j,k,4)*gradu(2,2,i,j,k)+C(i,j,k,5)*gradu(3,3,i,j,k))
+               this%CgradU(i,j,k,4)=2.00_WP*(C(i,j,k,2)*gradu(2,1,i,j,k)+C(i,j,k,4)*gradu(2,2,i,j,k)+C(i,j,k,5)*gradu(2,3,i,j,k))
                ! 32/23 tensor component
                this%CgradU(i,j,k,5)=(C(i,j,k,2)*gradu(3,1,i,j,k)+C(i,j,k,4)*gradu(3,2,i,j,k)+C(i,j,k,5)*gradu(3,3,i,j,k))+&
                &                    (C(i,j,k,3)*gradu(2,1,i,j,k)+C(i,j,k,5)*gradu(2,2,i,j,k)+C(i,j,k,6)*gradu(2,3,i,j,k))
@@ -223,17 +223,17 @@ contains
                ! psi parameter
                psi=1.00_WP-(C(i,j,k,1)+C(i,j,k,2)+C(i,j,k,6))/(Lmax**2)
                ! 11 tensor component
-               this%T(i,j,k,1)=C(i,j,k,1)/psi-1.00_WP/a
+               this%T(i,j,k,1)=(1.00_WP/We)*C(i,j,k,1)/psi-1.00_WP/a
                ! 21/12 tensor component
-               this%T(i,j,k,2)=C(i,j,k,2)/psi-0.00_WP/a
+               this%T(i,j,k,2)=(1.00_WP/We)*C(i,j,k,2)/psi-0.00_WP/a
                ! 31/13 tensor component
-               this%T(i,j,k,3)=C(i,j,k,3)/psi-0.00_WP/a
+               this%T(i,j,k,3)=(1.00_WP/We)*C(i,j,k,3)/psi-0.00_WP/a
                ! 22 tensor component
-               this%T(i,j,k,4)=C(i,j,k,4)/psi-1.00_WP/a
+               this%T(i,j,k,4)=(1.00_WP/We)*C(i,j,k,4)/psi-1.00_WP/a
                ! 32/23 tensor component
-               this%T(i,j,k,5)=C(i,j,k,5)/psi-0.00_WP/a
+               this%T(i,j,k,5)=(1.00_WP/We)*C(i,j,k,5)/psi-0.00_WP/a
                ! 33 tensor component
-               this%T(i,j,k,6)=C(i,j,k,6)/psi-1.00_WP/a 
+               this%T(i,j,k,6)=(1.00_WP/We)*C(i,j,k,6)/psi-1.00_WP/a 
             end do
          end do
       end do
