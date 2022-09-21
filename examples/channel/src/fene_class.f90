@@ -79,7 +79,7 @@ contains
       ! Prepare default metrics
       call self%init_metrics()
       
-      ! Prepare mask for C
+      ! Prepare mask for T
       allocate(self%mask(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%mask=0
       if (.not.self%cfg%xper) then
          if (self%cfg%iproc.eq.           1) self%mask(:self%cfg%imin-1,:,:)=2

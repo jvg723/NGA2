@@ -306,6 +306,12 @@ contains
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('viscosity',fs%visc)
+         call ens_out%add_scalar('C11',sc%SC(:,:,:,1))
+         call ens_out%add_scalar('C21',sc%SC(:,:,:,2))
+         call ens_out%add_scalar('C31',sc%SC(:,:,:,3))
+         call ens_out%add_scalar('C22',sc%SC(:,:,:,4))
+         call ens_out%add_scalar('C32',sc%SC(:,:,:,5))
+         call ens_out%add_scalar('C33',sc%SC(:,:,:,6))
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
