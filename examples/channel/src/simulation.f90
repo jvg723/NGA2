@@ -99,6 +99,60 @@ contains
       ! Deallocate work arrays
       deallocate(Uavg,Uavg_,vol,vol_)
    end subroutine postproc_vel
+
+   !> Specialized subroutine that outputs the velocity distribution
+   subroutine postproc_ct()
+      use string,    only: str_medium
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
+      use parallel,  only: MPI_REAL_WP
+      implicit none
+      integer :: iunit,ierr,i,j,k
+      real(WP), dimension(:), allocatable :: trCavg,trCavg_,Cxyavg,Cxyavg_,vol,vol_
+      character(len=str_medium) :: filename,timestamp
+      ! Allocate vertical line storage
+      allocate(trCavg (fs%cfg%jmin:fs%cfg%jmax)); trCavg =0.0_WP
+      allocate(trCavg_(fs%cfg%jmin:fs%cfg%jmax)); trCavg_=0.0_WP
+      allocate(Cxyavg (fs%cfg%jmin:fs%cfg%jmax)); Cxyavg =0.0_WP
+      allocate(Cxyavg_(fs%cfg%jmin:fs%cfg%jmax)); Cxyavg_=0.0_WP
+      allocate(vol_   (fs%cfg%jmin:fs%cfg%jmax)); vol_   =0.0_WP
+      allocate(vol    (fs%cfg%jmin:fs%cfg%jmax)); vol    =0.0_WP
+      ! Integrate all data over x and z
+      do k=fs%cfg%kmin_,fs%cfg%kmax_
+         do j=fs%cfg%jmin_,fs%cfg%jmax_
+            do i=fs%cfg%imin_,fs%cfg%imax_
+               vol_(j)   =vol_(j)+fs%cfg%vol(i,j,k)
+               Cxyavg_(j)=Cxyavg_(j)+fs%cfg%vol(i,j,k)*sc%SC(i,j,k,2)
+               trCavg_(j)=trCavg_(j)+fs%cfg%vol(i,j,k)*(sc%SC(i,j,k,1)+sc%SC(i,j,k,4)+sc%SC(i,j,k,6))
+            end do
+         end do
+      end do
+      ! All-reduce the data
+      call MPI_ALLREDUCE(vol_   ,vol   ,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Cxyavg_,Cxyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(trCavg_,trCavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      do j=fs%cfg%jmin,fs%cfg%jmax
+         if (vol(j).gt.0.0_WP) then
+            Cxyavg(j)=Cxyavg(j)/vol(j)
+            trCavg(j)=trCavg(j)/vol(j)
+         else
+            Cxyavg(j)=0.0_WP
+            trCavg(j)=0.0_WP
+         end if
+      end do
+      ! If root, print it out
+      if (fs%cfg%amRoot) then
+         filename='CTavg_'
+         write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12)') 'Height','Cxyavg','trCavg'
+         do j=fs%cfg%jmin,fs%cfg%jmax
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Cxyavg(j),trCavg(j)
+         end do
+         close(iunit)
+      end if
+      ! Deallocate work arrays
+      deallocate(Cxyavg,Cxyavg_,trCavg,trCavg_,vol,vol_)
+   end subroutine postproc_ct
    
    
    !> Initialization of problem solver
@@ -302,6 +356,7 @@ contains
          call param_read('Postproc output period',ppevt%tper)
          ! Perform the output
          if (ppevt%occurs()) call postproc_vel()
+         if (ppevt%occurs()) call postproc_ct()
       end block create_postproc
 
    end subroutine simulation_init
@@ -521,6 +576,7 @@ contains
 
          ! Specialized post-processing
          if (ppevt%occurs()) call postproc_vel()
+         if (ppevt%occurs()) call postproc_ct()
 
       end do
       
