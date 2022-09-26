@@ -716,52 +716,48 @@ contains
 	  real(WP), optional :: SCmax
 	  integer :: i,j,k
 	  select case (this%scheme)
-	  case (bquick) ! Modifys metrics to first order upwind
-	     if (present(SCmin)) then
-		    do k=this%cfg%kmin_,this%cfg%kmax_+1
-		       do j=this%cfg%jmin_,this%cfg%jmax_+1
-			      do i=this%cfg%imin_,this%cfg%imax_+1
-			         if (SC(i,j,k).lt.SCmin) then
-                     this%itp_xp(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_xp(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_xm(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_xm(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_yp(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_yp(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_ym(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_ym(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zp(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zp(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zm(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zm(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
-					 end if
-			      end do
-			   end do
-		    end do
-	     end if
+	  	case (bquick) ! Modifys metrics to first order upwind
+         if (present(SCmin)) then
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     if (minval(SC(i-1:i,j,k)).lt.SCmin) then
+                        this%itp_xp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                        this%itp_xm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     end if
+                     if (minval(SC(i,j-1:j,k)).lt.SCmin) then
+                        this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                        this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     end if
+                     if (minval(SC(i,j,k-1:k)).lt.SCmin) then
+                        this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                        this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     end if
+                  end do
+               end do
+            end do
+         end if
          if (present(SCmax)) then
-	        do k=this%cfg%kmin_,this%cfg%kmax_+1
-		       do j=this%cfg%jmin_,this%cfg%jmax_+1
-			      do i=this%cfg%imin_,this%cfg%imax_+1
-				      if (SC(i,j,k).gt.SCmax) then
-                     this%itp_xp(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_xp(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_xm(:,i  ,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_xm(:,i+1,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_yp(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_yp(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_ym(:,i,j  ,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_ym(:,i,j+1,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zp(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zp(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zm(:,i,j,k  )=[0.0_WP,1.0_WP,0.0_WP]
-                     this%itp_zm(:,i,j,k+1)=[0.0_WP,1.0_WP,0.0_WP]
-				      end if
-			      end do
-		       end do
-		    end do
-	     end if
-	  end select
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     if (maxval(SC(i-1:i,j,k)).gt.SCmax) then
+                        this%itp_xp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                        this%itp_xm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     end if
+                     if (maxval(SC(i,j-1:j,k)).gt.SCmax) then
+                        this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                        this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     end if
+                     if (maxval(SC(i,j,k-1:k)).gt.SCmax) then
+                        this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                        this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     end if
+                  end do
+               end do
+            end do
+         end if
+	   end select
    end subroutine metric_modification
 
    
