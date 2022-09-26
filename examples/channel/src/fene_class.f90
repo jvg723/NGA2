@@ -208,11 +208,11 @@ contains
    end subroutine get_CgradU
 
    !> Calculate the viscoelastic stress tensor
-   subroutine get_stressTensor(this,C,We,Lmax)
+   subroutine get_stressTensor(this,C,Wei,Lmax)
       implicit none
       class(fene), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(in) :: C
-      real(WP), intent(in) :: Lmax,We
+      real(WP), intent(in) :: Lmax,Wei
       real(WP) :: a,psi
       integer :: i,j,k
       ! a parameter
@@ -221,19 +221,19 @@ contains
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
                ! psi parameter
-               psi=1.00_WP-(C(i,j,k,1)+C(i,j,k,2)+C(i,j,k,6))/(Lmax**2)
+               psi=1.00_WP-(C(i,j,k,1)+C(i,j,k,4)+C(i,j,k,6))/(Lmax**2)
                ! 11 tensor component
-               this%T(i,j,k,1)=(1.00_WP/We)*C(i,j,k,1)/psi-1.00_WP/a
+               this%T(i,j,k,1)=(1.00_WP/Wei)*C(i,j,k,1)/psi-1.00_WP/a
                ! 21/12 tensor component
-               this%T(i,j,k,2)=(1.00_WP/We)*C(i,j,k,2)/psi-0.00_WP/a
+               this%T(i,j,k,2)=(1.00_WP/Wei)*C(i,j,k,2)/psi-0.00_WP/a
                ! 31/13 tensor component
-               this%T(i,j,k,3)=(1.00_WP/We)*C(i,j,k,3)/psi-0.00_WP/a
+               this%T(i,j,k,3)=(1.00_WP/Wei)*C(i,j,k,3)/psi-0.00_WP/a
                ! 22 tensor component
-               this%T(i,j,k,4)=(1.00_WP/We)*C(i,j,k,4)/psi-1.00_WP/a
+               this%T(i,j,k,4)=(1.00_WP/Wei)*C(i,j,k,4)/psi-1.00_WP/a
                ! 32/23 tensor component
-               this%T(i,j,k,5)=(1.00_WP/We)*C(i,j,k,5)/psi-0.00_WP/a
+               this%T(i,j,k,5)=(1.00_WP/Wei)*C(i,j,k,5)/psi-0.00_WP/a
                ! 33 tensor component
-               this%T(i,j,k,6)=(1.00_WP/We)*C(i,j,k,6)/psi-1.00_WP/a 
+               this%T(i,j,k,6)=(1.00_WP/Wei)*C(i,j,k,6)/psi-1.00_WP/a 
             end do
          end do
       end do

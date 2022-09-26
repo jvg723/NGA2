@@ -34,7 +34,7 @@ module simulation
    real(WP), dimension(:,:,:,:,:), allocatable :: gradu
    
    !> Fluid viscosity
-   real(WP) :: visc
+   real(WP) :: visc_s,visc_p
 
    !> Channel forcing
    real(WP) :: Ubulk,Wbulk
@@ -42,12 +42,9 @@ module simulation
 
    !> Event for post-processing
    type(event) :: ppevt    
-
-   !> BQUICK scheme parameters
-   real(WP) :: SCmax,SCmin
    
    !> FENE model parameters
-   real(WP) :: Lmax,We,Re,Beta
+   real(WP) :: Lmax,Wei,Beta
    
 contains
    
@@ -107,13 +104,13 @@ contains
       use parallel,  only: MPI_REAL_WP
       implicit none
       integer :: iunit,ierr,i,j,k
-      real(WP), dimension(:), allocatable :: trCavg,trCavg_,Cxyavg,Cxyavg_,vol,vol_
+      real(WP), dimension(:), allocatable :: trCavg,trCavg_,C12avg,C12avg_,vol,vol_
       character(len=str_medium) :: filename,timestamp
       ! Allocate vertical line storage
       allocate(trCavg (fs%cfg%jmin:fs%cfg%jmax)); trCavg =0.0_WP
       allocate(trCavg_(fs%cfg%jmin:fs%cfg%jmax)); trCavg_=0.0_WP
-      allocate(Cxyavg (fs%cfg%jmin:fs%cfg%jmax)); Cxyavg =0.0_WP
-      allocate(Cxyavg_(fs%cfg%jmin:fs%cfg%jmax)); Cxyavg_=0.0_WP
+      allocate(C12avg (fs%cfg%jmin:fs%cfg%jmax)); C12avg =0.0_WP
+      allocate(C12avg_(fs%cfg%jmin:fs%cfg%jmax)); C12avg_=0.0_WP
       allocate(vol_   (fs%cfg%jmin:fs%cfg%jmax)); vol_   =0.0_WP
       allocate(vol    (fs%cfg%jmin:fs%cfg%jmax)); vol    =0.0_WP
       ! Integrate all data over x and z
@@ -121,21 +118,21 @@ contains
          do j=fs%cfg%jmin_,fs%cfg%jmax_
             do i=fs%cfg%imin_,fs%cfg%imax_
                vol_(j)   =vol_(j)+fs%cfg%vol(i,j,k)
-               Cxyavg_(j)=Cxyavg_(j)+fs%cfg%vol(i,j,k)*sc%SC(i,j,k,2)
+               C12avg_(j)=C12avg_(j)+fs%cfg%vol(i,j,k)*sc%SC(i,j,k,2)
                trCavg_(j)=trCavg_(j)+fs%cfg%vol(i,j,k)*(sc%SC(i,j,k,1)+sc%SC(i,j,k,4)+sc%SC(i,j,k,6))
             end do
          end do
       end do
       ! All-reduce the data
       call MPI_ALLREDUCE(vol_   ,vol   ,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(Cxyavg_,Cxyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(C12avg_,C12avg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(trCavg_,trCavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       do j=fs%cfg%jmin,fs%cfg%jmax
          if (vol(j).gt.0.0_WP) then
-            Cxyavg(j)=Cxyavg(j)/vol(j)
+            C12avg(j)=C12avg(j)/vol(j)
             trCavg(j)=trCavg(j)/vol(j)
          else
-            Cxyavg(j)=0.0_WP
+            C12avg(j)=0.0_WP
             trCavg(j)=0.0_WP
          end if
       end do
@@ -146,12 +143,12 @@ contains
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(a12,3x,a12,3x,a12)') 'Height','Cxyavg','trCavg'
          do j=fs%cfg%jmin,fs%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Cxyavg(j),trCavg(j)
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),C12avg(j),trCavg(j)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(Cxyavg,Cxyavg_,trCavg,trCavg_,vol,vol_)
+      deallocate(C12avg,C12avg_,trCavg,trCavg_,vol,vol_)
    end subroutine postproc_ct
    
    
@@ -196,7 +193,7 @@ contains
          ! Create flow solver
          fs=incomp(cfg=cfg,name='NS solver')
          ! Assign constant viscosity
-         call param_read('Dynamic viscosity',visc); fs%visc=visc
+         call param_read('Solvent dynamic viscosity',visc_s); fs%visc=visc_s
          ! Assign constant density
          call param_read('Density',fs%rho)
          ! Configure pressure solver
@@ -234,64 +231,35 @@ contains
 
       ! Create a scalar solver with a BQUICK scheme to solve for tensor components
       create_scalar: block
-         use ils_class,  only: gmres_amg,pcg_amg 
+         use ils_class,  only: gmres_amg,pcg_amg,gmres_smg
          use multiscalar_class, only: bquick
          real(WP) :: diffusivity
          ! Create scalar solver
          sc=multiscalar(cfg=cfg,scheme=bquick,nscalar=6,name='C tensor components')
-         ! Max and min scalar bounds for BQUICK scehem
-         call param_read('Scalar upper bound',SCmax)
-         call param_read('Scalar lower bound',SCmin)
-         ! Assign constant diffusivity
-         call param_read('Dynamic diffusivity',diffusivity)
-         sc%diff=diffusivity
+         ! No diffusivity in conformation tensor evolution equation
+         sc%diff=0.0_WP
          ! Assign constant density
          sc%rho=fs%rho
          ! Configure implicit scalar solver
          sc%implicit%maxit=fs%implicit%maxit; sc%implicit%rcvg=fs%implicit%rcvg
          ! Setup the solver
          call sc%setup(implicit_ils=pcg_amg)
+         ! Initalize C tensor
+         sc%SC=0.0_WP
       end block create_scalar
-
-      ! initialize_scalar: block
-      !    real(WP) :: a,psi
-      !    integer :: i,j,k
-      !    sc%SC(:,:,:,1)=100.00_WP
-      !    sc%SC(:,:,:,2)=10.00_WP
-      !    ! a parameter
-      !    a=1.00_WP-3.00_WP/(Lmax**2)
-      !    do k=fs%cfg%kmin_,fs%cfg%kmax_
-      !       do j=fs%cfg%jmin_,fs%cfg%jmax_
-      !          do i=fs%cfg%imin_,fs%cfg%imax_
-      !             ! psi parameter
-      !             psi=1.00_WP-(660.00_WP)/(Lmax**2)
-      !             ! C13/31 and T13/31
-      !             sc%SC(i,j,k,3)=0.00_WP 
-      !             ! C22 and T22
-      !             sc%SC(i,j,k,4)=psi/a 
-      !             ! C23/32 and T23/32
-      !             sc%SC(i,j,k,5)=0.00_WP 
-      !             ! C33 and T33
-      !             sc%SC(i,j,k,6)=psi/a 
-      !          end do
-      !       end do
-      !    end do
-      ! end block initialize_scalar
 
       ! Create a fene model solver
       create_fene_model: block
          ! Maximum extensibility of polymer chain
          call param_read('Maximum extension of polymer chain',Lmax)
          ! Weissenberg number for polymer
-         call param_read('Weissenberg number',We)
-         ! Reynolds Number
-         call param_read('Reynolds number',Re)
-         ! Solvent/Polymer viscosity Ratio
+         call param_read('Weissenberg number',Wei)
+         ! Solvent/polymer viscosity ratio
          call param_read('Beta',Beta)
-         ! Set flow solver visc to Beta/Re
-         fs%visc=Beta/Re
+         ! Polymer viscosity
+         visc_p=((1.00_WP/Beta)-1.00_WP)
          ! Create FENE model solver 
-         fm=fene(cfg=cfg, name= 'fene model solver')
+         fm=fene(cfg=cfg, name= 'fene model')
          ! Setup the solvers
          call fm%setup()
       end block create_fene_model
@@ -424,13 +392,13 @@ contains
                ! Explicit calculation of resSC from scalar equation
                call sc%get_drhoSCdt(resSC,resU,resV,resW)
                ! Assemble explicit residual
-               resSC=time%dt*resSC-(2.0_WP*sc%rho*sc%SC-sc%rho*sc%SCold)
+               resSC=-2.0_WP*(sc%rho*sc%SC-sc%rho*sc%SCold)+time%dt*resSC
                ! Apply this residual
                SC_=2.0_WP*sc%SC-sc%SCold+resSC
             end block pre_check
             
             ! Check boundedess of explicit SC calculation
-            call sc%metric_modification(SC_,SCmin,SCmax)
+            call sc%metric_modification(SC=SC_,SCmin=0.0_WP)
             
             ! Calculate explicit SC post checking bounds
             post_check: block
@@ -438,8 +406,6 @@ contains
                call sc%get_drhoSCdt(resSC,resU,resV,resW)
                ! Assemble explicit residual
                resSC=time%dt*resSC-(2.0_WP*sc%rho*sc%SC-sc%rho*sc%SCold)
-               ! Apply this residual
-               SC_=2.0_WP*sc%SC-sc%SCold+resSC
             end block post_check
             
             ! Add FENE source terms
@@ -448,9 +414,9 @@ contains
                ! Form velocity gradient
                call fs%get_gradu(gradu)
                ! Calculate CgradU terms
-               call fm%get_CgradU(SC_,gradu)
+               call fm%get_CgradU(sc%SC,gradu)    
                ! Calculate T terms
-               call fm%get_stressTensor(SC_,We,Lmax)
+               call fm%get_stressTensor(sc%SC,Wei,Lmax)     
                ! Add source terms to calculated residual
                do isc=1,fm%Celem
                   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
@@ -515,7 +481,6 @@ contains
                where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
             end block forcing
 
-            ! Add source term from polymer to flow residual
             polymer: block
                integer :: i,j,k
                call fm%get_divT()
@@ -523,13 +488,13 @@ contains
                   do j=fs%cfg%jmin_,fs%cfg%jmax_
                      do i=fs%cfg%imin_,fs%cfg%imax_
                         if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-                           resU(i,j,k)=resU(i,j,k)+((1.00_WP-Beta)/Re)*fm%divT(i,j,k,1)
+                           resU(i,j,k)=resU(i,j,k)+visc_p*fm%divT(i,j,k,1)
                         end if
                         ! if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-                        !    resV(i,j,k)=resV(i,j,k)+((1.00_WP-Beta)/Re)*fm%divT(i,j,k,2)
+                        !    resV(i,j,k)=resV(i,j,k)+visc_p*fm%divT(i,j,k,2)
                         ! end if
                         if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-                           resW(i,j,k)=resW(i,j,k)+((1.00_WP-Beta)/Re)*fm%divT(i,j,k,3)
+                           resW(i,j,k)=resW(i,j,k)+visc_p*fm%divT(i,j,k,3)
                         end if
                      end do
                   end do

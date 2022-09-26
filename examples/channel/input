@@ -11,12 +11,16 @@ nz :	1
 Stretching : 2.1
 
 # Fluid properties and velocity
-Dynamic viscosity :   0.01
-Density :             1
-Ubulk : 1
-Wbulk : 0
-Perturbation : 0
+Solvent dynamic viscosity : 0.01
+Density                   : 1
+Ubulk                     : 1
+Wbulk                     : 0
+Perturbation              : 0
 
+# FENE model properties
+Maximum extension of polymer chain : 60
+Weissenberg number                 : 2
+Beta                               : 0.5
 
 # Time integration
 Max timestep size : 2e-2
@@ -30,18 +34,6 @@ Pressure iteration : 100
 Implicit tolerance : 1e-6
 Implicit iteration : 100
 
-# FENE model properties
-FENE model tolerance               : 1e-6
-FENE model iteration               : 100
-Maximum extension of polymer chain : 100
-Weissenberg number                 : 3.5
-Reynolds number                    : 100
-Beta                               : 0.9
-
-# Scalar solver
-Scalar upper bound  : -15
-Scalar lower bound  : 1000
-Dynamic diffusivity : 0
 
 # Ensight output
 Ensight output period :  1e-1
