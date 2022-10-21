@@ -3,7 +3,6 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use incomp_class,      only: incomp
-   use multiscalar_class, only: multiscalar
    use fene_class,        only: fene
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
@@ -12,9 +11,8 @@ module simulation
    implicit none
    private
    
-   !> Single-phase incompressible flow solver, scalar solver, fene model and corresponding time tracker
+   !> Single-phase incompressible flow solver, fene model and corresponding time tracker
    type(incomp),      public :: fs
-   type(multiscalar), public :: sc
    type(fene),        public :: fm
    type(timetracker), public :: time
    
@@ -23,7 +21,7 @@ module simulation
    type(event)   :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,forcefile,velfile
+   type(monitor) :: mfile,cflfile,forcefile,velfile,polymerfile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -84,7 +82,7 @@ contains
       end do
       ! If root, print it out
       if (fs%cfg%amRoot) then
-         filename='Uavg_'
+         filename='./velocity/Uavg_'
          write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(a12,3x,a12)') 'Height','Uavg'
@@ -104,13 +102,23 @@ contains
       use parallel,  only: MPI_REAL_WP
       implicit none
       integer :: iunit,ierr,i,j,k
-      real(WP), dimension(:), allocatable :: trCavg,trCavg_,C12avg,C12avg_,vol,vol_
+      real(WP), dimension(:), allocatable :: Cxxavg,Cxxavg_,Cyxavg,Cyxavg_,Cyyavg,Cyyavg_
+      real(WP), dimension(:), allocatable :: Txxavg,Txxavg_,Tyxavg,Tyxavg_,Tyyavg,Tyyavg_
+      real(WP), dimension(:), allocatable :: vol,vol_
       character(len=str_medium) :: filename,timestamp
       ! Allocate vertical line storage
-      allocate(trCavg (fs%cfg%jmin:fs%cfg%jmax)); trCavg =0.0_WP
-      allocate(trCavg_(fs%cfg%jmin:fs%cfg%jmax)); trCavg_=0.0_WP
-      allocate(C12avg (fs%cfg%jmin:fs%cfg%jmax)); C12avg =0.0_WP
-      allocate(C12avg_(fs%cfg%jmin:fs%cfg%jmax)); C12avg_=0.0_WP
+      allocate(Cxxavg (fs%cfg%jmin:fs%cfg%jmax)); Cxxavg =0.0_WP
+      allocate(Cxxavg_(fs%cfg%jmin:fs%cfg%jmax)); Cxxavg_=0.0_WP
+      allocate(Cyxavg (fs%cfg%jmin:fs%cfg%jmax)); Cyxavg =0.0_WP
+      allocate(Cyxavg_(fs%cfg%jmin:fs%cfg%jmax)); Cyxavg_=0.0_WP
+      allocate(Cyyavg (fs%cfg%jmin:fs%cfg%jmax)); Cyyavg =0.0_WP
+      allocate(Cyyavg_(fs%cfg%jmin:fs%cfg%jmax)); Cyyavg_=0.0_WP
+      allocate(Txxavg (fs%cfg%jmin:fs%cfg%jmax)); Txxavg =0.0_WP
+      allocate(Txxavg_(fs%cfg%jmin:fs%cfg%jmax)); Txxavg_=0.0_WP
+      allocate(Tyxavg (fs%cfg%jmin:fs%cfg%jmax)); Tyxavg =0.0_WP
+      allocate(Tyxavg_(fs%cfg%jmin:fs%cfg%jmax)); Tyxavg_=0.0_WP
+      allocate(Tyyavg (fs%cfg%jmin:fs%cfg%jmax)); Tyyavg =0.0_WP
+      allocate(Tyyavg_(fs%cfg%jmin:fs%cfg%jmax)); Tyyavg_=0.0_WP
       allocate(vol_   (fs%cfg%jmin:fs%cfg%jmax)); vol_   =0.0_WP
       allocate(vol    (fs%cfg%jmin:fs%cfg%jmax)); vol    =0.0_WP
       ! Integrate all data over x and z
@@ -118,37 +126,53 @@ contains
          do j=fs%cfg%jmin_,fs%cfg%jmax_
             do i=fs%cfg%imin_,fs%cfg%imax_
                vol_(j)   =vol_(j)+fs%cfg%vol(i,j,k)
-               C12avg_(j)=C12avg_(j)+fs%cfg%vol(i,j,k)*sc%SC(i,j,k,2)
-               trCavg_(j)=trCavg_(j)+fs%cfg%vol(i,j,k)*(sc%SC(i,j,k,1)+sc%SC(i,j,k,4)+sc%SC(i,j,k,6))
+               Cxxavg_(j)=Cxxavg_(j)+fs%cfg%vol(i,j,k)*fm%SC(i,j,k,1)
+               Cyxavg_(j)=Cyxavg_(j)+fs%cfg%vol(i,j,k)*fm%SC(i,j,k,2)
+               Cyyavg_(j)=Cyyavg_(j)+fs%cfg%vol(i,j,k)*fm%SC(i,j,k,4)
+               Txxavg_(j)=Txxavg_(j)+fs%cfg%vol(i,j,k)*fm%T(i,j,k,1)
+               Tyxavg_(j)=Tyxavg_(j)+fs%cfg%vol(i,j,k)*fm%T(i,j,k,2)
+               Tyyavg_(j)=Tyyavg_(j)+fs%cfg%vol(i,j,k)*fm%T(i,j,k,4)
             end do
          end do
       end do
       ! All-reduce the data
       call MPI_ALLREDUCE(vol_   ,vol   ,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(C12avg_,C12avg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(trCavg_,trCavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Cxxavg_,Cxxavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Cyxavg_,Cyxavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Cyyavg_,Cyyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Txxavg_,Txxavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Tyxavg_,Tyxavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Tyyavg_,Tyyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       do j=fs%cfg%jmin,fs%cfg%jmax
          if (vol(j).gt.0.0_WP) then
-            C12avg(j)=C12avg(j)/vol(j)
-            trCavg(j)=trCavg(j)/vol(j)
+            Cxxavg(j)=Cxxavg(j)/vol(j)
+            Cyxavg(j)=Cyxavg(j)/vol(j)
+            Cyyavg(j)=Cyyavg(j)/vol(j)
+            Txxavg(j)=Txxavg(j)/vol(j)
+            Tyxavg(j)=Tyxavg(j)/vol(j)
+            Tyyavg(j)=Tyyavg(j)/vol(j)
          else
-            C12avg(j)=0.0_WP
-            trCavg(j)=0.0_WP
+            Cxxavg(j)=0.0_WP
+            Cyxavg(j)=0.0_WP
+            Cyyavg(j)=0.0_WP
+            Txxavg(j)=0.0_WP
+            Tyxavg(j)=0.0_WP
+            Tyyavg(j)=0.0_WP
          end if
       end do
       ! If root, print it out
       if (fs%cfg%amRoot) then
-         filename='CTavg_'
+         filename='./stress/Cavg_'
          write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12)') 'Height','Cxyavg','trCavg'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'Height','Cxx_avg','Cyx_avg','Cyy_avg','Txx_avg','Tyx_avg','Tyy_avg'
          do j=fs%cfg%jmin,fs%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),C12avg(j),trCavg(j)
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Cxxavg(j),Cyxavg(j),Cyyavg(j),Txxavg(j),Tyxavg(j),Tyyavg(j)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(C12avg,C12avg_,trCavg,trCavg_,vol,vol_)
+      deallocate(Cxxavg,Cxxavg_,Cyxavg,Cyxavg_,Cyyavg,Cyyavg_,Txxavg,Txxavg_,Tyxavg,Tyxavg_,Tyyavg,Tyyavg_,vol,vol_)
    end subroutine postproc_ct
    
    
@@ -203,6 +227,7 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
+         ! call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_pfmg)
          call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
@@ -229,27 +254,17 @@ contains
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_amg
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_smg
 
-      ! Create a scalar solver with a BQUICK scheme to solve for tensor components
-      create_scalar: block
-         use ils_class,  only: gmres_amg,pcg_amg,gmres_smg
+      ! Create a FENE model with scalar solver using BQUICK scheme
+      create_fene: block
+         use ils_class,  only: gmres_amg,pcg_amg,gmres_pfmg,pcg_smg,gmres_pilut
          use multiscalar_class, only: bquick
-         real(WP) :: diffusivity
-         ! Create scalar solver
-         sc=multiscalar(cfg=cfg,scheme=bquick,nscalar=6,name='C tensor components')
+         integer :: j
+         ! Create FENE model solver
+         fm=fene(cfg=cfg,scheme=bquick,name='FENE model')
          ! No diffusivity in conformation tensor evolution equation
-         sc%diff=0.0_WP
+         fm%diff=0.0_WP
          ! Assign constant density
-         sc%rho=fs%rho
-         ! Configure implicit scalar solver
-         sc%implicit%maxit=fs%implicit%maxit; sc%implicit%rcvg=fs%implicit%rcvg
-         ! Setup the solver
-         call sc%setup(implicit_ils=pcg_amg)
-         ! Initalize C tensor
-         sc%SC=0.0_WP
-      end block create_scalar
-
-      ! Create a fene model solver
-      create_fene_model: block
+         fm%rho=fs%rho
          ! Maximum extensibility of polymer chain
          call param_read('Maximum extension of polymer chain',Lmax)
          ! Weissenberg number for polymer
@@ -257,12 +272,30 @@ contains
          ! Solvent/polymer viscosity ratio
          call param_read('Beta',Beta)
          ! Polymer viscosity
-         visc_p=((1.00_WP/Beta)-1.00_WP)
-         ! Create FENE model solver 
-         fm=fene(cfg=cfg, name= 'fene model')
-         ! Setup the solvers
-         call fm%setup()
-      end block create_fene_model
+         visc_p=visc_s*((1.00_WP-Beta)/Beta)
+         ! visc_p=visc_s/4.00_WP
+         ! Configure implicit scalar solver
+         fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
+         ! Setup the solver
+         call fm%setup(implicit_ils=gmres_pilut)
+         ! Initalize C tensor
+         ! fm%SC(:,:,:,1)=2.0_WP
+         ! fm%SC(:,:,:,2)=2.0_WP
+         ! fm%SC(:,:,:,3)=2.0_WP
+         ! fm%SC(:,:,:,4)=2.0_WP
+         ! fm%SC(:,:,:,5)=2.0_WP
+         ! fm%SC(:,:,:,6)=2.0_WP
+         do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+            fm%SC(:,j,:,1)=1000.00_WP*(1.00_WP-(fs%cfg%ym(j)/0.05_WP)**2)
+            fm%SC(:,j,:,2)=0.0_WP
+            fm%SC(:,j,:,3)=0.0_WP
+            fm%SC(:,j,:,4)=0.0_WP
+            fm%SC(:,j,:,5)=0.0_WP
+            fm%SC(:,j,:,6)=0.0_WP
+         end do
+
+         ! fm%SC=0.0_WP
+      end block create_fene
       
       ! Add Ensight output
       create_ensight: block
@@ -274,12 +307,30 @@ contains
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('viscosity',fs%visc)
-         call ens_out%add_scalar('C11',sc%SC(:,:,:,1))
-         call ens_out%add_scalar('C21',sc%SC(:,:,:,2))
-         call ens_out%add_scalar('C31',sc%SC(:,:,:,3))
-         call ens_out%add_scalar('C22',sc%SC(:,:,:,4))
-         call ens_out%add_scalar('C32',sc%SC(:,:,:,5))
-         call ens_out%add_scalar('C33',sc%SC(:,:,:,6))
+         call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
+         call ens_out%add_scalar('Cyx',fm%SC(:,:,:,2))
+         call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
+         call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
+         call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
+         call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
+         call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
+         call ens_out%add_scalar('Tyx',fm%T (:,:,:,2))
+         call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
+         call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
+         call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
+         call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
+         call ens_out%add_scalar('dT1',fm%divT(:,:,:,1))
+         call ens_out%add_scalar('dT2',fm%divT(:,:,:,2))
+         call ens_out%add_scalar('dT3',fm%divT(:,:,:,3))
+         call ens_out%add_scalar('gradu11',gradu(1,1,:,:,:))
+         call ens_out%add_scalar('gradu12',gradu(1,2,:,:,:))
+         call ens_out%add_scalar('gradu13',gradu(1,3,:,:,:))
+         call ens_out%add_scalar('gradu21',gradu(2,1,:,:,:))
+         call ens_out%add_scalar('gradu22',gradu(2,2,:,:,:))
+         call ens_out%add_scalar('gradu23',gradu(2,3,:,:,:))
+         call ens_out%add_scalar('gradu31',gradu(3,1,:,:,:))
+         call ens_out%add_scalar('gradu32',gradu(3,2,:,:,:))
+         call ens_out%add_scalar('gradu33',gradu(3,3,:,:,:))
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -289,6 +340,7 @@ contains
          ! Prepare some info about fields
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
+         call fm%get_max()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -321,6 +373,23 @@ contains
          call forcefile%add_column(meanU,'Bulk U')
          call forcefile%add_column(meanW,'Bulk W')
          call forcefile%write()
+         ! Create polymer monitor
+         polymerfile=monitor(fs%cfg%amRoot,'polymer')
+         call polymerfile%add_column(time%n,'Timestep number')
+         call polymerfile%add_column(time%t,'Time')
+         call polymerfile%add_column(fm%SCmax(1),'Cxxmax')
+         call polymerfile%add_column(fm%SCmax(2),'Cyxmax')
+         call polymerfile%add_column(fm%SCmax(3),'Czxmax')
+         call polymerfile%add_column(fm%SCmax(4),'Cyymax')
+         call polymerfile%add_column(fm%SCmax(5),'Czymax')
+         call polymerfile%add_column(fm%SCmax(6),'Czzmax')
+         call polymerfile%add_column(fm%SCmin(1),'Cxxmin')
+         call polymerfile%add_column(fm%SCmin(2),'Cyxmin')
+         call polymerfile%add_column(fm%SCmin(3),'Czxmin')
+         call polymerfile%add_column(fm%SCmin(4),'Cyymin')
+         call polymerfile%add_column(fm%SCmin(5),'Czymin')
+         call polymerfile%add_column(fm%SCmin(6),'Czzmin')
+         call polymerfile%write()
       end block create_monitor
       
       ! Create a specialized post-processing file
@@ -328,6 +397,9 @@ contains
          ! Create event for data postprocessing
          ppevt=event(time=time,name='Postproc output')
          call param_read('Postproc output period',ppevt%tper)
+         ! Create directory to write to
+         if (cfg%amRoot) call execute_command_line('mkdir -p velocity')
+         if (cfg%amRoot) call execute_command_line('mkdir -p stress')
          ! Perform the output
          if (ppevt%occurs()) call postproc_vel()
          if (ppevt%occurs()) call postproc_ct()
@@ -370,7 +442,7 @@ contains
          ! end block nonewt
 
          ! Remember old scalars
-         sc%SCold=sc%SC
+         fm%SCold=fm%SC
 
          ! Remember old velocity
          fs%Uold=fs%U
@@ -380,70 +452,72 @@ contains
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
 
-            ! ============= SCALAR SOLVER =======================
-            ! Reset interpolation metrics to QUICK scheme
-            call sc%metric_reset()
-            
+            ! Build mid-time velocity
+            fs%U=0.5_WP*(fs%U+fs%Uold)
+            fs%V=0.5_WP*(fs%V+fs%Vold)
+            fs%W=0.5_WP*(fs%W+fs%Wold)
+
             ! Build mid-time scalar
-            sc%SC=0.5_WP*(sc%SC+sc%SCold)
-            
+            fm%SC=0.5_WP*(fm%SC+fm%SCold)
+
+            ! Form velocity gradient
+            call fs%get_gradu(gradu)
+
+            ! ============= SCALAR SOLVER =======================  
+            ! Reset interpolation metrics to QUICK scheme
+            call fm%metric_reset()
+
             ! Calculate explicit SC prior to checking bounds
             pre_check: block
                ! Explicit calculation of resSC from scalar equation
-               call sc%get_drhoSCdt(resSC,resU,resV,resW)
+               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
                ! Assemble explicit residual
-               resSC=-2.0_WP*(sc%rho*sc%SC-sc%rho*sc%SCold)+time%dt*resSC
-               ! Apply this residual
-               SC_=2.0_WP*sc%SC-sc%SCold+resSC
+               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+               ! ! Apply this residual
+               ! SC_=2.0_WP*fm%SC-fm%SCold+resSC
             end block pre_check
             
             ! Check boundedess of explicit SC calculation
-            call sc%metric_modification(SC=SC_,SCmin=0.0_WP)
-            
+            call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+
             ! Calculate explicit SC post checking bounds
             post_check: block
                ! Explicit calculation of resSC from scalar equation
-               call sc%get_drhoSCdt(resSC,resU,resV,resW)
+               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
                ! Assemble explicit residual
-               resSC=time%dt*resSC-(2.0_WP*sc%rho*sc%SC-sc%rho*sc%SCold)
+               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
             end block post_check
             
             ! Add FENE source terms
             fene: block
                integer :: i,j,k,isc
-               ! Form velocity gradient
-               call fs%get_gradu(gradu)
                ! Calculate CgradU terms
-               call fm%get_CgradU(sc%SC,gradu)    
+               call fm%get_CgradU(fm%SC,gradu)    
                ! Calculate T terms
-               call fm%get_stressTensor(sc%SC,Wei,Lmax)     
+               call fm%get_stressTensor(fm%SC,Wei,Lmax)     
                ! Add source terms to calculated residual
-               do isc=1,fm%Celem
+               do isc=1,fm%nscalar
                   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
                      do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                         do i=fs%cfg%imino_,fs%cfg%imaxo_
-                           resSC(i,j,k,isc)=resSC(i,j,k,isc)+fm%CgradU(i,j,k,isc)-fm%T(i,j,k,isc)
+                           resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)*time%dt-fm%T(i,j,k,isc))*time%dt
                         end do
                      end do
                   end do
                end do
             end block fene
-            
+
             ! Form implicit residual
-            call sc%solve_implicit(time%dt,resSC,resU,resV,resW)
+            call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 
             ! Apply this residual
-            sc%SC=2.0_WP*sc%SC-sc%SCold+resSC
+            fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
 
             ! Apply other boundary conditions on the resulting field
-            call sc%apply_bcond(time%t,time%dt)
+            call fm%apply_bcond(time%t,time%dt)
             ! ===================================================
 
-            ! Build mid-time velocity
-            fs%U=0.5_WP*(fs%U+fs%Uold)
-            fs%V=0.5_WP*(fs%V+fs%Vold)
-            fs%W=0.5_WP*(fs%W+fs%Wold)
-            
+            ! ============= VELOCITY SOLVER ======================  
             ! Explicit calculation of drho*u/dt from NS
             call fs%get_dmomdt(resU,resV,resW)
             
@@ -481,25 +555,31 @@ contains
                where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
             end block forcing
 
+            ! Add in contribution form polymer
             polymer: block
+            use messager, only: die
                integer :: i,j,k
-               call fm%get_divT()
+               ! Calculate updated elastic tensor terms
+               call fm%get_stressTensor(fm%SC,Wei,Lmax)
+               ! Get its divergence 
+               call fm%get_divT(fs)
+               ! Add visc_p*divT to momentum equation 
                do k=fs%cfg%kmin_,fs%cfg%kmax_
                   do j=fs%cfg%jmin_,fs%cfg%jmax_
                      do i=fs%cfg%imin_,fs%cfg%imax_
                         if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-                           resU(i,j,k)=resU(i,j,k)+visc_p*fm%divT(i,j,k,1)
+                           resU(i,j,k)=resU(i,j,k)+visc_p*(fm%divT(i,j,k,1)*time%dt)
                         end if
-                        ! if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-                        !    resV(i,j,k)=resV(i,j,k)+visc_p*fm%divT(i,j,k,2)
-                        ! end if
+                        if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
+                           resV(i,j,k)=resV(i,j,k)+visc_p*(fm%divT(i,j,k,2)*time%dt)
+                        end if
                         if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-                           resW(i,j,k)=resW(i,j,k)+visc_p*fm%divT(i,j,k,3)
+                           resW(i,j,k)=resW(i,j,k)+visc_p*(fm%divT(i,j,k,3)*time%dt)
                         end if
                      end do
                   end do
                end do
-            end block polymer   
+            end block polymer
 
             ! Form implicit residuals
             call fs%solve_implicit(time%dt,resU,resV,resW)
@@ -526,6 +606,7 @@ contains
             fs%U=fs%U-time%dt*resU/fs%rho
             fs%V=fs%V-time%dt*resV/fs%rho
             fs%W=fs%W-time%dt*resW/fs%rho
+            ! ====================================================
             
             ! Increment sub-iteration counter
             time%it=time%it+1
@@ -541,9 +622,11 @@ contains
          
          ! Perform and output monitoring
          call fs%get_max()
+         call fm%get_max()
          call mfile%write()
          call cflfile%write()
          call forcefile%write()
+         call polymerfile%write()
 
          ! Specialized post-processing
          if (ppevt%occurs()) call postproc_vel()

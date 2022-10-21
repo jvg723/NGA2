@@ -70,11 +70,12 @@ module multiscalar_class
       integer :: nst                                      !< Scheme order (and elemental stencil size)
       integer :: stp1,stp2                                !< Plus interpolation stencil extent for multiscalar advection
       integer :: stm1,stm2                                !< Minus interpolation stencil extent for multiscalar advection
-      real(WP), dimension(:,:,:,:), allocatable :: itp_xp,itp_yp,itp_zp  !< Plus interpolation for SC
-      real(WP), dimension(:,:,:,:), allocatable :: itp_xm,itp_ym,itp_zm  !< Minus interpolation for SC
-      real(WP), dimension(:,:,:,:), allocatable :: div_x ,div_y ,div_z   !< Divergence for SC
-      real(WP), dimension(:,:,:,:), allocatable :: grd_x ,grd_y ,grd_z   !< multiscalar gradient for SC
-      real(WP), dimension(:,:,:,:), allocatable :: itp_x ,itp_y ,itp_z   !< Second order interpolation for SC diffusivity
+      real(WP), dimension(:,:,:,:), allocatable :: itp_xp,itp_yp,itp_zp   !< Plus interpolation for SC
+      real(WP), dimension(:,:,:,:), allocatable :: itp_xm,itp_ym,itp_zm   !< Minus interpolation for SC
+      real(WP), dimension(:,:,:,:), allocatable :: div_x ,div_y ,div_z    !< Divergence for SC
+      real(WP), dimension(:,:,:,:), allocatable :: grd_x ,grd_y ,grd_z    !< multiscalar gradient for SC
+      real(WP), dimension(:,:,:,:), allocatable :: itp_x ,itp_y ,itp_z    !< Second order interpolation for SC diffusivity
+      real(WP), dimension(:,:,:,:,:), allocatable :: itp_xy,itp_yz,itp_xz !< Interpolation for cell centered scalar to cell edges
       
       ! Bquick requires additional storage
 	   real(WP), dimension(:,:,:,:), allocatable :: bitp_xp,bitp_yp,bitp_zp  !< Plus interpolation for SC  - backup
@@ -139,7 +140,9 @@ contains
       allocate(self%SC   (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%SC   =0.0_WP
       allocate(self%SCold(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%SCold=0.0_WP
       allocate(self%diff (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_             )); self%diff =0.0_WP
-      
+      allocate(self%SCmax(1:self%nscalar)); self%SCmax=0.0_WP
+      allocate(self%SCmin(1:self%nscalar)); self%SCmin=0.0_WP
+
       ! Prepare advection scheme
       self%scheme=scheme
       select case (self%scheme)
@@ -205,7 +208,8 @@ contains
       use mathtools, only: fv_itp_build
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: i,j,k
+      integer :: i,j,k,st1,st2
+      real(WP), dimension(-1:0) :: itpx,itpy,itpz
       
       ! Allocate finite difference diffusivity interpolation coefficients
       allocate(this%itp_x(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
@@ -282,6 +286,30 @@ contains
             end do
          end do
       end do
+
+      ! Allocate finite difference scalar interpolation coefficients
+      allocate(this%itp_xy(-1:0,-1:0,this%cfg%imino_+1:this%cfg%imaxo_,this%cfg%jmino_+1:this%cfg%jmaxo_,this%cfg%kmino_+1:this%cfg%kmaxo_)) !< Edge-centered (xy)
+      allocate(this%itp_yz(-1:0,-1:0,this%cfg%imino_+1:this%cfg%imaxo_,this%cfg%jmino_+1:this%cfg%jmaxo_,this%cfg%kmino_+1:this%cfg%kmaxo_)) !< Edge-centered (yz)
+      allocate(this%itp_xz(-1:0,-1:0,this%cfg%imino_+1:this%cfg%imaxo_,this%cfg%jmino_+1:this%cfg%jmaxo_,this%cfg%kmino_+1:this%cfg%kmaxo_)) !< Edge-centered (zx)
+      ! Create scalar interpolation coefficients to cell edge
+      do k=this%cfg%kmino_+1,this%cfg%kmaxo_
+         do j=this%cfg%jmino_+1,this%cfg%jmaxo_
+            do i=this%cfg%imino_+1,this%cfg%imaxo_
+               ! Prepare local 1D metrics
+               itpx=this%cfg%dxmi(i)*[this%cfg%xm(i)-this%cfg%x(i),this%cfg%x(i)-this%cfg%xm(i-1)]
+               itpy=this%cfg%dymi(j)*[this%cfg%ym(j)-this%cfg%y(j),this%cfg%y(j)-this%cfg%ym(j-1)]
+               itpz=this%cfg%dzmi(k)*[this%cfg%zm(k)-this%cfg%z(k),this%cfg%z(k)-this%cfg%zm(k-1)]
+               ! Combine for 2D interpolations
+               do st1=-1,0
+                  do st2=-1,0
+                     this%itp_xy(st1,st2,i,j,k)=itpx(st1)*itpy(st2)
+                     this%itp_yz(st1,st2,i,j,k)=itpy(st1)*itpz(st2)
+                     this%itp_xz(st1,st2,i,j,k)=itpx(st1)*itpz(st2)
+                  end do
+               end do
+            end do
+         end do
+      end do
       
    end subroutine init_metrics
    
@@ -290,7 +318,8 @@ contains
    subroutine adjust_metrics(this)
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: i,j,k
+      integer :: i,j,k,st1,st2
+      real(WP) :: delta,mysum
       
       ! Sync up masks
       call this%cfg%sync(this%mask)
@@ -384,6 +413,26 @@ contains
          this%div_z=0.0_WP
          this%grd_z=0.0_WP
       end if
+
+      ! Adjust scalar interpolation coefficients to cell edge in the presence of walls (only walls)
+      do k=this%cfg%kmino_+1,this%cfg%kmaxo_
+         do j=this%cfg%jmino_+1,this%cfg%jmaxo_
+            do i=this%cfg%imino_+1,this%cfg%imaxo_
+               ! Zero out interpolation coefficients reaching in the walls
+               do st1=-1,0
+                  do st2=-1,0
+                     if (this%mask(i+st1,j+st2,k).eq.1) this%itp_xy(st1,st2,i,j,k)=0.0_WP
+                     if (this%mask(i,j+st1,k+st2).eq.1) this%itp_yz(st1,st2,i,j,k)=0.0_WP
+                     if (this%mask(i+st1,j,k+st2).eq.1) this%itp_xz(st1,st2,i,j,k)=0.0_WP
+                  end do
+               end do
+               ! Rescale to ensure sum(itp)=1
+               mysum=sum(this%itp_xy(:,:,i,j,k)); if (mysum.gt.0.0_WP) this%itp_xy(:,:,i,j,k)=this%itp_xy(:,:,i,j,k)/mysum
+               mysum=sum(this%itp_yz(:,:,i,j,k)); if (mysum.gt.0.0_WP) this%itp_yz(:,:,i,j,k)=this%itp_yz(:,:,i,j,k)/mysum
+               mysum=sum(this%itp_xz(:,:,i,j,k)); if (mysum.gt.0.0_WP) this%itp_xz(:,:,i,j,k)=this%itp_xz(:,:,i,j,k)/mysum
+            end do
+         end do
+      end do
       
    end subroutine adjust_metrics
    
@@ -620,11 +669,23 @@ contains
       use parallel, only: MPI_REAL_WP
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: isc,ierr
+      integer :: i,j,k,isc,ierr
       real(WP) :: my_SCmax,my_SCmin
+
+      ! Set all to zero
       do isc=1,this%nscalar
-         my_SCmax=maxval(this%SC(:,:,:,isc)); call MPI_ALLREDUCE(my_SCmax,this%SCmax(isc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-         my_SCmin=minval(this%SC(:,:,:,isc)); call MPI_ALLREDUCE(my_SCmin,this%SCmin(isc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+         my_SCmax=0.0_WP; my_SCmin=0.0_WP
+         do k=this%cfg%kmin_,this%cfg%kmax_
+            do j=this%cfg%jmin_,this%cfg%jmax_
+               do i=this%cfg%imin_,this%cfg%imax_
+                  my_SCmax=max(my_SCmax,abs(this%SC(i,j,k,isc)))
+                  my_SCmin=min(my_SCmin,abs(this%SC(i,j,k,isc)))
+               end do
+            end do
+         end do
+         ! Get the parallel max
+         call MPI_ALLREDUCE(my_SCmax,this%SCmax(isc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+         call MPI_ALLREDUCE(my_SCmin,this%SCmin(isc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
       end do
    end subroutine get_max
    
@@ -696,7 +757,7 @@ contains
       end do
       
       do isc=1,this%nscalar
-         ! Solve the linear system
+      ! Solve the linear system
          call this%implicit%setup()
          this%implicit%rhs=resSC(:,:,:,isc)
          this%implicit%sol=0.0_WP
@@ -747,6 +808,7 @@ contains
                         this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
                         this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
                      end if
+                    
                      if (minval(SC(i,j,k-1:k,:)).lt.SCmin) then
                         this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
                         this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]

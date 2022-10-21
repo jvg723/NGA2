@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 1 1
+Partition :	4 2 1
 
 # Mesh definition
 Lx :	5
@@ -18,9 +18,9 @@ Wbulk                     : 0
 Perturbation              : 0
 
 # FENE model properties
-Maximum extension of polymer chain : 60
-Weissenberg number                 : 2
-Beta                               : 0.5
+Maximum extension of polymer chain : 100
+Weissenberg number                 : 6.67
+Beta                               : 0.9
 
 # Time integration
 Max timestep size : 2e-2
