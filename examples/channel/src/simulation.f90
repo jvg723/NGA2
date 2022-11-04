@@ -62,14 +62,15 @@ contains
       allocate(vol_ (fs%cfg%jmin:fs%cfg%jmax)); vol_ =0.0_WP
       allocate(vol  (fs%cfg%jmin:fs%cfg%jmax)); vol  =0.0_WP
       ! Integrate all data over x and z
-      do k=fs%cfg%kmin_,fs%cfg%kmax_
+      k=fs%cfg%kmax/2
+      ! do k=fs%cfg%kmin_,fs%cfg%kmax_
          do j=fs%cfg%jmin_,fs%cfg%jmax_
             do i=fs%cfg%imin_,fs%cfg%imax_
                vol_(j) = vol_(j)+fs%cfg%vol(i,j,k)
                Uavg_(j)=Uavg_(j)+fs%cfg%vol(i,j,k)*fs%U(i,j,k)
             end do
          end do
-      end do
+      ! end do
       ! All-reduce the data
       call MPI_ALLREDUCE( vol_, vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(Uavg_,Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
@@ -210,7 +211,7 @@ contains
       
       ! Create a single-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use ils_class, only: gmres_amg,pcg_pfmg
+         use ils_class, only: gmres_amg,pcg_pfmg,pcg_amg
          use mathtools, only: twoPi
          integer :: i,j,k
          real(WP) :: amp,vel
@@ -227,8 +228,8 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         ! call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_pfmg)
-         call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
+         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_amg)
+         !call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
          call param_read('Wbulk',Wbulk)
@@ -555,31 +556,31 @@ contains
                where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
             end block forcing
 
-            ! Add in contribution form polymer
-            polymer: block
-            use messager, only: die
-               integer :: i,j,k
-               ! Calculate updated elastic tensor terms
-               call fm%get_stressTensor(fm%SC,Wei,Lmax)
-               ! Get its divergence 
-               call fm%get_divT(fs)
-               ! Add visc_p*divT to momentum equation 
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-                           resU(i,j,k)=resU(i,j,k)+visc_p*(fm%divT(i,j,k,1)*time%dt)
-                        end if
-                        if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-                           resV(i,j,k)=resV(i,j,k)+visc_p*(fm%divT(i,j,k,2)*time%dt)
-                        end if
-                        if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-                           resW(i,j,k)=resW(i,j,k)+visc_p*(fm%divT(i,j,k,3)*time%dt)
-                        end if
-                     end do
-                  end do
-               end do
-            end block polymer
+            ! ! Add in contribution form polymer
+            ! polymer: block
+            ! use messager, only: die
+            !    integer :: i,j,k
+            !    ! Calculate updated elastic tensor terms
+            !    call fm%get_stressTensor(fm%SC,Wei,Lmax)
+            !    ! Get its divergence 
+            !    call fm%get_divT(fs)
+            !    ! Add visc_p*divT to momentum equation 
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
+            !                resU(i,j,k)=resU(i,j,k)+visc_p*(fm%divT(i,j,k,1)*time%dt)
+            !             end if
+            !             if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
+            !                resV(i,j,k)=resV(i,j,k)+visc_p*(fm%divT(i,j,k,2)*time%dt)
+            !             end if
+            !             if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
+            !                resW(i,j,k)=resW(i,j,k)+visc_p*(fm%divT(i,j,k,3)*time%dt)
+            !             end if
+            !          end do
+            !       end do
+            !    end do
+            ! end block polymer
 
             ! Form implicit residuals
             call fs%solve_implicit(time%dt,resU,resV,resW)

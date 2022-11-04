@@ -1,21 +1,23 @@
 # Parallelization
-Partition :	4 2 1
+Partition :	2 2 2
 
 # Mesh definition
-Lx :	5
+Lx :	12.6
 Ly :	1
-Lz :	0.04
-nx :	128
-ny :	40
-nz :	1
-Stretching : 2.1
+Lz :	1
+nx :	144
+ny :	56
+nz :	56
+Stretching :    2.5
+Initial Y plus: 0.37
+Max Y plus:     10
 
 # Fluid properties and velocity
-Solvent dynamic viscosity : 0.01
+Solvent dynamic viscosity : 2.27e-4
 Density                   : 1
 Ubulk                     : 1
 Wbulk                     : 0
-Perturbation              : 0
+Perturbation              : 0.5
 
 # FENE model properties
 Maximum extension of polymer chain : 100
@@ -36,5 +38,5 @@ Implicit iteration : 100
 
 
 # Ensight output
-Ensight output period :  1e-1
-Postproc output period : 10
+Ensight output period :  1e-2
+Postproc output period : 1
