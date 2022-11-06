@@ -4,6 +4,7 @@ module simulation
    use geometry,          only: cfg
    use incomp_class,      only: incomp
    use fene_class,        only: fene
+   use sgsmodel_class,    only: sgsmodel
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use event_class,       only: event
@@ -11,10 +12,11 @@ module simulation
    implicit none
    private
    
-   !> Single-phase incompressible flow solver, fene model and corresponding time tracker
+   !> Single-phase incompressible flow solver, fene model,sgs model and corresponding time tracker
    type(incomp),      public :: fs
    type(fene),        public :: fm
    type(timetracker), public :: time
+   type(sgsmodel),    public :: sgs         
    
    !> Ensight postprocessing
    type(ensight) :: ens_out
@@ -297,6 +299,11 @@ contains
 
          ! fm%SC=0.0_WP
       end block create_fene
+
+      ! Create an LES model
+      create_sgs: block
+         sgs=sgsmodel(cfg=fs%cfg,umask=fs%umask,vmask=fs%vmask,wmask=fs%wmask)
+      end block create_sgs
       
       ! Add Ensight output
       create_ensight: block
@@ -308,6 +315,7 @@ contains
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('viscosity',fs%visc)
+         call ens_out%add_scalar('visc_t',sgs%visc)
          call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
          call ens_out%add_scalar('Cyx',fm%SC(:,:,:,2))
          call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
@@ -448,7 +456,19 @@ contains
          ! Remember old velocity
          fs%Uold=fs%U
          fs%Vold=fs%V
-         fs%Wold=fs%W      
+         fs%Wold=fs%W     
+
+         ! Reset here gas viscosity
+         fs%visc=visc_s
+
+         ! Turbulence modeling
+         call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
+         resU=fs%rho
+         call sgs%get_visc(dt=time%dtold,rho=resU,Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
+         where (sgs%visc.lt.-fs%visc)
+            sgs%visc=-fs%visc
+         end where
+         fs%visc=fs%visc+sgs%visc
 
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -458,65 +478,65 @@ contains
             fs%V=0.5_WP*(fs%V+fs%Vold)
             fs%W=0.5_WP*(fs%W+fs%Wold)
 
-            ! Build mid-time scalar
-            fm%SC=0.5_WP*(fm%SC+fm%SCold)
+            ! ! Build mid-time scalar
+            ! fm%SC=0.5_WP*(fm%SC+fm%SCold)
 
-            ! Form velocity gradient
-            call fs%get_gradu(gradu)
+            ! ! Form velocity gradient
+            ! call fs%get_gradu(gradu)
 
-            ! ============= SCALAR SOLVER =======================  
-            ! Reset interpolation metrics to QUICK scheme
-            call fm%metric_reset()
+            ! ! ============= SCALAR SOLVER =======================  
+            ! ! Reset interpolation metrics to QUICK scheme
+            ! call fm%metric_reset()
 
-            ! Calculate explicit SC prior to checking bounds
-            pre_check: block
-               ! Explicit calculation of resSC from scalar equation
-               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-               ! Assemble explicit residual
-               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-               ! ! Apply this residual
-               ! SC_=2.0_WP*fm%SC-fm%SCold+resSC
-            end block pre_check
+            ! ! Calculate explicit SC prior to checking bounds
+            ! pre_check: block
+            !    ! Explicit calculation of resSC from scalar equation
+            !    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+            !    ! Assemble explicit residual
+            !    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+            !    ! ! Apply this residual
+            !    ! SC_=2.0_WP*fm%SC-fm%SCold+resSC
+            ! end block pre_check
             
-            ! Check boundedess of explicit SC calculation
-            call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+            ! ! Check boundedess of explicit SC calculation
+            ! call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
 
-            ! Calculate explicit SC post checking bounds
-            post_check: block
-               ! Explicit calculation of resSC from scalar equation
-               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-               ! Assemble explicit residual
-               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-            end block post_check
+            ! ! Calculate explicit SC post checking bounds
+            ! post_check: block
+            !    ! Explicit calculation of resSC from scalar equation
+            !    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+            !    ! Assemble explicit residual
+            !    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+            ! end block post_check
             
-            ! Add FENE source terms
-            fene: block
-               integer :: i,j,k,isc
-               ! Calculate CgradU terms
-               call fm%get_CgradU(fm%SC,gradu)    
-               ! Calculate T terms
-               call fm%get_stressTensor(fm%SC,Wei,Lmax)     
-               ! Add source terms to calculated residual
-               do isc=1,fm%nscalar
-                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                        do i=fs%cfg%imino_,fs%cfg%imaxo_
-                           resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)*time%dt-fm%T(i,j,k,isc))*time%dt
-                        end do
-                     end do
-                  end do
-               end do
-            end block fene
+            ! ! Add FENE source terms
+            ! fene: block
+            !    integer :: i,j,k,isc
+            !    ! Calculate CgradU terms
+            !    call fm%get_CgradU(fm%SC,gradu)    
+            !    ! Calculate T terms
+            !    call fm%get_stressTensor(fm%SC,Wei,Lmax)     
+            !    ! Add source terms to calculated residual
+            !    do isc=1,fm%nscalar
+            !       do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+            !          do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+            !             do i=fs%cfg%imino_,fs%cfg%imaxo_
+            !                resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)*time%dt-fm%T(i,j,k,isc))*time%dt
+            !             end do
+            !          end do
+            !       end do
+            !    end do
+            ! end block fene
 
-            ! Form implicit residual
-            call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
+            ! ! Form implicit residual
+            ! call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 
-            ! Apply this residual
-            fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
+            ! ! Apply this residual
+            ! fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
 
-            ! Apply other boundary conditions on the resulting field
-            call fm%apply_bcond(time%t,time%dt)
-            ! ===================================================
+            ! ! Apply other boundary conditions on the resulting field
+            ! call fm%apply_bcond(time%t,time%dt)
+            ! ! ===================================================
 
             ! ============= VELOCITY SOLVER ======================  
             ! Explicit calculation of drho*u/dt from NS
