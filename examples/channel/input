@@ -13,7 +13,7 @@ Initial Y plus: 0.37
 Max Y plus:     10
 
 # Fluid properties and velocity
-Solvent dynamic viscosity : 2.27e-4
+Solvent dynamic viscosity : 1.667e-4
 Density                   : 1
 Ubulk                     : 1
 Wbulk                     : 0
