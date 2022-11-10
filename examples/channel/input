@@ -18,6 +18,7 @@ Density                   : 1
 Ubulk                     : 1
 Wbulk                     : 0
 Perturbation              : 0.5
+Angular velocity          : 0.5
 
 # FENE model properties
 Maximum extension of polymer chain : 100

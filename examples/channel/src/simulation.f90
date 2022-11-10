@@ -216,7 +216,7 @@ contains
          use ils_class, only: gmres_amg,pcg_pfmg,pcg_amg
          use mathtools, only: twoPi
          integer :: i,j,k
-         real(WP) :: amp,vel
+         real(WP) :: amp,vel,omega
          ! Create flow solver
          fs=incomp(cfg=cfg,name='NS solver')
          ! Assign constant viscosity
@@ -241,14 +241,15 @@ contains
          meanW=Wbulk
          ! To facilitate transition
          call param_read('Perturbation',amp)
+         call param_read('Angular velocity',omega)
          vel=sqrt(Ubulk**2+Wbulk**2)
          do k=fs%cfg%kmino_,fs%cfg%kmaxo_
             do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                do i=fs%cfg%imino_,fs%cfg%imaxo_
                   ! if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
                   ! if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
-                  if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
-                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)+8.0_WP*twoPi*fs%cfg%ym(j)
+                  if (fs%vmask(i,j,k).eq.0) fs%V(i,j,k)=fs%V(i,j,k)+2.00_WP*twoPi*omega*fs%cfg%zm(k)*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
+                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)-2.00_WP*twoPi*omega*fs%cfg%ym(j)*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
                end do
             end do
          end do
