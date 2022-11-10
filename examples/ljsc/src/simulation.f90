@@ -4,7 +4,7 @@ module simulation
    use geometry,          only: cfg
    use mast_class,        only: mast
    use vfs_class,         only: vfs
-   use matm_class,        only: matm
+   use matm_class,        only: matm,air,water
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use event_class,       only: event
@@ -29,8 +29,9 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
 
    !> Problem definition
-   real(WP) :: dcyl,xcyl
-   integer :: relax_model
+   real(WP) :: djet
+   real(WP), dimension(:), allocatable :: xjet
+   integer :: relax_model, nwall
 
 contains
 
@@ -42,7 +43,7 @@ contains
      integer, intent(in) :: i,j,k
      logical :: isIn
      isIn=.false.
-     if (i.eq.pg%imin) isIn=.true.
+     if (i.eq.pg%imin-1) isIn=.true.
    end function left_of_domain
 
    !> Function that localizes the right (x+) of the domain
@@ -55,19 +56,94 @@ contains
      isIn=.false.
      if (i.eq.pg%imax+1) isIn=.true.
    end function right_of_domain
+   
+   !> Function that localizes the top (y+) of the domain
+   function top_of_domain(pg,i,j,k) result(isIn)
+     use pgrid_class, only: pgrid
+     implicit none
+     class(pgrid), intent(in) :: pg
+     integer, intent(in) :: i,j,k
+     logical :: isIn
+     isIn=.false.
+     if (j.eq.pg%jmax+1) isIn=.true.
+   end function top_of_domain
+   
+   !> Function that localizes the back (z-) of the domain
+   function back_of_domain(pg,i,j,k) result(isIn)
+     use pgrid_class, only: pgrid
+     implicit none
+     class(pgrid), intent(in) :: pg
+     integer, intent(in) :: i,j,k
+     logical :: isIn
+     isIn=.false.
+     if (k.eq.pg%kmin-1) isIn=.true.
+   end function back_of_domain
+   
+   !> Function that localizes the front (z+) of the domain
+   function front_of_domain(pg,i,j,k) result(isIn)
+     use pgrid_class, only: pgrid
+     implicit none
+     class(pgrid), intent(in) :: pg
+     integer, intent(in) :: i,j,k
+     logical :: isIn
+     isIn=.false.
+     if (k.eq.pg%kmax+1) isIn=.true.
+   end function front_of_domain
+   
+   !> Function that localizes the jet(s) initial location
+   function jet(pg,i,j,k) result(isIn)
+     use pgrid_class, only: pgrid
+     implicit none
+     class(pgrid), intent(in) :: pg
+     integer, intent(in) :: i,j,k
+     real(WP), dimension(3) :: xyz
+     logical :: isIn
+     isIn=.false.
+     xyz(1)=pg%xm(i); xyz(2)=0.0_WP; xyz(3)=pg%zm(k)
+     if (j.le.pg%jmin-1+nwall.and.levelset_halfdrop(xyz,0.0_WP).gt.0.0_WP) isIn=.true.
+   end function jet
+   
+   !> Function that localizes the walls surrounding the jets
+   function wall(pg,i,j,k) result(isIn)
+     use pgrid_class, only: pgrid
+     implicit none
+     class(pgrid), intent(in) :: pg
+     integer, intent(in) :: i,j,k
+     logical :: isIn
+     isIn=.false.
+     if (j.le.pg%jmin-1+nwall.and.(.not.jet(pg,i,j,k))) isIn=.true.
+   end function wall
+   
+   !> Function that localizes the jet(s) BCs at edge of domain
+   function jet_bdy(pg,i,j,k) result(isIn)
+     use pgrid_class, only: pgrid
+     implicit none
+     class(pgrid), intent(in) :: pg
+     integer, intent(in) :: i,j,k
+     real(WP), dimension(3) :: xyz
+     logical :: isIn
+     isIn=.false.
+     xyz(1)=pg%xm(i); xyz(2)=0.0_WP; xyz(3)=pg%zm(k)
+     if (j.eq.pg%jmin-1.and.(jet(pg,i,j,k))) isIn=.true.
+   end function jet_bdy
 
-   !> Function that defines a level set function for a cylindrical droplet
-   function levelset_cyl(xyz,t) result(G)
+   !> Function that defines a level set function for the start of a jet at wall
+   function levelset_halfdrop(xyz,t) result(G)
       implicit none
       real(WP), dimension(3),intent(in) :: xyz
       real(WP), intent(in) :: t
       real(WP) :: G
-      G=1.0_WP-sqrt(((xyz(1)-xcyl)/dcyl*2.0_WP)**2+(xyz(2)/dcyl*2.0_WP)**2)
-   end function levelset_cyl
+      integer  :: n
+      ! Loop jets
+      G = -huge(1.0_WP)
+      do n = 1,size(xjet)
+        G=max(G,0.5_WP*djet-sqrt((xyz(1)-xjet(n))**2+max(0.0_WP,xyz(2))**2+xyz(3)**2))
+      end do
+   end function levelset_halfdrop
 
    !> Initialization of problem solver
    subroutine simulation_init
-      use param, only: param_read
+      use param, only: param_read,param_getsize
       implicit none
 
 
@@ -81,12 +157,34 @@ contains
          time%dt=time%dtmax
          time%itmax=2
       end block initialize_timetracker
+      
+      ! Set up walls before solvers are initialized
+      create_walls: block
+        integer :: i,j,k,njet
+        ! Initialize liquid jet(s)
+        call param_read('Jet diameter',djet)
+        njet = param_getsize('Jet location')
+        allocate(xjet(njet))
+        call param_read('Jet location',xjet)
+        ! Number of wall cells
+        call param_read('Wall cells in domain', nwall, default=1)
+        do k=cfg%kmino_,cfg%kmaxo_
+          do j=cfg%jmino_,cfg%jmaxo_
+            do i=cfg%imino_,cfg%imaxo_
+              if (wall(cfg%pgrid,i,j,k)) then
+                cfg%VF(i,j,k)=0.0_WP
+              end if
+            end do
+          end do
+        end do
+        
+      end block create_walls
 
 
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom, only: cube_refine_vol
-         use vfs_class, only: r2p,lvira,elvira,VFhi,VFlo
+         use vfs_class, only: elvira,VFhi,VFlo
          integer :: i,j,k,n,si,sj,sk
          real(WP), dimension(3,8) :: cube_vertex
          real(WP), dimension(3) :: v_cent,a_cent
@@ -94,9 +192,6 @@ contains
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver with lvira reconstruction
          vf=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF')
-         ! Initialize liquid at left
-         call param_read('Cylinder diameter',dcyl)
-         call param_read('Cylinder location',xcyl)
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -111,12 +206,13 @@ contains
                   end do
                   ! Call adaptive refinement code to get volume and barycenters recursively
                   vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_cyl,0.0_WP,amr_ref_lvl)
+                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_halfdrop,0.0_WP,amr_ref_lvl)
                   vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
+                  ! Round up to fully liquid within wall (accuracy of mdot improves with resolution)
+                  if (vf%VF(i,j,k).gt.0.0_WP.and.vf%cfg%ym(j).lt.0.0_WP) vf%VF(i,j,k)=1.0_WP
                   if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
                      vf%Lbary(:,i,j,k)=v_cent
                      vf%Gbary(:,i,j,k)=([vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]-vf%VF(i,j,k)*vf%Lbary(:,i,j,k))/(1.0_WP-vf%VF(i,j,k))
-                     vf%Gbary(3,i,j,k)=v_cent(3);
                   else
                      vf%Lbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
                      vf%Gbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
@@ -146,37 +242,41 @@ contains
 
       ! Create a compressible two-phase flow solver
       create_and_initialize_flow_solver: block
-         use mast_class, only: clipped_neumann,dirichlet,bc_scope,bcond,mech_egy_mech_hhz
+         use mast_class, only: clipped_neumann,dirichlet,bc_scope,bcond,thermmech_egy_mech_hhz
          use ils_class,  only: pcg_bbox,gmres_smg
          use mathtools,  only: Pi
          use parallel,   only: amRoot
          integer :: i,j,k,n
          real(WP), dimension(3) :: xyz
-         real(WP) :: gamm_l,Pref_l,gamm_g,visc_l,visc_g,hdff_g,hdff_l
-         real(WP) :: xshock,vshock,relshockvel
-         real(WP) :: Grho0, GP0, Grho1, GP1, ST, Ma1, Ma, Lrho0
+         real(WP) :: gamm_l,Pref_l,q_l,b_l,gamm_g
+         real(WP) :: ST, Ma, Ptot, Ttot, mdot, BL, vcross
+         real(WP) :: T_cf, P_cf, U_cf, RHO_cf
+         real(WP) :: T_j , P_j , V_j , RHO_j
          type(bcond), pointer :: mybc
+         real(WP), parameter :: R = 287.0_WP ! Gas constant for air
+         
          ! Create material model class
          matmod=matm(cfg=cfg,name='Liquid-gas models')
          ! Get EOS parameters from input
+         ! Paramters from Kuhn and Desjardins (2021): gamm_l = 1.19,
+         ! Pref_l = 7.028e8, q_l = -1.178e6, b_l = 6.61e-4, gamm_g = 1.4
          call param_read('Liquid gamma',gamm_l)
          call param_read('Liquid Pref', Pref_l)
+         call param_read('Liquid q', q_l)
+         call param_read('Liquid b', b_l)
          call param_read('Gas gamma',gamm_g)
          ! Register equations of state
-         call matmod%register_stiffenedgas('liquid',gamm_l,Pref_l)
+         call matmod%register_NobleAbelstiffenedgas('liquid',gamm_l,Pref_l,q_l,b_l)
          call matmod%register_idealgas('gas',gamm_g)
          ! Create flow solver
          fs=mast(cfg=cfg,name='Two-phase All-Mach',vf=vf)
          ! Register flow solver variables with material models
          call matmod%register_thermoflow_variables('liquid',fs%Lrho,fs%Ui,fs%Vi,fs%Wi,fs%LrhoE,fs%LP)
          call matmod%register_thermoflow_variables('gas'   ,fs%Grho,fs%Ui,fs%Vi,fs%Wi,fs%GrhoE,fs%GP)
-         ! Assign constant viscosity to each phase, also heat diffusion
-         call param_read('Liquid dynamic viscosity',visc_l)
-         call param_read('Gas dynamic viscosity',visc_g)
-         call param_read('Liquid thermal conductivity',hdff_l)
-         call param_read('Gas thermal conductivity',hdff_g)
-         call matmod%register_diffusion_thermo_models(viscconst_gas=visc_g, viscconst_liquid=visc_l, &
-                                                      hdffconst_gas=hdff_g, hdffconst_liquid=hdff_l)
+         ! Use built-in temperature-dependent models for diffusion and specific heat
+         call matmod%register_diffusion_thermo_models(viscmodel_gas=air, viscmodel_liquid=water, &
+                                                      hdffmodel_gas=air, hdffmodel_liquid=water, &
+                                                      sphtmodel_gas=air, sphtmodel_liquid=water)
          ! Read in surface tension coefficient
          call param_read('Surface tension coefficient',fs%sigma)
          ! Configure pressure solver
@@ -188,68 +288,104 @@ contains
          ! Setup the solver
          call fs%setup(pressure_ils=pcg_bbox,implicit_ils=gmres_smg)
 
-         ! Liquid density
-         call param_read('Liquid density',Lrho0)
-         fs%Lrho = Lrho0
+         
+         ! Read crossflow parameters
+         call param_read('Mach number',Ma)
+         call param_read('Stagnation pressure',Ptot)
+         call param_read('Stagnation temperature',Ttot)
+         call param_read('Crossflow BL thickness',BL)
+         ! Get crossflow quantities
+         T_cf = Ttot / (1+(gamm_g-1.0_WP)/2.0_WP*Ma**2)
+         P_cf = Ptot * (1.0_WP+(gamm_g-1.0_WP)/2.0_WP*Ma**2)**(gamm_g/(1.0_WP-gamm_g))
+         U_cf = Ma * sqrt(gamm_g*R*T_cf)
+         RHO_cf = P_cf/R/Ttot * (1+(gamm_g-1.0_WP)/2.0_WP*Ma**2)
+         
+         ! Read jet parameters
+         call param_read('Mass flowrate',mdot)
+         call param_read('Liquid temperature',T_j)
+         call param_read('Liquid density',RHO_j)
+         ! Get jet quantities
+         V_j = mdot / RHO_j / (pi * 0.25_WP * djet**2)
+         P_j = matmod%EOS_pressure(T_j,RHO_j,matmod%spec_heat_liquid(T_j),'liquid')
+         
+         ! Print useful information
+         if (amRoot) then
+           print*,"===== Problem Setup Description ====="
+           print*,'Mach number', Ma, 'Number of jets', size(xjet), 'Mass flowrate', mdot
+           print*,'Stagnation: Pressure', Ptot, 'Temperature', Ttot
+           print*,'Crossflow:  Pressure', P_cf,'Density',RHO_cf,'Velocity',U_cf
+           print*,'Jet:        Pressure',  P_j,'Density', RHO_j,'Velocity', V_j
+           print*,'Re_BL',RHO_cf*U_cf*BL/matmod%viscosity_air(T_cf), &
+                  'Re_D',RHO_cf*U_cf*djet/matmod%viscosity_air(T_cf), &
+                  'Re_jet',RHO_j*V_j*djet/matmod%viscosity_water(T_j)
+           if (fs%sigma.gt.0.0_WP) then
+             print*,'We',RHO_cf*U_cf**2*djet/fs%sigma, &
+                    'We_eff', (2.0_WP + (gamm_g-1.0_WP)*Ma**2) / & 
+                    ((gamm_g-1.0_WP)*Ma**2) * (RHO_cf*U_cf**2*djet/fs%sigma)
+           else
+             print*,'We      Infinity'
+           end if
+         end if
+         
+         !! -- Populate crossflow data -- !!
          ! Initially 0 velocity in y and z
          fs%Vi = 0.0_WP; fs%Wi = 0.0_WP
          ! Zero face velocities as well for the sake of dirichlet boundaries
          fs%V = 0.0_WP; fs%W = 0.0_WP
-         ! Set up initial thermo properties (0)
-         ! Default is from Meng & Colonius (2015),
-         ! which is basically the same as Igra & Takayama and Terashima & Tryggvason
-         call param_read('Pre-shock density',Grho0,default=1.204_WP)
-         call param_read('Pre-shock pressure',GP0,default=1.01325e5_WP)
-         call param_read('Mach number of shock',Ma,default=1.47_WP)
-         call param_read('Shock location',xshock)
-         ! Use shock relations to get post-shock numbers (1)
-         GP1 = GP0 * (2.0_WP*gamm_g*Ma**2 - (gamm_g-1.0_WP)) / (gamm_g+1.0_WP)
-         Grho1 = Grho0 * (Ma**2 * (gamm_g+1.0_WP) / ((gamm_g-1.0_WP)*Ma**2 + 2.0_WP))
-         ! Calculate post-shock Mach number
-         Ma1 = sqrt(((gamm_g-1.0_WP)*(Ma**2)+2.0_WP)/(2.0_WP*gamm_g*(Ma**2)-(gamm_g-1.0_WP)))
-         ! Calculate post-shock velocity
-         vshock = -Ma1 * sqrt(gamm_g*GP1/Grho1) + Ma*sqrt(gamm_g*GP0/Grho0)
-         ! Velocity at which shock moves
-         relshockvel = -Grho1*vshock/(Grho0-Grho1)
-
-         if (amRoot) then
-           print*,"===== Problem Setup Description ====="
-           print*,'Mach number', Ma
-           print*,'Pre-shock:  Density',Grho0,'Pressure',GP0
-           print*,'Post-shock: Density',Grho1,'Pressure',GP1,'Velocity',vshock
-           print*,'Shock velocity', relshockvel
-         end if
-
-         ! Initialize gas phase quantities
-         do i=fs%cfg%imino_,fs%cfg%imaxo_
-           ! pressure, velocity, use matmod for energy
-           if (fs%cfg%x(i).lt.xshock) then
-             fs%Grho(i,:,:) = Grho1
-             fs%Ui(i,:,:) = vshock
-             fs%GrhoE(i,:,:) = matmod%EOS_energy(GP1,Grho1,vshock,0.0_WP,0.0_WP,'gas')
+         do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+           if (j.le.nwall) then
+             vcross = 0.0_WP
+             RHO_cf = P_cf/R/Ttot
            else
-             fs%Grho(i,:,:) = Grho0
-             fs%Ui(i,:,:) = 0.0_WP
-             fs%GrhoE(i,:,:) = matmod%EOS_energy(GP0,Grho0,0.0_WP,0.0_WP,0.0_WP,'gas')
+             vcross = U_cf * min(1.0_WP, (fs%cfg%ym(j)/BL)**(1.0_WP/7.0_WP))
+             RHO_cf = P_cf/R/Ttot/(1+(gamm_g-1.0_WP)/2.0_WP*Ma**2*(1.0_WP-(vcross/U_cf)**2))*(1+(gamm_g-1.0_WP)/2.0_WP*Ma**2)
            end if
+           ! pressure, velocity, use matmod for energy
+           fs%Grho(:,j,:) = RHO_cf
+           fs%Ui(:,j,:) = vcross
+           fs%GrhoE(:,j,:) = matmod%EOS_energy(P_cf,RHO_cf,vcross,0.0_WP,0.0_WP,'gas')
          end do
-
-         ! Initialize liquid energy, with surface tension
-         fs%LrhoE = matmod%EOS_energy(GP0+fs%sigma*2.0_WP/dcyl,Lrho0,0.0_WP,0.0_WP,0.0_WP,'liquid')
-
+         
+         !! -- Populate jet data -- !!
+         fs%Lrho = RHO_j
+         do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+           do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+             do i=fs%cfg%imino_,fs%cfg%imaxo_
+               ! Populate liquid velocity (use uniform for now)
+               if (vf%VF(i,j,k).gt.0.0_WP) then
+                 fs%Ui(i,j,k) = 0.0_WP
+                 fs%Vi(i,j,k) = V_j
+                 fs%LrhoE(i,j,k) = matmod%EOS_energy(P_j,RHO_j,0.0_WP,V_j,0.0_WP,'liquid')
+               end if
+             end do
+           end do
+         end do
+         
          ! Define boundary conditions - initialized values are intended dirichlet values too, for the cell centers
-         call fs%add_bcond(name= 'inflow',type=dirichlet      ,locator=left_of_domain ,face='x',dir=-1)
-         call fs%add_bcond(name='outflow',type=clipped_neumann,locator=right_of_domain,face='x',dir=+1)
+         call fs%add_bcond(name='crossflow',type=dirichlet      ,locator=left_of_domain ,celldir='xm')
+         call fs%add_bcond(name='jet'      ,type=dirichlet      ,locator=jet_bdy        ,celldir='ym')
+         call fs%add_bcond(name='outflow'  ,type=clipped_neumann,locator=right_of_domain,celldir='xp')
+         call fs%add_bcond(name='out_yp'   ,type=clipped_neumann,locator=top_of_domain  ,celldir='yp')
+         if (fs%cfg%nz.gt.1) then
+           call fs%add_bcond(name='out_zm'   ,type=clipped_neumann,locator=back_of_domain ,celldir='zm')
+           call fs%add_bcond(name='out_zp'   ,type=clipped_neumann,locator=front_of_domain,celldir='zp')
+         end if
 
          ! Calculate face velocities
          call fs%interp_vel_basic(vf,fs%Ui,fs%Vi,fs%Wi,fs%U,fs%V,fs%W)
-         ! Apply face BC - inflow
-         call fs%get_bcond('inflow',mybc)
+         ! Apply face BC - air inflow
+         call fs%get_bcond('crossflow',mybc)
          do n=1,mybc%itr%n_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%U(i,j,k)=vshock
+            fs%U(i:i+1,j,k)=fs%Ui(i,j,k)
          end do
-         ! Apply face BC - outflow
+         ! Apply face BC - water inflow
+         call fs%get_bcond('jet',mybc)
+         do n=1,mybc%itr%n_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%V(i,j:j+1,k)=fs%Vi(i,j,k)
+         end do
+         ! Apply face BC - outflows
          bc_scope = 'velocity'
          call fs%apply_bcond(time%dt,bc_scope)
 
@@ -257,7 +393,7 @@ contains
          fs%RHO   = (1.0_WP-vf%VF)*fs%Grho  + vf%VF*fs%Lrho
          fs%rhoUi = fs%RHO*fs%Ui; fs%rhoVi = fs%RHO*fs%Vi; fs%rhoWi = fs%RHO*fs%Wi
          ! Perform initial pressure relax
-         relax_model = mech_egy_mech_hhz
+         relax_model = thermmech_egy_mech_hhz
          call fs%pressure_relax(vf,matmod,relax_model)
          ! Calculate initial phase and bulk moduli
          call fs%init_phase_bulkmod(vf,matmod)
@@ -272,7 +408,7 @@ contains
       ! Add Ensight output
       create_ensight: block
          ! Create Ensight output from cfg
-         ens_out=ensight(cfg=cfg,name='ShockWaterCylinder')
+         ens_out=ensight(cfg=cfg,name='LiqJetinSSCrossflow')
          ! Create event for Ensight output
          ens_evt=event(time=time,name='Ensight output')
          call param_read('Ensight output period',ens_evt%tper)
@@ -284,6 +420,7 @@ contains
          call ens_out%add_scalar('Lrho',fs%Lrho)
          call ens_out%add_scalar('Density',fs%RHO)
          call ens_out%add_scalar('Bulkmod',fs%RHOSS2)
+         call ens_out%add_scalar('Temperature',fs%Tmptr)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
          ! Output to ensight
