@@ -1,0 +1,34 @@
+# Parallelization
+Partition :	2 2 2
+
+# Mesh definition
+Lx :	      32
+Liquid Ly :	  4
+Gas Ly :	  12
+Lz :	      12
+nx :	      320
+ny :	      160
+nz :	      160
+
+# Fluid properties and inital profile
+Gas Reynolds number :  688
+Gas Weber number :     49
+Viscosity ratio :      60       !< This is mu_l/mu_g
+Density ratio :        800      !< This is rho_l/rho_g
+Static contact angle : 72
+
+# Time integration
+Max timestep size : 1e-3
+Max cfl number :    0.9
+Max time :          400
+
+# Pressure solver
+Pressure tolerance : 1e-6
+Pressure iteration : 100
+
+# Implicit velocity solver
+Implicit tolerance : 1e-6
+Implicit iteration : 100
+
+# Ensight output
+Ensight output period : 1
