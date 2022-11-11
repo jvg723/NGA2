@@ -17,7 +17,6 @@ module simulation
    type(vfs),         public :: vf
    type(timetracker), public :: time
    type(surfmesh),    public :: smesh                                              
-   ! SGS and surmesh
    
    !> Ensight postprocessing
    type(ensight) :: ens_out
