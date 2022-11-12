@@ -11,8 +11,8 @@ ny :	      160
 nz :	      1
 
 # Fluid properties and inital profile
-Gas Reynolds number :  688
-Gas Weber number :     49
+Gas Reynolds number :  1000
+Gas Weber number :     20
 Viscosity ratio :      60       !< This is mu_l/mu_g
 Density ratio :        800      !< This is rho_l/rho_g
 Static contact angle : 72
