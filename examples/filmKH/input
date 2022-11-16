@@ -16,6 +16,7 @@ Gas Weber number :     20
 Viscosity ratio :      60       !< This is mu_l/mu_g
 Density ratio :        800      !< This is rho_l/rho_g
 Static contact angle : 72
+Power law constant   : 0.3
 
 # Time integration
 Max timestep size : 1e-1

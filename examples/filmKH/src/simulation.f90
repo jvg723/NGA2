@@ -6,7 +6,7 @@ module simulation
    use vfs_class,         only: vfs
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
-   ! use surfmesh_class,    only: surfmesh
+   use surfmesh_class,    only: surfmesh
    use event_class,       only: event
    use monitor_class,     only: monitor
    implicit none
@@ -16,7 +16,7 @@ module simulation
    type(tpns),        public :: fs
    type(vfs),         public :: vf
    type(timetracker), public :: time
-   ! type(surfmesh),    public :: smesh                                              
+   type(surfmesh),    public :: smesh                                              
    
    !> Ensight postprocessing
    type(ensight) :: ens_out
@@ -28,13 +28,14 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:), allocatable :: SRMag
+   real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:),   allocatable :: SRmag
    real(WP), dimension(:,:,:,:), allocatable :: SR
    
    !> Problem definition
    real(WP) :: Reg,Weg,r_visc,r_rho
+   real(WP) :: n,lambda,visc_0,visc_inf
    integer :: nwaveX,nwaveZ
    real(WP), dimension(:), allocatable :: wnumbX,wshiftX,wampX,wnumbZ,wshiftZ,wampZ
    
@@ -109,14 +110,14 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(resU   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SRMag  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR     (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resU (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -145,7 +146,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         vf=vfs(cfg=cfg,reconstruction_method=r2p,name='VOF')
+         vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
          ! Prepare initialize interface parameters
          nwaveX=6
          allocate(wnumbX(nwaveX),wshiftX(nwaveX),wampX(nwaveX))
@@ -225,6 +226,13 @@ contains
          call param_read('Gas Weber number',Weg); fs%sigma=1.0_WP/(Weg+epsilon(Weg))
          call param_read('Static contact angle',fs%contact_angle)
          fs%contact_angle=fs%contact_angle*Pi/180.0_WP
+         ! Read in power law constant for non-newtonian liquid
+         call param_read('Power law constant',n)
+         ! Set low and high SR viscosity values
+         visc_0=r_visc*fs%visc_g
+         visc_inf=0.0_WP
+         ! Characteristic time scale
+         lambda=r_visc
          ! Configure pressure solver
          call param_read('Pressure iteration',fs%psolv%maxit)
          call param_read('Pressure tolerance',fs%psolv%rcvg)
@@ -254,29 +262,29 @@ contains
       end block create_and_initialize_flow_solver
 
       ! Create surfmesh object for interface polygon output
-      ! create_smesh: block
-      !    use irl_fortran_interface
-      !    integer :: i,j,k,nplane,np
-      !    ! Include an extra variable for number of planes
-      !    smesh=surfmesh(nvar=1,name='plic')
-      !    smesh%varname(1)='nplane'
-      !    ! Transfer polygons to smesh
-      !    call vf%update_surfmesh(smesh)
-      !    ! Also populate nplane variable
-      !    smesh%var(1,:)=1.0_WP
-      !    np=0
-      !    do k=vf%cfg%kmin_,vf%cfg%kmax_
-      !       do j=vf%cfg%jmin_,vf%cfg%jmax_
-      !          do i=vf%cfg%imin_,vf%cfg%imax_
-      !             do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
-      !                if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-      !                   np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
-      !                end if
-      !             end do
-      !          end do
-      !       end do
-      !    end do
-      ! end block create_smesh
+      create_smesh: block
+         use irl_fortran_interface
+         integer :: i,j,k,nplane,np
+         ! Include an extra variable for number of planes
+         smesh=surfmesh(nvar=1,name='plic')
+         smesh%varname(1)='nplane'
+         ! Transfer polygons to smesh
+         call vf%update_surfmesh(smesh)
+         ! Also populate nplane variable
+         smesh%var(1,:)=1.0_WP
+         np=0
+         do k=vf%cfg%kmin_,vf%cfg%kmax_
+            do j=vf%cfg%jmin_,vf%cfg%jmax_
+               do i=vf%cfg%imin_,vf%cfg%imax_
+                  do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                     end if
+                  end do
+               end do
+            end do
+         end do
+      end block create_smesh
       
       
       ! Add Ensight output
@@ -291,7 +299,8 @@ contains
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('SRmag',SRmag)
-         ! call ens_out%add_surface('vofplic',smesh)
+         call ens_out%add_scalar('visc_l',fs%visc_l)
+         call ens_out%add_surface('vofplic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -357,24 +366,26 @@ contains
          ! Calculate SR
          call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
 
-         ! ! Model non-Newtonian fluid
-         ! nonewt: block
-         !    integer :: i,j,k
-         !    ! real(WP) :: SRmag
-         !    real(WP), parameter :: C=1.137e-3_WP
-         !    real(WP), parameter :: n=0.3_WP 
-         !    ! Update viscosity
-         !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-         !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-         !          do i=fs%cfg%imino_,fs%cfg%imaxo_
-         !             SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-         !             SRmag(i,j,k)=max(SRmag(i,j,k),1000.0_WP**(1.0_WP/(n-1.0_WP)))
-         !             fs%visc_l(i,j,k)=C*SRmag(i,j,k)**(n-1.0_WP)
-         !          end do
-         !       end do
-         !    end do
-         !    call fs%cfg%sync(fs%visc_l)
-         ! end block nonewt
+         ! Model non-Newtonian fluid
+         nonewt: block
+            integer :: i,j,k
+            ! real(WP), parameter :: C=1.137e-3_WP
+            ! Update viscosity
+            do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+               do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                  do i=fs%cfg%imino_,fs%cfg%imaxo_
+                     ! Power law model 
+                     ! SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+                     ! SRmag(i,j,k)=max(SRmag(i,j,k),1000.0_WP**(1.0_WP/(n-1.0_WP)))
+                     ! fs%visc_l(i,j,k)=C*SRmag(i,j,k)**(n-1.0_WP)
+                     ! Carreau Model
+                     SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+                     fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(lambda*SRmag(i,j,k))**2.00_WP)**((n-1.00_WP)/2.00_WP)
+                  end do
+               end do
+            end do
+            call fs%cfg%sync(fs%visc_l)
+         end block nonewt
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -455,26 +466,26 @@ contains
          ! Output to ensight
          if (ens_evt%occurs()) then 
             ! Update surfmesh object
-         !    update_smesh: block
-         !    use irl_fortran_interface
-         !    integer :: nplane,np,i,j,k
-         !    ! Transfer polygons to smesh
-         !    call vf%update_surfmesh(smesh)
-         !    ! Also populate nplane variable
-         !    smesh%var(1,:)=1.0_WP
-         !    np=0
-         !    do k=vf%cfg%kmin_,vf%cfg%kmax_
-         !       do j=vf%cfg%jmin_,vf%cfg%jmax_
-         !          do i=vf%cfg%imin_,vf%cfg%imax_
-         !             do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
-         !                if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-         !                   np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
-         !                end if
-         !             end do
-         !          end do
-         !       end do
-         !    end do
-         ! end block update_smesh
+            update_smesh: block
+            use irl_fortran_interface
+            integer :: nplane,np,i,j,k
+            ! Transfer polygons to smesh
+            call vf%update_surfmesh(smesh)
+            ! Also populate nplane variable
+            smesh%var(1,:)=1.0_WP
+            np=0
+            do k=vf%cfg%kmin_,vf%cfg%kmax_
+               do j=vf%cfg%jmin_,vf%cfg%jmax_
+                  do i=vf%cfg%imin_,vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end block update_smesh
          ! Perform ensight output 
             call ens_out%write_data(time%t)
          end if
