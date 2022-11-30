@@ -51,36 +51,63 @@ contains
    
    !> Specialized subroutine that outputs the velocity distribution
    subroutine postproc_vel()
-      use string,    only: str_medium
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
-      use parallel,  only: MPI_REAL_WP
+      use string,      only: str_medium
+      use mpi_f08,     only: MPI_ALLREDUCE,MPI_SUM
+      use parallel,    only: MPI_REAL_WP
       implicit none
       integer :: iunit,ierr,i,j,k
-      real(WP), dimension(:), allocatable :: Uavg,Uavg_,vol,vol_
+      real(WP), dimension(3) :: pos=(/ 0.0_WP,0.0_WP,0.0_WP /)
+      integer,  dimension(3) :: ind_guess=(/ 1,1,64 /)
+      integer,  dimension(3) :: ind
+      real(WP), dimension(:), allocatable :: Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,vol,vol_,volmid,volmid_
       character(len=str_medium) :: filename,timestamp
       ! Allocate vertical line storage
-      allocate(Uavg (fs%cfg%jmin:fs%cfg%jmax)); Uavg =0.0_WP
-      allocate(Uavg_(fs%cfg%jmin:fs%cfg%jmax)); Uavg_=0.0_WP
-      allocate(vol_ (fs%cfg%jmin:fs%cfg%jmax)); vol_ =0.0_WP
-      allocate(vol  (fs%cfg%jmin:fs%cfg%jmax)); vol  =0.0_WP
+      allocate(Uavg    (fs%cfg%jmin:fs%cfg%jmax)); Uavg    =0.0_WP
+      allocate(Uavg_   (fs%cfg%jmin:fs%cfg%jmax)); Uavg_   =0.0_WP
+      allocate(Umid    (fs%cfg%jmin:fs%cfg%jmax)); Umid    =0.0_WP
+      allocate(Umid_   (fs%cfg%jmin:fs%cfg%jmax)); Umid_   =0.0_WP
+      allocate(dUdyavg (fs%cfg%jmin:fs%cfg%jmax)); dUdyavg =0.0_WP
+      allocate(dUdyavg_(fs%cfg%jmin:fs%cfg%jmax)); dUdyavg_=0.0_WP
+      allocate(vol_    (fs%cfg%jmin:fs%cfg%jmax)); vol_    =0.0_WP
+      allocate(vol     (fs%cfg%jmin:fs%cfg%jmax)); vol     =0.0_WP
+      allocate(volmid_ (fs%cfg%jmin:fs%cfg%jmax)); volmid_ =0.0_WP
+      allocate(volmid  (fs%cfg%jmin:fs%cfg%jmax)); volmid  =0.0_WP
       ! Integrate all data over x and z
-      k=fs%cfg%kmax/2
-      ! do k=fs%cfg%kmin_,fs%cfg%kmax_
+      do k=fs%cfg%kmin_,fs%cfg%kmax_
          do j=fs%cfg%jmin_,fs%cfg%jmax_
             do i=fs%cfg%imin_,fs%cfg%imax_
-               vol_(j) = vol_(j)+fs%cfg%vol(i,j,k)
-               Uavg_(j)=Uavg_(j)+fs%cfg%vol(i,j,k)*fs%U(i,j,k)
+               vol_(j)    =vol_(j)    +fs%cfg%vol(i,j,k)
+               Uavg_(j)   =Uavg_(j)   +fs%cfg%vol(i,j,k)*fs%U(i,j,k)
+               dUdyavg_(j)=dUdyavg_(j)+fs%cfg%vol(i,j,k)*gradu(2,1,i,j,k)
             end do
          end do
-      ! end do
+      end do
+      ! Integrate all data over x for z at mid channel
+      ind=fs%cfg%get_ijk_global(pos,ind_guess)
+      if (ind(3).ge.fs%cfg%kmin.and.ind(3).le.fs%cfg%kmax_) then
+         k=ind(3)
+         do j=fs%cfg%jmin_,fs%cfg%jmax_
+            do i=fs%cfg%imin_,fs%cfg%imax_
+               volmid_(j)=volmid_(j)+fs%cfg%vol(i,j,k)
+               Umid_(j)  =Umid_(j)  +fs%cfg%vol(i,j,k)*fs%U(i,j,k)
+            end do
+         end do
+      end if
       ! All-reduce the data
-      call MPI_ALLREDUCE( vol_, vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(Uavg_,Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(    vol_,    vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE( volmid_, volmid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(   Uavg_,   Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(dUdyavg_,dUdyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(   Umid_,   Umid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       do j=fs%cfg%jmin,fs%cfg%jmax
          if (vol(j).gt.0.0_WP) then
-            Uavg(j)=Uavg(j)/vol(j)
+            Uavg(j)   =Uavg(j)   /vol(j)
+            dUdyavg(j)=dUdyavg(j)/vol(j)
+            Umid(j)   =Umid(j)   /volmid(j)
          else
-            Uavg(j)=0.0_WP
+            Uavg(j)   =0.0_WP
+            dUdyavg(j)=0.0_WP
+            Umid(j)   =0.0_WP
          end if
       end do
       ! If root, print it out
@@ -88,14 +115,14 @@ contains
          filename='./velocity/Uavg_'
          write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12)') 'Height','Uavg'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12)') 'Height','Uavg','dUdyavg','Umid'
          do j=fs%cfg%jmin,fs%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j)
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j),dUdyavg(j),Umid(j)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(Uavg,Uavg_,vol,vol_)
+      deallocate(Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,vol,vol_,volmid,volmid_)
    end subroutine postproc_vel
 
    !> Specialized subroutine that outputs the velocity distribution
@@ -230,7 +257,7 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_amg)
+         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_pfmg)
          !call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
@@ -279,28 +306,20 @@ contains
          call param_read('Beta',Beta)
          ! Polymer viscosity
          visc_p=visc_s*((1.00_WP-Beta)/Beta)
-         ! visc_p=visc_s/4.00_WP
          ! Configure implicit scalar solver
          fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
          ! Setup the solver
          call fm%setup(implicit_ils=gmres_pilut)
          ! Initalize C tensor
-         ! fm%SC(:,:,:,1)=2.0_WP
-         ! fm%SC(:,:,:,2)=2.0_WP
-         ! fm%SC(:,:,:,3)=2.0_WP
-         ! fm%SC(:,:,:,4)=2.0_WP
-         ! fm%SC(:,:,:,5)=2.0_WP
-         ! fm%SC(:,:,:,6)=2.0_WP
-         do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-            fm%SC(:,j,:,1)=1000.00_WP*(1.00_WP-(fs%cfg%ym(j)/0.05_WP)**2)
-            fm%SC(:,j,:,2)=0.0_WP
-            fm%SC(:,j,:,3)=0.0_WP
-            fm%SC(:,j,:,4)=0.0_WP
-            fm%SC(:,j,:,5)=0.0_WP
-            fm%SC(:,j,:,6)=0.0_WP
-         end do
-
-         ! fm%SC=0.0_WP
+         ! do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+         !    fm%SC(:,j,:,1)=0.0_WP
+         !    fm%SC(:,j,:,2)=0.0_WP
+         !    fm%SC(:,j,:,3)=0.0_WP
+         !    fm%SC(:,j,:,4)=0.0_WP
+         !    fm%SC(:,j,:,5)=0.0_WP
+         !    fm%SC(:,j,:,6)=0.0_WP
+         ! end do
+         fm%SC=0.0_WP
       end block create_fene
 
       ! Create an LES model
@@ -464,14 +483,14 @@ contains
          ! Reset here gas viscosity
          fs%visc=visc_s
 
-         ! Turbulence modeling
-         call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
-         resU=fs%rho
-         call sgs%get_visc(dt=time%dtold,rho=resU,Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
-         where (sgs%visc.lt.-fs%visc)
-            sgs%visc=-fs%visc
-         end where
-         fs%visc=fs%visc+sgs%visc
+         ! ! Turbulence modeling
+         ! call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
+         ! resU=fs%rho
+         ! call sgs%get_visc(dt=time%dtold,rho=resU,Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
+         ! where (sgs%visc.lt.-fs%visc)
+         !    sgs%visc=-fs%visc
+         ! end where
+         ! fs%visc=fs%visc+sgs%visc
 
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -481,65 +500,65 @@ contains
             fs%V=0.5_WP*(fs%V+fs%Vold)
             fs%W=0.5_WP*(fs%W+fs%Wold)
 
-            ! ! Build mid-time scalar
-            ! fm%SC=0.5_WP*(fm%SC+fm%SCold)
+            ! Build mid-time scalar
+            fm%SC=0.5_WP*(fm%SC+fm%SCold)
 
             ! ! Form velocity gradient
-            ! call fs%get_gradu(gradu)
+            call fs%get_gradu(gradu)
 
-            ! ! ============= SCALAR SOLVER =======================  
-            ! ! Reset interpolation metrics to QUICK scheme
-            ! call fm%metric_reset()
+            ! ============= SCALAR SOLVER =======================  
+            ! Reset interpolation metrics to QUICK scheme
+            call fm%metric_reset()
 
-            ! ! Calculate explicit SC prior to checking bounds
-            ! pre_check: block
-            !    ! Explicit calculation of resSC from scalar equation
-            !    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-            !    ! Assemble explicit residual
-            !    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-            !    ! ! Apply this residual
-            !    ! SC_=2.0_WP*fm%SC-fm%SCold+resSC
-            ! end block pre_check
+            ! Calculate explicit SC prior to checking bounds
+            pre_check: block
+               ! Explicit calculation of resSC from scalar equation
+               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+               ! Assemble explicit residual
+               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+               ! Apply this residual
+               SC_=2.0_WP*fm%SC-fm%SCold+resSC
+            end block pre_check
             
-            ! ! Check boundedess of explicit SC calculation
-            ! call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+            ! Check boundedess of explicit SC calculation
+            call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
 
-            ! ! Calculate explicit SC post checking bounds
-            ! post_check: block
-            !    ! Explicit calculation of resSC from scalar equation
-            !    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-            !    ! Assemble explicit residual
-            !    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-            ! end block post_check
+            ! Calculate explicit SC post checking bounds
+            post_check: block
+               ! Explicit calculation of resSC from scalar equation
+               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+               ! Assemble explicit residual
+               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+            end block post_check
             
-            ! ! Add FENE source terms
-            ! fene: block
-            !    integer :: i,j,k,isc
-            !    ! Calculate CgradU terms
-            !    call fm%get_CgradU(fm%SC,gradu)    
-            !    ! Calculate T terms
-            !    call fm%get_stressTensor(fm%SC,Wei,Lmax)     
-            !    ! Add source terms to calculated residual
-            !    do isc=1,fm%nscalar
-            !       do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-            !          do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-            !             do i=fs%cfg%imino_,fs%cfg%imaxo_
-            !                resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)*time%dt-fm%T(i,j,k,isc))*time%dt
-            !             end do
-            !          end do
-            !       end do
-            !    end do
-            ! end block fene
+            ! Add FENE source terms
+            fene: block
+               integer :: i,j,k,isc
+               ! Calculate CgradU terms
+               call fm%get_CgradU(fm%SC,gradu)    
+               ! Calculate T terms
+               call fm%get_stressTensor(fm%SC,Wei,Lmax)     
+               ! Add source terms to calculated residual
+               do isc=1,fm%nscalar
+                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                        do i=fs%cfg%imino_,fs%cfg%imaxo_
+                           resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)*time%dt-fm%T(i,j,k,isc))*time%dt
+                        end do
+                     end do
+                  end do
+               end do
+            end block fene
 
-            ! ! Form implicit residual
-            ! call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
+            ! Form implicit residual
+            call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 
-            ! ! Apply this residual
-            ! fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
+            ! Apply this residual
+            fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
 
-            ! ! Apply other boundary conditions on the resulting field
-            ! call fm%apply_bcond(time%t,time%dt)
-            ! ! ===================================================
+            ! Apply other boundary conditions on the resulting field
+            call fm%apply_bcond(time%t,time%dt)
+            ! ===================================================
 
             ! ============= VELOCITY SOLVER ======================  
             ! Explicit calculation of drho*u/dt from NS
@@ -579,31 +598,31 @@ contains
                where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
             end block forcing
 
-            ! ! Add in contribution form polymer
-            ! polymer: block
-            ! use messager, only: die
-            !    integer :: i,j,k
-            !    ! Calculate updated elastic tensor terms
-            !    call fm%get_stressTensor(fm%SC,Wei,Lmax)
-            !    ! Get its divergence 
-            !    call fm%get_divT(fs)
-            !    ! Add visc_p*divT to momentum equation 
-            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
-            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
-            !          do i=fs%cfg%imin_,fs%cfg%imax_
-            !             if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-            !                resU(i,j,k)=resU(i,j,k)+visc_p*(fm%divT(i,j,k,1)*time%dt)
-            !             end if
-            !             if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-            !                resV(i,j,k)=resV(i,j,k)+visc_p*(fm%divT(i,j,k,2)*time%dt)
-            !             end if
-            !             if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-            !                resW(i,j,k)=resW(i,j,k)+visc_p*(fm%divT(i,j,k,3)*time%dt)
-            !             end if
-            !          end do
-            !       end do
-            !    end do
-            ! end block polymer
+            ! Add in contribution form polymer
+            polymer: block
+            use messager, only: die
+               integer :: i,j,k
+               ! Calculate updated elastic tensor terms
+               call fm%get_stressTensor(fm%SC,Wei,Lmax)
+               ! Get its divergence 
+               call fm%get_divT(fs)
+               ! Add visc_p*divT to momentum equation 
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
+                           resU(i,j,k)=resU(i,j,k)+visc_p*(fm%divT(i,j,k,1)*time%dt)
+                        end if
+                        if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
+                           resV(i,j,k)=resV(i,j,k)+visc_p*(fm%divT(i,j,k,2)*time%dt)
+                        end if
+                        if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
+                           resW(i,j,k)=resW(i,j,k)+visc_p*(fm%divT(i,j,k,3)*time%dt)
+                        end if
+                     end do
+                  end do
+               end do
+            end block polymer
 
             ! Form implicit residuals
             call fs%solve_implicit(time%dt,resU,resV,resW)

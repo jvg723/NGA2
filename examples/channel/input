@@ -2,28 +2,26 @@
 Partition :	2 2 2
 
 # Mesh definition
-Lx :	12.6
-Ly :	1
-Lz :	1
-nx :	144
-ny :	56
-nz :	56
-Stretching :    2.5
-Initial Y plus: 0.37
-Max Y plus:     10
+Lx :	62
+Ly :	2
+Lz :	2
+nx :	1000
+ny :	128
+nz :	128
+Stretching : 1.8417
 
 # Fluid properties and velocity
-Solvent dynamic viscosity : 1.667e-4
+Solvent dynamic viscosity : 4.54e-4
 Density                   : 1
 Ubulk                     : 1
 Wbulk                     : 0
-Perturbation              : 0.5
+Perturbation              : 0
 Angular velocity          : 0.5
 
 # FENE model properties
 Maximum extension of polymer chain : 100
 Weissenberg number                 : 6.67
-Beta                               : 0.9
+Beta                               : 1
 
 # Time integration
 Max timestep size : 2e-2
@@ -40,4 +38,4 @@ Implicit iteration : 100
 
 # Ensight output
 Ensight output period :  1e-2
-Postproc output period : 1
+Postproc output period : 1e-2

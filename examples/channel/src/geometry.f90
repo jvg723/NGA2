@@ -31,33 +31,6 @@ contains
          call param_read('Lx',Lx); call param_read('nx',nx); allocate(x(nx+1))
          call param_read('Ly',Ly); call param_read('ny',ny); allocate(y(ny+1)); call param_read('Stretching',stretch)
          call param_read('Lz',Lz); call param_read('nz',nz); allocate(z(nz+1))
-         ! ! Read in definitions for grid streching in viscous wall region
-         ! call param_read('Solvent dynamic viscosity',mu); 
-         ! call param_read('Density',rho)
-         ! call param_read('Ubulk',Uinf)
-         ! call param_read('Initial Y plus',yp_init); zp_init=yp_init
-         ! call param_read('Max Y plus',yp_max); zp_max=yp_max
-         ! call param_read('Ly',Hc)
-         ! ! Caculate first cell along y and z axis in viscous wall region
-         ! Re=(rho*Uinf*Hc)/mu                    ! Reynolds number for channel based on bulk flow
-         ! Cf=0.027_WP/(Re**(1.00_WP/7.00_WP))    ! Drag coeff 
-         ! tau_w=0.5_WP*Cf*rho*(Uinf**2.00_WP)    ! Wall shear stress
-         ! u_tau=sqrt(tau_w/rho)                  ! Shear velocity
-         ! yt=(yp_init*mu)/(rho*u_tau)
-         ! zt=(zp_init*mu)/(rho*u_tau)
-         ! ! Create rectilinear grid in x, y and z grid streched for viscous wall region
-         ! do i=1,nx+1
-         !    x(i)=real(i-1,WP)/real(nx,WP)*Lx
-         ! end do
-         ! do j=1,ny+1
-         !    y(j)=0.5_WP*Ly*tanh(stretch*(2.0_WP*real(j-1,WP)/real(ny,WP)-1.0_WP))/tanh(stretch)
-         ! end do
-         ! do k=1,nz+1
-         !    ! z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
-         !    z(k)=0.5_WP*Lz*tanh(stretch*(2.0_WP*real(k-1,WP)/real(nz,WP)-1.0_WP))/tanh(stretch)
-         ! end do
-         ! print *, 'from yp calc: ',yt, 'from grid creation',y(1)
-         ! print *, 'from zp calc: ',zt, 'from grid creation',z(1)
          ! Create simple rectilinear grid in x and z, tanh-stretched grid in y
          do i=1,nx+1
             x(i)=real(i-1,WP)/real(nx,WP)*Lx
