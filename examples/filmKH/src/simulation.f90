@@ -63,7 +63,7 @@ contains
    
   !> Specialized subroutine that outputs the vertical liquid distribution
    subroutine postproc_data()
-      use mathtools, only: Pi
+      ! use mathtools, only: Pi
       use string,    only: str_medium
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
       use parallel,  only: MPI_REAL_WP
@@ -93,10 +93,12 @@ contains
       call MPI_ALLREDUCE(myVEL,VEL,vf%cfg%ny,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); VEL=VEL/real(vf%cfg%nx*vf%cfg%nz,WP)
       ! If root, print it out
       if (vf%cfg%amRoot) then
-         call execute_command_line('mkdir -p stats')
-         filename='profile_'
+         ! call execute_command_line('mkdir -p stats')
+         ! filename='profile_'
+         filename='./stats/profile_'
          write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         ! open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(a12,3x,a12,3x,a12)') 'Height','VOF','VEL'
          do j=vf%cfg%jmin,vf%cfg%jmax
             write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') vf%cfg%ym(j),VOF(j),VEL(j)
@@ -157,7 +159,7 @@ contains
          ! Prepare initialize interface parameters
          nwaveX=6
          allocate(wnumbX(nwaveX),wshiftX(nwaveX),wampX(nwaveX))
-         wampX=0.3_WP/real(nwaveX,WP)
+         wampX=0.6_WP/real(nwaveX,WP)
          wnumbX=[3.0_WP,4.0_WP,5.0_WP,6.0_WP,7.0_WP,8.0_WP]*twoPi/cfg%xL
          if (cfg%amRoot) then
             do n=1,nwaveX
@@ -167,7 +169,7 @@ contains
          call MPI_BCAST(wshiftX,nwaveX,MPI_REAL_WP,0,cfg%comm,ierr)
          nwaveZ=6
          allocate(wnumbZ(nwaveZ),wshiftZ(nwaveZ),wampZ(nwaveZ))
-         wampZ=0.3_WP/real(nwaveZ,WP)
+         wampZ=0.6_WP/real(nwaveZ,WP)
          wnumbZ=[3.0_WP,4.0_WP,5.0_WP,6.0_WP,7.0_WP,8.0_WP]*twoPi/cfg%zL
          if (cfg%amRoot) then
             do n=1,nwaveZ
@@ -357,6 +359,8 @@ contains
          ! Create event for data postprocessing
          ppevt=event(time=time,name='Postproc output')
          call param_read('Postproc output period',ppevt%tper)
+         ! Create directory to write to
+         if (cfg%amRoot) call execute_command_line('mkdir -p stats')
          ! Perform the output
          if (ppevt%occurs()) call postproc_data()
       end block create_postproc
@@ -398,11 +402,11 @@ contains
                      ! fs%visc_l(i,j,k)=C*SRmag(i,j,k)**(n-1.0_WP)
                      ! Carreau Model
                      SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-                     fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(lambda*SRmag(i,j,k))**2.00_WP)**((n-1.00_WP)/2.00_WP)
+                     ! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(lambda*SRmag(i,j,k))**2.00_WP)**((n-1.00_WP)/2.00_WP)
                   end do
                end do
             end do
-            call fs%cfg%sync(fs%visc_l)
+            ! call fs%cfg%sync(fs%visc_l)
          end block nonewt
          
          ! Remember old VOF
@@ -516,6 +520,7 @@ contains
 
          ! Specialized post-processing
          if (ppevt%occurs()) call postproc_data()
+         
          
       end do
       

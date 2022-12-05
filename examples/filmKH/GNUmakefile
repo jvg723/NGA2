@@ -24,8 +24,9 @@ INCLUDE_LOCATIONS += $(Ulocs)
 VPATH_LOCATIONS   += $(Ulocs)
 
 # Define external libraries - this can also be in .profile
-HYPRE_DIR = /Users/josephgiliberto/Builds/HYPRE
-IRL_DIR   = /Users/josephgiliberto/Builds/IRL
+HYPRE_DIR = /home/fs01/od57/Repositories/hypre/src/hypre
+IRL_DIR   = /home/fs01/od57/Repositories/IRL
+LAPACK_DIR= /home/fs01/od57/Repositories/lapack
 
 # NGA compilation definitions
 include $(NGA_HOME)/tools/GNUMake/Make.defs

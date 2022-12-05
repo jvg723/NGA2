@@ -1,27 +1,31 @@
 # Parallelization
-Partition :	4 2 1
+Partition :	16 4 3
 
 # Mesh definition
 Lx :	      32
 Liquid Ly :	  4
 Gas Ly :	  12
-Lz :	      1e-1
+Lz :	      16
 nx :	      320
 ny :	      160
-nz :	      1
+nz :	      160
+# nx :	      50
+# ny :	      10
+# nz :	      10
 
 # Fluid properties and inital profile
 Gas Reynolds number :  1000
 Gas Weber number :     20
 Viscosity ratio :      60       !< This is mu_l/mu_g
-Density ratio :        800      !< This is rho_l/rho_g
+Density ratio :        80       !< This is rho_l/rho_g
 Static contact angle : 72
-Power law constant   : 0.3
+Power law constant   : 0.5
+#non-Newtonian liquid phase
 
 # Time integration
 Max timestep size : 1e-1
 Max cfl number :    0.9
-Max time :          400
+Max time :          1000
 
 # Pressure solver
 Pressure tolerance : 1e-6
