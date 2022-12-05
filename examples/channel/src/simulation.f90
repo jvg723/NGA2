@@ -32,6 +32,7 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: SR,resSC,SC_
    real(WP), dimension(:,:,:,:,:), allocatable :: gradu
+   real(WP), dimension(:),         allocatable :: omega,phi,F  ! For initializing C tensor
    
    !> Fluid viscosity
    real(WP) :: visc_s,visc_p
@@ -45,33 +46,47 @@ module simulation
    
    !> FENE model parameters
    real(WP) :: Lmax,Wei,Beta
-   
+
+   ! !> Position and index guess for mind channel
+   real(WP), dimension(3) :: pos
+   integer,  dimension(3) :: ind_guess
+
 contains
    
    
    !> Specialized subroutine that outputs the velocity distribution
-   subroutine postproc_vel()
+   subroutine postproc_vel(pos,ind_guess)
       use string,      only: str_medium
       use mpi_f08,     only: MPI_ALLREDUCE,MPI_SUM
       use parallel,    only: MPI_REAL_WP
       implicit none
       integer :: iunit,ierr,i,j,k
-      real(WP), dimension(3) :: pos=(/ 0.0_WP,0.0_WP,0.0_WP /)
-      integer,  dimension(3) :: ind_guess=(/ 1,1,64 /)
+      real(WP), dimension(3), intent(in) :: pos
+      integer,  dimension(3), intent(in) :: ind_guess
       integer,  dimension(3) :: ind
-      real(WP), dimension(:), allocatable :: Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,vol,vol_,volmid,volmid_
+      real(WP), dimension(:), allocatable :: Uavg,Uavg_,vol,vol_
+      real(WP), dimension(:), allocatable :: dUdyavg,dUdyavg_
+      real(WP), dimension(:), allocatable :: Umid,Umid_,volmid,volmid_
+      real(WP), dimension(:), allocatable :: Udia,Udia_,voldia,voldia_
+      real(WP)                            :: dia_pos
       character(len=str_medium) :: filename,timestamp
       ! Allocate vertical line storage
       allocate(Uavg    (fs%cfg%jmin:fs%cfg%jmax)); Uavg    =0.0_WP
       allocate(Uavg_   (fs%cfg%jmin:fs%cfg%jmax)); Uavg_   =0.0_WP
       allocate(Umid    (fs%cfg%jmin:fs%cfg%jmax)); Umid    =0.0_WP
       allocate(Umid_   (fs%cfg%jmin:fs%cfg%jmax)); Umid_   =0.0_WP
+      allocate(Udia    (fs%cfg%jmin:fs%cfg%jmax)); Udia    =0.0_WP
+      allocate(Udia_   (fs%cfg%jmin:fs%cfg%jmax)); Udia_   =0.0_WP
       allocate(dUdyavg (fs%cfg%jmin:fs%cfg%jmax)); dUdyavg =0.0_WP
       allocate(dUdyavg_(fs%cfg%jmin:fs%cfg%jmax)); dUdyavg_=0.0_WP
       allocate(vol_    (fs%cfg%jmin:fs%cfg%jmax)); vol_    =0.0_WP
       allocate(vol     (fs%cfg%jmin:fs%cfg%jmax)); vol     =0.0_WP
       allocate(volmid_ (fs%cfg%jmin:fs%cfg%jmax)); volmid_ =0.0_WP
       allocate(volmid  (fs%cfg%jmin:fs%cfg%jmax)); volmid  =0.0_WP
+      allocate(voldia_ (fs%cfg%jmin:fs%cfg%jmax)); voldia_ =0.0_WP
+      allocate(voldia  (fs%cfg%jmin:fs%cfg%jmax)); voldia  =0.0_WP
+      ! allocate(distdia_(fs%cfg%jmin:fs%cfg%jmax)); distdia_=0.0_WP
+      ! allocate(distdia (fs%cfg%jmin:fs%cfg%jmax)); distdia =0.0_WP
       ! Integrate all data over x and z
       do k=fs%cfg%kmin_,fs%cfg%kmax_
          do j=fs%cfg%jmin_,fs%cfg%jmax_
@@ -82,9 +97,10 @@ contains
             end do
          end do
       end do
-      ! Integrate all data over x for z at mid channel
+      ! Integrate all data over x at mid channel
       ind=fs%cfg%get_ijk_global(pos,ind_guess)
-      if (ind(3).ge.fs%cfg%kmin.and.ind(3).le.fs%cfg%kmax_) then
+      ! Check if k is in processor 
+      if (ind(3).ge.fs%cfg%kmin_.and.ind(3).le.fs%cfg%kmax_) then
          k=ind(3)
          do j=fs%cfg%jmin_,fs%cfg%jmax_
             do i=fs%cfg%imin_,fs%cfg%imax_
@@ -93,21 +109,38 @@ contains
             end do
          end do
       end if
+      ! Intagrate all data over x along channel diagonal
+      do k=fs%cfg%kmin_,fs%cfg%kmax_
+         ! Check if j is in processor 
+         if (k.ge.fs%cfg%kmin_.and.k.le.fs%cfg%kmax_) then
+            ! For square section with same # of cells in each direction
+            j=k
+            do i=fs%cfg%imin_,fs%cfg%imax_
+               voldia_(j) =voldia_(j)+fs%cfg%vol(i,j,k)
+               Udia_(j)   =Udia_(j)  +fs%cfg%vol(i,j,k)*fs%U(i,j,k)          
+            end do
+         end if
+      end do 
       ! All-reduce the data
       call MPI_ALLREDUCE(    vol_,    vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE( volmid_, volmid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE( voldia_, voldia,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(   Uavg_,   Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(dUdyavg_,dUdyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(   Umid_,   Umid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(   Udia_,   Udia,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      ! call MPI_ALLREDUCE(distdia_,distdia,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       do j=fs%cfg%jmin,fs%cfg%jmax
          if (vol(j).gt.0.0_WP) then
             Uavg(j)   =Uavg(j)   /vol(j)
             dUdyavg(j)=dUdyavg(j)/vol(j)
             Umid(j)   =Umid(j)   /volmid(j)
+            Udia(j)   =Udia(j)   /voldia(j)
          else
             Uavg(j)   =0.0_WP
             dUdyavg(j)=0.0_WP
             Umid(j)   =0.0_WP
+            Udia(j)   =0.0_WP
          end if
       end do
       ! If root, print it out
@@ -115,14 +148,15 @@ contains
          filename='./velocity/Uavg_'
          write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12,3x,a12)') 'Height','Uavg','dUdyavg','Umid'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'Height','Uavg','dUdyavg','Umid','Posistion','Udia'
          do j=fs%cfg%jmin,fs%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j),dUdyavg(j),Umid(j)
+            dia_pos=sqrt(fs%cfg%zm(j)**2.00_WP+fs%cfg%ym(j)**2.00_WP)
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j),dUdyavg(j),Umid(j),dia_pos,Udia(j)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,vol,vol_,volmid,volmid_)
+      deallocate(Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,Udia,Udia_,vol,vol_,volmid,volmid_,voldia,voldia_)
    end subroutine postproc_vel
 
    !> Specialized subroutine that outputs the velocity distribution
@@ -225,6 +259,10 @@ contains
          ! Scalar solver
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
          allocate(SC_  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bounds
+         ! C matrix initial condiitons
+         allocate(omega(cfg%jmino_:cfg%jmaxo_)); omega=0.0_WP
+         allocate(phi  (cfg%jmino_:cfg%jmaxo_)); phi  =0.0_WP
+         allocate(F    (cfg%jmino_:cfg%jmaxo_)); F    =0.0_WP
       end block allocate_work_arrays
       
 
@@ -257,7 +295,7 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_pfmg)
+         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_amg)
          !call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
@@ -287,6 +325,20 @@ contains
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_amg
       ! Newtonian Solvers: pressure=gmres_amg,implicit=pcg_smg
 
+      ! ! Read in the initial conditions
+      ! read_ic: block
+      !    use mpi_f08,  only: MPI_BCAST
+      !    use parallel, only: comm,amRoot,MPI_REAL_WP
+      !    real(WP), dimension(41) :: x_swh1,swh1    ! dli
+      !    integer :: ierr,iunit,i
+      !    ! Only the global root process reads the CAD files
+      !    if (amRoot) then
+      !       open(newunit=iunit,file='inital_conditons/vel_grad.txt',form='formatted',status='old',access='stream',iostat=ierr); do i=1,   41; read(iunit,'(2F12.8)') x_swh1(i),swh1(i); end do; close(iunit)
+      !    end if
+      !    ! Then the root broadcasts
+      !    call MPI_BCAST(x_swh1,   2,MPI_REAL_WP,0,comm,ierr); call MPI_BCAST(swh1,   2,MPI_REAL_WP,0,comm,ierr)
+      ! end block read_ic
+      
       ! Create a FENE model with scalar solver using BQUICK scheme
       create_fene: block
          use ils_class,  only: gmres_amg,pcg_amg,gmres_pfmg,pcg_smg,gmres_pilut
@@ -311,15 +363,15 @@ contains
          ! Setup the solver
          call fm%setup(implicit_ils=gmres_pilut)
          ! Initalize C tensor
-         ! do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-         !    fm%SC(:,j,:,1)=0.0_WP
-         !    fm%SC(:,j,:,2)=0.0_WP
-         !    fm%SC(:,j,:,3)=0.0_WP
-         !    fm%SC(:,j,:,4)=0.0_WP
-         !    fm%SC(:,j,:,5)=0.0_WP
-         !    fm%SC(:,j,:,6)=0.0_WP
-         ! end do
-         fm%SC=0.0_WP
+         do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+            fm%SC(:,j,:,1)=0.0_WP
+            fm%SC(:,j,:,2)=0.0_WP
+            fm%SC(:,j,:,3)=0.0_WP
+            fm%SC(:,j,:,4)=0.0_WP
+            fm%SC(:,j,:,5)=0.0_WP
+            fm%SC(:,j,:,6)=0.0_WP
+         end do
+         ! fm%SC=0.0_WP
       end block create_fene
 
       ! Create an LES model
@@ -425,6 +477,9 @@ contains
       
       ! Create a specialized post-processing file
       create_postproc: block
+         ! Posistion and index guess for channel bisector
+         pos=(/ 0.0_WP,0.0_WP,0.0_WP /)
+         ind_guess=(/ fs%cfg%imin,fs%cfg%jmin,fs%cfg%kmax/2 /)
          ! Create event for data postprocessing
          ppevt=event(time=time,name='Postproc output')
          call param_read('Postproc output period',ppevt%tper)
@@ -432,7 +487,7 @@ contains
          if (cfg%amRoot) call execute_command_line('mkdir -p velocity')
          if (cfg%amRoot) call execute_command_line('mkdir -p stress')
          ! Perform the output
-         if (ppevt%occurs()) call postproc_vel()
+         if (ppevt%occurs()) call postproc_vel(pos,ind_guess)
          if (ppevt%occurs()) call postproc_ct()
       end block create_postproc
 
@@ -672,7 +727,7 @@ contains
          call polymerfile%write()
 
          ! Specialized post-processing
-         if (ppevt%occurs()) call postproc_vel()
+         if (ppevt%occurs()) call postproc_vel(pos,ind_guess)
          if (ppevt%occurs()) call postproc_ct()
 
       end do
