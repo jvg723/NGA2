@@ -64,14 +64,14 @@ contains
       ! Allocate vertical line storage
       allocate(Uavg    (fs%cfg%jmin:fs%cfg%jmax)); Uavg    =0.0_WP
       allocate(Uavg_   (fs%cfg%jmin:fs%cfg%jmax)); Uavg_   =0.0_WP
-      ! allocate(Umid    (fs%cfg%jmin:fs%cfg%jmax)); Umid    =0.0_WP
-      ! allocate(Umid_   (fs%cfg%jmin:fs%cfg%jmax)); Umid_   =0.0_WP
+      allocate(Umid    (fs%cfg%jmin:fs%cfg%jmax)); Umid    =0.0_WP
+      allocate(Umid_   (fs%cfg%jmin:fs%cfg%jmax)); Umid_   =0.0_WP
       allocate(dUdyavg (fs%cfg%jmin:fs%cfg%jmax)); dUdyavg =0.0_WP
       allocate(dUdyavg_(fs%cfg%jmin:fs%cfg%jmax)); dUdyavg_=0.0_WP
       allocate(vol_    (fs%cfg%jmin:fs%cfg%jmax)); vol_    =0.0_WP
       allocate(vol     (fs%cfg%jmin:fs%cfg%jmax)); vol     =0.0_WP
-      ! allocate(volmid_ (fs%cfg%jmin:fs%cfg%jmax)); volmid_ =0.0_WP
-      ! allocate(volmid  (fs%cfg%jmin:fs%cfg%jmax)); volmid  =0.0_WP
+      allocate(volmid_ (fs%cfg%jmin:fs%cfg%jmax)); volmid_ =0.0_WP
+      allocate(volmid  (fs%cfg%jmin:fs%cfg%jmax)); volmid  =0.0_WP
       ! Integrate all data over x and z
       do k=fs%cfg%kmin_,fs%cfg%kmax_
          do j=fs%cfg%jmin_,fs%cfg%jmax_
@@ -82,32 +82,32 @@ contains
             end do
          end do
       end do
-      ! ! Integrate all data over x for z at mid channel
-      ! ind=fs%cfg%get_ijk_global(pos,ind_guess)
-      ! if (ind(3).ge.fs%cfg%kmin.and.ind(3).le.fs%cfg%kmax_) then
-      !    k=ind(3)
-      !    do j=fs%cfg%jmin_,fs%cfg%jmax_
-      !       do i=fs%cfg%imin_,fs%cfg%imax_
-      !          volmid_(j)=volmid_(j)+fs%cfg%vol(i,j,k)
-      !          Umid_(j)  =Umid_(j)  +fs%cfg%vol(i,j,k)*fs%U(i,j,k)
-      !       end do
-      !    end do
-      ! end if
+      ! Integrate all data over x for z at mid channel
+      ind=fs%cfg%get_ijk_global(pos,ind_guess)
+      if (ind(3).ge.fs%cfg%kmin.and.ind(3).le.fs%cfg%kmax_) then
+         k=ind(3)
+         do j=fs%cfg%jmin_,fs%cfg%jmax_
+            do i=fs%cfg%imin_,fs%cfg%imax_
+               volmid_(j)=volmid_(j)+fs%cfg%vol(i,j,k)
+               Umid_(j)  =Umid_(j)  +fs%cfg%vol(i,j,k)*fs%U(i,j,k)
+            end do
+         end do
+      end if
       ! All-reduce the data
       call MPI_ALLREDUCE(    vol_,    vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      ! call MPI_ALLREDUCE( volmid_, volmid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE( volmid_, volmid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(   Uavg_,   Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       call MPI_ALLREDUCE(dUdyavg_,dUdyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      ! call MPI_ALLREDUCE(   Umid_,   Umid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(   Umid_,   Umid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       do j=fs%cfg%jmin,fs%cfg%jmax
          if (vol(j).gt.0.0_WP) then
             Uavg(j)   =Uavg(j)   /vol(j)
             dUdyavg(j)=dUdyavg(j)/vol(j)
-            ! Umid(j)   =Umid(j)   /volmid(j)
+            Umid(j)   =Umid(j)   /volmid(j)
          else
             Uavg(j)   =0.0_WP
             dUdyavg(j)=0.0_WP
-            ! Umid(j)   =0.0_WP
+            Umid(j)   =0.0_WP
          end if
       end do
       ! If root, print it out
@@ -115,14 +115,14 @@ contains
          filename='./velocity/Uavg_'
          write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12)') 'Height','Uavg','dUdyavg'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12)') 'Height','Uavg','dUdyavg','Umid'
          do j=fs%cfg%jmin,fs%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j),dUdyavg(j)
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j),dUdyavg(j),Umid(j)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(Uavg,Uavg_,dUdyavg,dUdyavg_,vol,vol_)
+      deallocate(Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,vol,vol_,volmid,volmid_)
    end subroutine postproc_vel
 
    !> Specialized subroutine that outputs the velocity distribution
