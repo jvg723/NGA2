@@ -37,10 +37,12 @@ contains
          end do
          do j=1,ny+1
             y(j)=0.5_WP*Ly*tanh(stretch*(2.0_WP*real(j-1,WP)/real(ny,WP)-1.0_WP))/tanh(stretch)
+            ! y(j)=0.5_WP*Ly*tanh(stretch*(2.0_WP*real(j-1,WP)/real(ny,WP)-1.0_WP))/tanh(stretch)+Ly/2.0_WP
          end do
          do k=1,nz+1
             ! z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
             z(k)=0.5_WP*Lz*tanh(stretch*(2.0_WP*real(k-1,WP)/real(nz,WP)-1.0_WP))/tanh(stretch)
+            ! z(k)=0.5_WP*Lz*tanh(stretch*(2.0_WP*real(k-1,WP)/real(nz,WP)-1.0_WP))/tanh(stretch)+Lz/2.0_WP
          end do
          ! General serial grid object
          grid=sgrid(coord=cartesian,no=2,x=x,y=y,z=z,xper=.true.,yper=.false.,zper=.false.,name='channel')
