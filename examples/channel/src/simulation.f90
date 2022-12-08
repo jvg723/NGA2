@@ -58,7 +58,7 @@ contains
    
    
    !> Specialized subroutine that outputs the velocity distribution
-   subroutine postproc_vel(pos,ind_guess)
+   subroutine postproc_vel()
       use string,      only: str_medium
       use mpi_f08,     only: MPI_ALLREDUCE,MPI_SUM
       use parallel,    only: MPI_REAL_WP
