@@ -25,7 +25,6 @@ contains
          use sgrid_class, only: cartesian
          integer :: i,j,k,nx,ny,nz
          real(WP) :: Lx,Ly,Lz,stretch
-         real(WP) :: Re,Cf,rho,mu,Uinf,tau_w,u_tau,yp_init,zp_init,yp_max,zp_max,Hc,yt,zt
          real(WP), dimension(:), allocatable :: x,y,z
          ! Read in grid definition
          call param_read('Lx',Lx); call param_read('nx',nx); allocate(x(nx+1))
@@ -40,12 +39,12 @@ contains
             ! y(j)=0.5_WP*Ly*tanh(stretch*(2.0_WP*real(j-1,WP)/real(ny,WP)-1.0_WP))/tanh(stretch)+Ly/2.0_WP
          end do
          do k=1,nz+1
-            ! z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
-            z(k)=0.5_WP*Lz*tanh(stretch*(2.0_WP*real(k-1,WP)/real(nz,WP)-1.0_WP))/tanh(stretch)
+            z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
+            ! z(k)=0.5_WP*Lz*tanh(stretch*(2.0_WP*real(k-1,WP)/real(nz,WP)-1.0_WP))/tanh(stretch)
             ! z(k)=0.5_WP*Lz*tanh(stretch*(2.0_WP*real(k-1,WP)/real(nz,WP)-1.0_WP))/tanh(stretch)+Lz/2.0_WP
          end do
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=2,x=x,y=y,z=z,xper=.true.,yper=.false.,zper=.false.,name='channel')
+         grid=sgrid(coord=cartesian,no=2,x=x,y=y,z=z,xper=.true.,yper=.false.,zper=.true.,name='channel')
       end block create_grid
       
       ! Create a config from that grid on our entire group

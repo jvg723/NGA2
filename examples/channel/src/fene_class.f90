@@ -103,22 +103,22 @@ contains
                psi=1.00_WP-(C(i,j,k,1)+C(i,j,k,4)+C(i,j,k,6))/(Lmax**2)
                ! xx tensor component
                this%T(i,j,k,1)=(1.00_WP/Wei)*(C(i,j,k,1)/psi-1.00_WP/a)
-               if(abs(this%T(i,j,k,1)).le.thres) this%T(i,j,k,1)=0.0_WP
+               ! if(abs(this%T(i,j,k,1)).le.thres) this%T(i,j,k,1)=0.0_WP
                ! yx/xy tensor component
                this%T(i,j,k,2)=(1.00_WP/Wei)*(C(i,j,k,2)/psi-0.00_WP/a)
-               if(abs(this%T(i,j,k,2)).le.thres) this%T(i,j,k,2)=0.0_WP
+               ! if(abs(this%T(i,j,k,2)).le.thres) this%T(i,j,k,2)=0.0_WP
                ! zx/xz tensor component
                this%T(i,j,k,3)=(1.00_WP/Wei)*(C(i,j,k,3)/psi-0.00_WP/a)
-               if(abs(this%T(i,j,k,3)).le.thres) this%T(i,j,k,3)=0.0_WP
+               ! if(abs(this%T(i,j,k,3)).le.thres) this%T(i,j,k,3)=0.0_WP
                ! yy tensor component
                this%T(i,j,k,4)=(1.00_WP/Wei)*(C(i,j,k,4)/psi-1.00_WP/a)
-               if(abs(this%T(i,j,k,4)).le.thres) this%T(i,j,k,4)=0.0_WP
+               ! if(abs(this%T(i,j,k,4)).le.thres) this%T(i,j,k,4)=0.0_WP
                ! zy/yz tensor component
                this%T(i,j,k,5)=(1.00_WP/Wei)*(C(i,j,k,5)/psi-0.00_WP/a)
-               if(abs(this%T(i,j,k,5)).le.thres) this%T(i,j,k,5)=0.0_WP
+               ! if(abs(this%T(i,j,k,5)).le.thres) this%T(i,j,k,5)=0.0_WP
                ! zz tensor component
                this%T(i,j,k,6)=(1.00_WP/Wei)*(C(i,j,k,6)/psi-1.00_WP/a)
-               if(abs(this%T(i,j,k,6)).le.thres) this%T(i,j,k,6)=0.0_WP
+               ! if(abs(this%T(i,j,k,6)).le.thres) this%T(i,j,k,6)=0.0_WP
             end do
          end do
       end do
