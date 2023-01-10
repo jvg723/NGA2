@@ -20,8 +20,8 @@ Angular velocity          : 0
 
 # FENE model properties
 Maximum extension of polymer chain : 10
-Weissenberg number                 : 25
-Beta                               : 1
+Polymer Relaxation Time            : 5
+Beta                               : 0.8
 Stress diffusivisty                : 0
 
 # Time integration
@@ -35,7 +35,6 @@ Pressure iteration : 100
 # Implicit velocity solver
 Implicit tolerance : 1e-6
 Implicit iteration : 100
-
 
 # Ensight output
 Ensight output period :  1e-1

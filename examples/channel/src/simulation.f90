@@ -23,7 +23,7 @@ module simulation
    type(event)   :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,forcefile,velfile
+   type(monitor) :: mfile,cflfile,forcefile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -34,113 +34,57 @@ module simulation
    real(WP), dimension(:,:,:,:,:), allocatable :: gradu
 
    
-   !> Fluid viscosity
-   real(WP) :: visc_s,visc_p
+   !> Fluid viscosity (solvent,polymer,total)
+   real(WP) :: visc_s,visc_p,visc_0
 
-   !> Artifical diffusivity
+   !> Artifical diffusivity for conformation tensor
    real(WP) :: stress_diff
 
    !> Channel forcing
    real(WP) :: Ubulk,Wbulk
    real(WP) :: meanU,meanW
+   real(WP) :: H,Q,px
 
    !> Event for post-processing
    type(event) :: ppevt    
    
-   !> FENE model parameters
-   real(WP) :: Lmax,Wei,Beta
-
-   ! !> Position and index guess for mind channel
-   real(WP), dimension(3) :: pos
-   integer,  dimension(3) :: ind_guess
+   !> FENE-P model parameters
+   real(WP) :: Lmax,lambda,Beta
 
 contains
    
    
    !> Specialized subroutine that outputs the velocity distribution
-   subroutine postproc_vel(pos,ind_guess)
+   subroutine postproc_vel()
       use string,      only: str_medium
       use mpi_f08,     only: MPI_ALLREDUCE,MPI_SUM
       use parallel,    only: MPI_REAL_WP
       implicit none
       integer :: iunit,ierr,i,j,k
-      real(WP), dimension(3), intent(in) :: pos
-      integer,  dimension(3), intent(in) :: ind_guess
-      integer,  dimension(3) :: ind
       real(WP), dimension(:), allocatable :: Uavg,Uavg_,vol,vol_
-      real(WP), dimension(:), allocatable :: dUdyavg,dUdyavg_
-      real(WP), dimension(:), allocatable :: Umid,Umid_,volmid,volmid_
-      real(WP), dimension(:), allocatable :: Udia,Udia_,voldia,voldia_
-      real(WP)                            :: dia_pos
       character(len=str_medium) :: filename,timestamp
       ! Allocate vertical line storage
-      allocate(Uavg    (fs%cfg%jmin:fs%cfg%jmax)); Uavg    =0.0_WP
-      allocate(Uavg_   (fs%cfg%jmin:fs%cfg%jmax)); Uavg_   =0.0_WP
-      allocate(Umid    (fs%cfg%jmin:fs%cfg%jmax)); Umid    =0.0_WP
-      allocate(Umid_   (fs%cfg%jmin:fs%cfg%jmax)); Umid_   =0.0_WP
-      allocate(Udia    (fs%cfg%jmin:fs%cfg%jmax)); Udia    =0.0_WP
-      allocate(Udia_   (fs%cfg%jmin:fs%cfg%jmax)); Udia_   =0.0_WP
-      allocate(dUdyavg (fs%cfg%jmin:fs%cfg%jmax)); dUdyavg =0.0_WP
-      allocate(dUdyavg_(fs%cfg%jmin:fs%cfg%jmax)); dUdyavg_=0.0_WP
-      allocate(vol_    (fs%cfg%jmin:fs%cfg%jmax)); vol_    =0.0_WP
-      allocate(vol     (fs%cfg%jmin:fs%cfg%jmax)); vol     =0.0_WP
-      allocate(volmid_ (fs%cfg%jmin:fs%cfg%jmax)); volmid_ =0.0_WP
-      allocate(volmid  (fs%cfg%jmin:fs%cfg%jmax)); volmid  =0.0_WP
-      allocate(voldia_ (fs%cfg%jmin:fs%cfg%jmax)); voldia_ =0.0_WP
-      allocate(voldia  (fs%cfg%jmin:fs%cfg%jmax)); voldia  =0.0_WP
+      allocate(Uavg    (fs%cfg%jmin:fs%cfg%jmax)); Uavg =0.0_WP
+      allocate(Uavg_   (fs%cfg%jmin:fs%cfg%jmax)); Uavg_=0.0_WP
+      allocate(vol_    (fs%cfg%jmin:fs%cfg%jmax)); vol_ =0.0_WP
+      allocate(vol     (fs%cfg%jmin:fs%cfg%jmax)); vol  =0.0_WP
       ! Integrate all data over x and z
       do k=fs%cfg%kmin_,fs%cfg%kmax_
          do j=fs%cfg%jmin_,fs%cfg%jmax_
             do i=fs%cfg%imin_,fs%cfg%imax_
-               vol_(j)    =vol_(j)    +fs%cfg%vol(i,j,k)
-               Uavg_(j)   =Uavg_(j)   +fs%cfg%vol(i,j,k)*fs%U(i,j,k)
-               dUdyavg_(j)=dUdyavg_(j)+fs%cfg%vol(i,j,k)*gradu(2,1,i,j,k)
+               vol_(j) =vol_(j) +fs%cfg%vol(i,j,k)
+               Uavg_(j)=Uavg_(j)+fs%cfg%vol(i,j,k)*fs%U(i,j,k)
             end do
          end do
       end do
-      ! Integrate all data over x at mid channel
-      ind=fs%cfg%get_ijk_global(pos,ind_guess)
-      ! Check if k is in processor 
-      if (ind(3).ge.fs%cfg%kmin_.and.ind(3).le.fs%cfg%kmax_) then
-         k=ind(3)
-         do j=fs%cfg%jmin_,fs%cfg%jmax_
-            do i=fs%cfg%imin_,fs%cfg%imax_
-               volmid_(j)=volmid_(j)+fs%cfg%vol(i,j,k)
-               Umid_(j)  =Umid_(j)  +fs%cfg%vol(i,j,k)*fs%U(i,j,k)
-            end do
-         end do
-      end if
-      ! Intagrate all data over x along channel diagonal
-      do k=fs%cfg%kmin_,fs%cfg%kmax_
-         ! Check if j is in processor 
-         if (k.ge.fs%cfg%kmin_.and.k.le.fs%cfg%kmax_) then
-            ! For square section with same # of cells in each direction
-            j=k
-            do i=fs%cfg%imin_,fs%cfg%imax_
-               voldia_(j) =voldia_(j)+fs%cfg%vol(i,j,k)
-               Udia_(j)   =Udia_(j)  +fs%cfg%vol(i,j,k)*fs%U(i,j,k)          
-            end do
-         end if
-      end do 
       ! All-reduce the data
-      call MPI_ALLREDUCE(    vol_,    vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE( volmid_, volmid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE( voldia_, voldia,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(   Uavg_,   Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(dUdyavg_,dUdyavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(   Umid_,   Umid,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-      call MPI_ALLREDUCE(   Udia_,   Udia,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE( vol_, vol,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+      call MPI_ALLREDUCE(Uavg_,Uavg,fs%cfg%ny,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
       do j=fs%cfg%jmin,fs%cfg%jmax
          if (vol(j).gt.0.0_WP) then
-            Uavg(j)   =Uavg(j)   /vol(j)
-            dUdyavg(j)=dUdyavg(j)/vol(j)
-            Umid(j)   =Umid(j)   /volmid(j)
-            Udia(j)   =Udia(j)   /voldia(j)
+            Uavg(j)=Uavg(j)/vol(j)
          else
-            Uavg(j)   =0.0_WP
-            dUdyavg(j)=0.0_WP
-            Umid(j)   =0.0_WP
-            Udia(j)   =0.0_WP
+            Uavg(j)=0.0_WP
          end if
       end do
       ! If root, print it out
@@ -148,15 +92,14 @@ contains
          filename='./velocity/Uavg_'
          write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'Height','Uavg','dUdyavg','Umid','Posistion','Udia'
+         write(iunit,'(a12,3x,a12)') 'Height','Uavg'
          do j=fs%cfg%jmin,fs%cfg%jmax
-            dia_pos=sqrt(fs%cfg%zm(j)**2.00_WP+fs%cfg%ym(j)**2.00_WP)
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j),dUdyavg(j),Umid(j),dia_pos,Udia(j)
+            write(iunit,'(es12.5,3x,es12.5)') fs%cfg%ym(j),Uavg(j)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(Uavg,Uavg_,Umid,Umid_,dUdyavg,dUdyavg_,Udia,Udia_,vol,vol_,volmid,volmid_,voldia,voldia_)
+      deallocate(Uavg,Uavg_,vol,vol_)
    end subroutine postproc_vel
 
    !> Specialized subroutine that outputs the velocity distribution
@@ -238,7 +181,67 @@ contains
       ! Deallocate work arrays
       deallocate(Cxxavg,Cxxavg_,Cxyavg,Cxyavg_,Cyyavg,Cyyavg_,Txxavg,Txxavg_,Txyavg,Txyavg_,Tyyavg,Tyyavg_,vol,vol_)
    end subroutine postproc_ct
-   
+
+   !> Specialized subroutine to plot simulation vs theory curves
+   subroutine plotter()
+      use string,      only: str_medium
+      use mpi_f08,     only: MPI_ALLREDUCE,MPI_SUM
+      use parallel,    only: MPI_REAL_WP
+      implicit none
+      integer :: iunit,ierr
+      character(len=str_medium) :: timestamp 
+      character(len=str_medium) :: vel_file
+      character(len=str_medium) :: strs_file
+      character(len=str_medium), parameter :: plt_file='~/Builds/NGA2/examples/channel/plot.gp'    
+      ! Plot comparison from root processor
+      if (fs%cfg%amRoot) then
+         ! Time step
+         write(timestamp,'(es12.5)') time%t
+         ! Velocity
+         vel_file=trim('Uavg_')//trim(adjustl(timestamp))
+         ! Stress
+         strs_file=trim('Cavg_')//trim(adjustl(timestamp))
+         ! Store timestep and array naming for reading in gnuplot
+         open(newunit=iunit,file='./plots/gp_input',form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a16,5x,a16)') 'timestep','beta','Uc','H','visc_0','vel_file','strs_file'
+         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,a16,5x,a16)') time%t,beta,Ubulk,fs%cfg%yL,visc_s+visc_p,vel_file,strs_file
+         close(iunit)
+         ! Plot the curves using gnuplot
+         call execute_command_line('gnuplot ' // plt_file)
+      end if
+   end subroutine plotter
+
+   !> Calculate F+ values for FENE-P theory velocity curve
+   function fpvalues(x,A,C) result(Fplus)
+      real(WP), intent(in) :: x,A,C
+      real(WP)             :: Fplus
+      ! F^+(x)
+      Fplus=(C*x+sqrt(A**3.00_WP+(C*x)**2.00_WP))**(1.00_WP/3.00_WP)
+   end function fpvalues
+
+   !> Calculate F- values for FENE-P theory velocity curve
+   function fmvalues(x,A,C) result(Fminus)
+      real(WP), intent(in) :: x,A,C
+      real(WP)             :: Fminus
+      ! F^-(x)
+      Fminus=-abs(C*x-sqrt(A**3.00_WP+(C*x)**2.00_WP))**(1.00_WP/3.00_WP)
+   end function fmvalues
+
+   !> Calculate G+ values for FENE-P theory velocity curve
+   function gpvalues(x,A,C) result(Gplus)
+      real(WP), intent(in) :: x,A,C
+      real(WP)             :: Gplus
+      ! G^+(x)
+      Gplus=3.00_WP*C*x+sqrt(A**3.00_WP+(C*x)**2.00_WP)
+   end function gpvalues
+
+   !> Calculate G- values for FENE-P theory velocity curve
+   function gmvalues(x,A,C) result(Gminus)
+      real(WP), intent(in) :: x,A,C
+      real(WP)             :: Gminus
+      ! G^-(x)
+      Gminus=3.00_WP*C*x-sqrt(A**3.00_WP+(C*x)**2.00_WP)
+   end function gmvalues        
    
    !> Initialization of problem solver
    subroutine simulation_init
@@ -274,7 +277,7 @@ contains
       
       ! Create a single-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use ils_class, only: gmres_amg,pcg_pfmg,pcg_amg
+         use ils_class, only: gmres_amg,pcg_pfmg,pcg_amg,gmres_pfmg,pfmg,smg,pcg_smg
          use mathtools, only: twoPi
          integer :: i,j,k
          real(WP) :: amp,vel,omega
@@ -292,7 +295,7 @@ contains
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
          ! call fs%setup(pressure_ils=gmres_amg,implicit_ils=gmres_amg)
-         call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
+         call fs%setup(pressure_ils=pcg_smg,implicit_ils=smg)
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
          call param_read('Wbulk',Wbulk)
@@ -323,7 +326,7 @@ contains
 
       ! Create a FENE model 
       create_fene: block
-         use ils_class,  only: gmres_amg,pcg_amg,gmres_pfmg,pcg_smg,gmres_pilut
+         use ils_class,  only: gmres_pilut
          use multiscalar_class, only: bquick
          integer :: j
          ! Create FENE model solver
@@ -335,8 +338,8 @@ contains
          fm%rho=fs%rho
          ! Maximum extensibility of polymer chain
          call param_read('Maximum extension of polymer chain',Lmax)
-         ! Weissenberg number for polymer
-         call param_read('Weissenberg number',Wei)
+         ! Relaxation time for polymer
+         call param_read('Polymer Relaxation Time',lambda)
          ! Solvent/polymer viscosity ratio
          call param_read('Beta',Beta)
          ! Polymer viscosity
@@ -347,56 +350,62 @@ contains
          call fm%setup(implicit_ils=gmres_pilut)
       end block create_fene
 
+      ! Pressure gradient to drive periodic flow
+      pressure_grad: block
+         ! Total dynamic viscosity (solvent+polymer)
+         visc_0=visc_s+visc_p  
+         ! Channel height
+         H=fs%cfg%yL
+         ! Flow rate through the channel
+         Q=Ubulk*H 
+         ! Contant pressure gradient
+         px=-12.00_WP*(visc_0/H**3.00_WP)*Q 
+      end block pressure_grad
+
       ! Initalize FEBNE model tensors
       init_fene: block
-         use mpi_f08,  only: MPI_BCAST
-         use parallel, only: comm,amRoot,MPI_REAL_WP 
-         integer :: i,j,k,iunit,ierr
-         real(WP) :: omega,phi,F                  !> Terms for mean shear flow assumption
-         real(WP), dimension(128) :: dudy=0.0_WP  !> Turbulent velocity gradient for initializing C tensor
-         real(WP) :: mu,Re,Q,dpdx                 !> Terms for theoretical stress tensor calculation in laminar flow
-         real(WP) :: A,B                          !> Terms being solved for in polynomial for shear stress
+         ! real(WP) :: H,Lc,Uc,Q,epsilon,visc,px,A,B,C   !> Terms for theoretical stress tensor calculation in laminar flow
+         ! integer :: i,j,k,iunit,ierr
+         ! use mpi_f08,  only: MPI_BCAST
+         ! use parallel, only: comm,amRoot,MPI_REAL_WP 
+         ! real(WP) :: omega,phi,F                  !> Terms for mean shear flow assumption
+         ! real(WP), dimension(128) :: dudy=0.0_WP  !> Turbulent velocity gradient for initializing C tensor
          
-         !> Initalize C and T tensor for laminar channel flow using analytical solution from D.O.A. Cruz et al. (2005)
-         ! Calcualte parameters for theroy stress tensor values
-         mu=visc_s+visc_p                          ! Total dynamic viscosity (solvent+polymer)
-         Re=(fs%rho*Ubulk*fs%cfg%yL)/mu            ! Reynold number based on channcel height, inital bulk velocity and dynamic viscosity
-         Q=Ubulk*fs%cfg%yL                         ! Flow rate through the channel
-         dpdx=-12.00_WP*(mu/fs%cfg%yL**3.00_WP)*Q  ! Pressure gradient in channel
-         ! For 2D flow set stress yz,xz,yy and zz terms to 0
-         fm%T(:,:,:,3)=0.00_WP   !Txz
-         fm%T(:,:,:,4)=0.00_WP   !Tyy
-         fm%T(:,:,:,5)=0.00_WP   !Tyz
-         fm%T(:,:,:,6)=0.00_WP   !Tzz
-         ! For 2D flow set confromation tensor yz and xz terms to 0
+         ! !> Initalize C and T tensor for laminar channel flow using analytical solution from D.O.A. Cruz et al. (2005)
+         ! ! Set conformation tensor to 0
          ! fm%SC=0.0_WP
-         fm%SC(:,:,:,3)=0.00_WP  !Cxz
-         fm%SC(:,:,:,5)=0.00_WP  !Cyz
-         ! Constant coefficents being solved for in cubic equation
-         A=(Lmax**2.00_WP/(2.00_WP*Wei**2.00_WP))*(1.00_WP+(3.00_WP/Lmax**2.00_WP)+((1.00_WP-Beta)/Beta))
-         ! Calculate stress and conformation tensor
-         do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-            do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-               do i=fs%cfg%imino_,fs%cfg%imaxo_
-                  ! Position dependent coefficent being solved for in cubic equation
-                  B=(Lmax**2.00_WP/2.00_WP)*dpdx*(Re/Beta)*(1.00_WP/Wei**2.00_WP)*fs%cfg%ym(j)
-                  ! Position dependent shear and normmal stress
-                  fm%T(i,j,k,2)=(B+sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP)-abs(B-sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP) !Txy
-                  fm%T(i,j,k,1)=2.00_WP*Wei*fm%T(i,j,k,2)**2.00_WP                                                                       !Txx
-                  ! Position dependent shear and normmal conformation tensor components
-                  fm%SC(i,j,k,1)=(Lmax**2.00_WP*(Wei*fm%T(i,j,k,1)+1.00_WP))/(Lmax**2.00_WP+3.00_WP+Wei*fm%T(i,j,k,1))   !Cxx
-                  fm%SC(i,j,k,2)=Wei*fm%T(i,j,k,2)*(Lmax**2.00_WP-fm%SC(i,j,k,1))/(Lmax**2.00_WP)                        !Cxy
-                  fm%SC(i,j,k,4)=(Lmax**2.00_WP-fm%SC(i,j,k,1))/(Lmax**2.00_WP)                                          !Cyy
-                  fm%SC(i,j,k,6)=(Lmax**2.00_WP-fm%SC(i,j,k,1))/(Lmax**2.00_WP)                                          !Czz
-               end do
-            end do
-         end do
-         ! Get its divergence 
-         call fm%get_divT(fs)
-         ! Form velocity gradient
-         call fs%get_gradu(gradu)
-         ! Calculate CgradU terms
-         call fm%get_CgradU(fm%SC,gradu)  
+         ! ! Characteristic scales
+         ! H=fs%cfg%yL
+         ! Lc=fs%cfg%yL
+         ! Uc=Ubulk
+         ! ! Flow rate through the channel
+         ! Q=Uc*H 
+         ! ! Polymer terms
+         ! epsilon=1.00_WP-(3.00_WP/Lmax**2.00_WP)
+         ! ! Total dynamic viscosity (solvent+polymer)
+         ! visc=visc_s+visc_p                                            
+         ! ! Pressure gradient in channel
+         ! px=-12.00_WP*(visc/H**3.00_WP)*Q 
+         ! ! Constant coefficents 
+         ! A=(visc_p**2.00_WP/(6.00_WP*epsilon*lambda**2.00_WP))*(1.00_WP+visc_p/visc_s)
+         ! C=(visc_p**2.00_WP/(4.00_WP*epsilon*lambda**2.00_WP))*(visc_p/visc_s)*px 
+         ! ! For 2D flow set stress yz,xz,yy and zz terms to 0
+         ! fm%T(:,:,:,3)=0.00_WP   !Txz
+         ! fm%T(:,:,:,4)=0.00_WP   !Tyy
+         ! fm%T(:,:,:,5)=0.00_WP   !Tyz
+         ! fm%T(:,:,:,6)=0.00_WP   !Tzz
+         ! ! Calculate shear and normal stress
+         ! do k=fs%cfg%kmin_,fs%cfg%kmax_
+         !    do j=fs%cfg%jmin_,fs%cfg%jmax_
+         !       do i=fs%cfg%imin_,fs%cfg%imax_
+         !          ! Position dependent coefficent being solved for in cubic equation
+         !          B=C*fs%cfg%ym(j)
+         !          ! Position dependent shear and normmal stress
+         !          fm%T(i,j,k,2)=(B+sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP)-abs(B-sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP) !Txy
+         !          fm%T(i,j,k,1)=2.00_WP*(lambda/visc_p)*fm%T(i,j,k,2)**2.00_WP                                                                       !Txx
+         !       end do
+         !    end do
+         ! end do
 
          ! !> Initalize C and T tensor for turbulent channel flow using procedure of R. Sureshkummar et. al (1997)
          ! ! Read inital dudy from root processor
@@ -426,36 +435,11 @@ contains
          ! ! Calculate stress tensor
          ! call fm%get_stressTensor(fm%SC,Wei,Lmax) 
          
-         ! > Initalize C and T tensor to 0
-         ! fm%SC=0.0_WP
-         ! call fm%get_stressTensor(fm%SC,Wei,Lmax)
-
-         ! ! Calculate conformation tensor
-         ! do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-         !    do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-         !       do i=fs%cfg%imino_,fs%cfg%imaxo_
-         !          if(fs%cfg%xm(i).ge.1.00_WP.and.fs%cfg%xm(i).le.1.50_WP) then
-         !             fm%SC(i,j,k,1)=1.00_WP
-         !          else
-         !             fm%SC(i,j,k,1)=0.00_WP
-         !          end if
-         !       end do
-         !    end do
-         ! end do
-         ! fm%SC(:,j,:,2)=0.0_WP
-         ! fm%SC(:,j,:,3)=0.0_WP
-         ! fm%SC(:,j,:,4)=0.0_WP
-         ! fm%SC(:,j,:,5)=0.0_WP
-         ! fm%SC(:,j,:,6)=0.0_WP
-         ! call fm%get_stressTensor(fm%SC,Wei,Lmax)
-
+         ! > Initalize C to 0
+         fm%SC=0.0_WP
+         call fm%get_stressTensor(lambda,Lmax,visc_p)
 
       end block init_fene
-
-      ! ! Create an LES model
-      ! create_sgs: block
-      !    sgs=sgsmodel(cfg=fs%cfg,umask=fs%umask,vmask=fs%vmask,wmask=fs%wmask)
-      ! end block create_sgs
       
       ! Add Ensight output
       create_ensight: block
@@ -474,30 +458,12 @@ contains
          call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
          call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
          call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
-         call ens_out%add_scalar('Cuxx',fm%CgradU(:,:,:,1))
-         call ens_out%add_scalar('Cuxy',fm%CgradU(:,:,:,2))
-         call ens_out%add_scalar('Cuzx',fm%CgradU(:,:,:,3))
-         call ens_out%add_scalar('Cuyy',fm%CgradU(:,:,:,4))
-         call ens_out%add_scalar('Cuzy',fm%CgradU(:,:,:,5))
-         call ens_out%add_scalar('Cuzz',fm%CgradU(:,:,:,6))
          call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
          call ens_out%add_scalar('Txy',fm%T (:,:,:,2))
          call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
          call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
          call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
          call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
-         call ens_out%add_scalar('dT1',fm%divT(:,:,:,1))
-         call ens_out%add_scalar('dT2',fm%divT(:,:,:,2))
-         call ens_out%add_scalar('dT3',fm%divT(:,:,:,3))
-         call ens_out%add_scalar('gradu11',gradu(1,1,:,:,:))
-         call ens_out%add_scalar('gradu12',gradu(1,2,:,:,:))
-         call ens_out%add_scalar('gradu13',gradu(1,3,:,:,:))
-         call ens_out%add_scalar('gradu21',gradu(2,1,:,:,:))
-         call ens_out%add_scalar('gradu22',gradu(2,2,:,:,:))
-         call ens_out%add_scalar('gradu23',gradu(2,3,:,:,:))
-         call ens_out%add_scalar('gradu31',gradu(3,1,:,:,:))
-         call ens_out%add_scalar('gradu32',gradu(3,2,:,:,:))
-         call ens_out%add_scalar('gradu33',gradu(3,3,:,:,:))
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -541,12 +507,76 @@ contains
          call forcefile%add_column(meanW,'Bulk W')
          call forcefile%write()
       end block create_monitor
-      
+
+      ! Theory solution for 2D FENE-P channel flow from D.O.A. Cruz et al. (2005)
+      theory: block
+         use string, only: str_medium
+         real(WP) :: b2,epsilon,A,B,C                        !> Terms for theoretical stress tensor calculation in laminar flow
+         real(WP) :: Fp_H,Fm_H,Gp_H,Gm_H,Fp_y,Fm_y,Gp_y,Gm_y !> Terms for velocity curves
+         integer :: i,j,k,iunit,ierr
+         real(WP), dimension(:), allocatable :: Txy,Txx,u
+         ! Allocate vertical line storage
+         allocate(Txy(fs%cfg%jmin:fs%cfg%jmax)); Txy=0.0_WP
+         allocate(Txx(fs%cfg%jmin:fs%cfg%jmax)); Txx=0.0_WP
+         allocate(u  (fs%cfg%jmin:fs%cfg%jmax)); u  =0.0_WP
+         ! Polymer terms
+         b2=Lmax**2.00_WP-3.00_WP
+         epsilon=1.00_WP/((b2+5.00_WP))
+         lambda=((b2+2.00_WP)/(b2+5.00_WP))*lambda
+         ! Constant coefficents 
+         A=(visc_p**2.00_WP/(6.00_WP*epsilon*lambda**2.00_WP))*(1.00_WP+visc_p/visc_s)
+         C=(visc_p**2.00_WP/(4.00_WP*epsilon*lambda**2.00_WP))*(visc_p/visc_s)*px 
+         ! Loop over channel height to calculate velocity and stress
+            do j=fs%cfg%jmin,fs%cfg%jmax
+               ! Position dependent coefficent being solved for in cubic equation
+               B=C*fs%cfg%ym(j)
+               ! Shear stress
+               Txy(j)=(B+sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP)-abs(B-sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP) 
+               ! Normal stress
+               Txx(j)=2.00_WP*(lambda/visc_p)*Txy(j)**2.00_WP
+               !> Velocity curve parameters
+               if (fs%cfg%ym(j).lt.0.00_WP) then
+                  ! @ -H/2
+                  Fp_H=fpvalues(-H/2.00_WP,A,C)
+                  Fm_H=fmvalues(-H/2.00_WP,A,C)
+                  Gp_H=gpvalues(-H/2.00_WP,A,C)
+                  Gm_H=gmvalues(-H/2.00_WP,A,C)
+               else if (fs%cfg%ym(j).ge.0.00_WP) then
+                  ! @ H/2
+                  Fp_H=fpvalues(H/2.00_WP,A,C)
+                  Fm_H=fmvalues(H/2.00_WP,A,C)
+                  Gp_H=gpvalues(H/2.00_WP,A,C)
+                  Gm_H=gmvalues(H/2.00_WP,A,C)
+               end if
+               ! @ y(j)
+               Fp_y=fpvalues(fs%cfg%ym(j),A,C)
+               Fm_y=fmvalues(fs%cfg%ym(j),A,C)
+               Gp_y=gpvalues(fs%cfg%ym(j),A,C)
+               Gm_y=gmvalues(fs%cfg%ym(j),A,C)
+               ! Velocity
+               if (Beta.eq.1.00_WP) then
+                  u(j)=(-(px*(H/2.00_WP)**2.00_WP)/(2.00_WP*visc_s))*(1.00_WP-(fs%cfg%ym(j)/(H/2.00_WP))**2.00_WP)
+               else 
+                  u(j)=(-(px*(H/2.00_WP)**2.00_WP)/(2.00_WP*visc_s))*(1.00_WP-(fs%cfg%ym(j)/(H/2.00_WP))**2.00_WP)+(3.00_WP/(8.00_WP*C*visc_s))*(Fp_H*Gm_H-Fp_y*Gm_y+Fm_H*Gp_H-Fm_y*Gp_y)                                                           
+               end if
+            end do
+            ! Create directory to write to
+            if (cfg%amRoot) call execute_command_line('mkdir -p plots')
+            ! If root, print it out
+            if (fs%cfg%amRoot) then
+               open(newunit=iunit,file='./plots/theory',form='formatted',status='replace',access='stream',iostat=ierr)
+               write(iunit,'(a12,3x,a12,3x,a12,3x,a12)') 'Height','u','Txx','Txy'
+               do j=fs%cfg%jmin,fs%cfg%jmax
+                  write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') fs%cfg%ym(j),u(j),Txx(j),Txy(j)
+               end do
+               close(iunit)
+            end if 
+         ! Deallocate arrays
+         deallocate(Txy,Txx,u)
+      end block theory
+
       ! Create a specialized post-processing file
       create_postproc: block
-         ! Posistion and index guess for channel bisector
-         pos=(/ 0.0_WP,0.0_WP,0.0_WP /)
-         ind_guess=(/ fs%cfg%imin,fs%cfg%jmin,fs%cfg%kmax/2 /)
          ! Create event for data postprocessing
          ppevt=event(time=time,name='Postproc output')
          call param_read('Postproc output period',ppevt%tper)
@@ -554,8 +584,9 @@ contains
          if (cfg%amRoot) call execute_command_line('mkdir -p velocity')
          if (cfg%amRoot) call execute_command_line('mkdir -p stress')
          ! Perform the output
-         if (ppevt%occurs()) call postproc_vel(pos,ind_guess)
+         if (ppevt%occurs()) call postproc_vel()
          if (ppevt%occurs()) call postproc_ct()
+         if (ppevt%occurs()) call plotter()
       end block create_postproc
 
    end subroutine simulation_init
@@ -580,7 +611,7 @@ contains
          !    real(WP), parameter :: C=1.0e-2_WP
          !    real(WP), parameter :: n=0.3_WP
          !    ! Calculate SR
-         !    call fs%get_strainrate(Ui,Vi,Wi,SR)
+         !    call fs%get_strainrate(SR)
          !    ! Update viscosity
          !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
          !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
@@ -601,18 +632,6 @@ contains
          fs%Uold=fs%U
          fs%Vold=fs%V
          fs%Wold=fs%W     
-
-         ! Reset here gas viscosity
-         fs%visc=visc_s
-
-         ! ! Turbulence modeling
-         ! call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
-         ! resU=fs%rho
-         ! call sgs%get_visc(dt=time%dtold,rho=resU,Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
-         ! where (sgs%visc.lt.-fs%visc)
-         !    sgs%visc=-fs%visc
-         ! end where
-         ! fs%visc=fs%visc+sgs%visc
 
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -657,15 +676,17 @@ contains
             fene: block
                integer :: i,j,k,isc
                ! Calculate CgradU terms
-               call fm%get_CgradU(fm%SC,gradu)    
+               call fm%get_CgradU(gradu)    
                ! Calculate T terms
-               call fm%get_stressTensor(fm%SC,Wei,Lmax)     
+               call fm%get_stressTensor(lambda,Lmax,visc_p)     
                ! Add source terms to calculated residual
                do isc=1,fm%nscalar
                   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
                      do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                         do i=fs%cfg%imino_,fs%cfg%imaxo_
-                           resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)-fm%T(i,j,k,isc))*time%dt
+                           if (fm%mask(i,j,k).eq.0) then
+                              resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)-(1.00_WP/visc_p)*fm%T(i,j,k,isc))*time%dt
+                           end if
                         end do
                      end do
                   end do
@@ -693,53 +714,55 @@ contains
             
             ! Add body forcing
             forcing: block
-               use mpi_f08,  only: MPI_SUM,MPI_ALLREDUCE
-               use parallel, only: MPI_REAL_WP
-               integer :: i,j,k,ierr
-               real(WP) :: myU,myUvol,myW,myWvol,Uvol,Wvol
-               myU=0.0_WP; myUvol=0.0_WP; myW=0.0_WP; myWvol=0.0_WP
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%umask(i,j,k).eq.0) then
-                           myU   =myU   +fs%cfg%dxm(i)*fs%cfg%dy(j)*fs%cfg%dz(k)*(2.0_WP*fs%U(i,j,k)-fs%Uold(i,j,k))
-                           myUvol=myUvol+fs%cfg%dxm(i)*fs%cfg%dy(j)*fs%cfg%dz(k)
-                        end if
-                        if (fs%wmask(i,j,k).eq.0) then
-                           myW   =myW   +fs%cfg%dx(i)*fs%cfg%dy(j)*fs%cfg%dzm(k)*(2.0_WP*fs%W(i,j,k)-fs%Wold(i,j,k))
-                           myWvol=myWvol+fs%cfg%dx(i)*fs%cfg%dy(j)*fs%cfg%dzm(k)
-                        end if
-                     end do
-                  end do
-               end do
-               call MPI_ALLREDUCE(myUvol,Uvol ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-               call MPI_ALLREDUCE(myU   ,meanU,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanU=meanU/Uvol
-               where (fs%umask.eq.0) resU=resU+Ubulk-meanU
-               call MPI_ALLREDUCE(myWvol,Wvol ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
-               call MPI_ALLREDUCE(myW   ,meanW,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanW=meanW/Wvol
-               where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
+               ! ! Enforce constant flow rate
+               ! use mpi_f08,  only: MPI_SUM,MPI_ALLREDUCE
+               ! use parallel, only: MPI_REAL_WP
+               ! integer :: i,j,k,ierr
+               ! real(WP) :: myU,myUvol,myW,myWvol,Uvol,Wvol
+               ! myU=0.0_WP; myUvol=0.0_WP; myW=0.0_WP; myWvol=0.0_WP
+               ! do k=fs%cfg%kmin_,fs%cfg%kmax_
+               !    do j=fs%cfg%jmin_,fs%cfg%jmax_
+               !       do i=fs%cfg%imin_,fs%cfg%imax_
+               !          if (fs%umask(i,j,k).eq.0) then
+               !             myU   =myU   +fs%cfg%dxm(i)*fs%cfg%dy(j)*fs%cfg%dz(k)*(2.0_WP*fs%U(i,j,k)-fs%Uold(i,j,k))
+               !             myUvol=myUvol+fs%cfg%dxm(i)*fs%cfg%dy(j)*fs%cfg%dz(k)
+               !          end if
+               !          if (fs%wmask(i,j,k).eq.0) then
+               !             myW   =myW   +fs%cfg%dx(i)*fs%cfg%dy(j)*fs%cfg%dzm(k)*(2.0_WP*fs%W(i,j,k)-fs%Wold(i,j,k))
+               !             myWvol=myWvol+fs%cfg%dx(i)*fs%cfg%dy(j)*fs%cfg%dzm(k)
+               !          end if
+               !       end do
+               !    end do
+               ! end do
+               ! call MPI_ALLREDUCE(myUvol,Uvol ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+               ! call MPI_ALLREDUCE(myU   ,meanU,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanU=meanU/Uvol
+               ! where (fs%umask.eq.0) resU=resU+Ubulk-meanU
+               ! call MPI_ALLREDUCE(myWvol,Wvol ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
+               ! call MPI_ALLREDUCE(myW   ,meanW,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanW=meanW/Wvol
+               ! where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
+               ! Drive flow through constant pressure gradient
+               where (fs%umask.eq.0) resU=resU+(-px*time%dt)
             end block forcing
 
-            ! Add in contribution form polymer
+            ! Add in polymer stress
             polymer: block
-            use messager, only: die
                integer :: i,j,k
                ! Calculate updated elastic tensor terms
-               call fm%get_stressTensor(fm%SC,Wei,Lmax)
+               call fm%get_stressTensor(lambda,Lmax,visc_p)
                ! Get its divergence 
-               call fm%get_divT(fs)
-               ! Add visc_p*divT to momentum equation 
+               call fm%get_divT(fs) 
+               ! Add divT to momentum equation 
                do k=fs%cfg%kmin_,fs%cfg%kmax_
                   do j=fs%cfg%jmin_,fs%cfg%jmax_
                      do i=fs%cfg%imin_,fs%cfg%imax_
                         if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-                           resU(i,j,k)=resU(i,j,k)+visc_p*(fm%divT(i,j,k,1)*time%dt)
+                           resU(i,j,k)=resU(i,j,k)+(fm%divT(i,j,k,1)*time%dt)
                         end if
                         if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-                           resV(i,j,k)=resV(i,j,k)+visc_p*(fm%divT(i,j,k,2)*time%dt)
+                           resV(i,j,k)=resV(i,j,k)+(fm%divT(i,j,k,2)*time%dt)
                         end if
                         if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-                           resW(i,j,k)=resW(i,j,k)+visc_p*(fm%divT(i,j,k,3)*time%dt)
+                           resW(i,j,k)=resW(i,j,k)+(fm%divT(i,j,k,3)*time%dt)
                         end if
                      end do
                   end do
@@ -793,8 +816,9 @@ contains
          call forcefile%write()
 
          ! Specialized post-processing
-         if (ppevt%occurs()) call postproc_vel(pos,ind_guess)
+         if (ppevt%occurs()) call postproc_vel()
          if (ppevt%occurs()) call postproc_ct()
+         if (ppevt%occurs()) call plotter()
 
       end do
       
