@@ -808,7 +808,6 @@ contains
                         this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
                         this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
                      end if
-                    
                      if (minval(SC(i,j,k-1:k,:)).lt.SCmin) then
                         this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
                         this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]

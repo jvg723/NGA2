@@ -51,6 +51,9 @@ module simulation
    !> FENE-P model parameters
    real(WP) :: Lmax,lambda,Beta
 
+   !> CFL numbers
+   real(WP) :: cflc,cflp
+
 contains
    
    
@@ -294,8 +297,8 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         ! call fs%setup(pressure_ils=gmres_amg,implicit_ils=gmres_amg)
-         call fs%setup(pressure_ils=pcg_smg,implicit_ils=smg)
+         call fs%setup(pressure_ils=gmres_amg,implicit_ils=smg)      !> 3D case
+         ! call fs%setup(pressure_ils=pcg_smg,implicit_ils=smg)      !> 2D Case
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
          call param_read('Wbulk',Wbulk)
@@ -310,10 +313,10 @@ contains
          do k=fs%cfg%kmino_,fs%cfg%kmaxo_
             do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                do i=fs%cfg%imino_,fs%cfg%imaxo_
-                  ! if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
-                  ! if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
-                  if (fs%vmask(i,j,k).eq.0) fs%V(i,j,k)=fs%V(i,j,k)+2.00_WP*twoPi*omega*fs%cfg%zm(k)*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
-                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)-2.00_WP*twoPi*omega*fs%cfg%ym(j)*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
+                  if (fs%umask(i,j,k).eq.0) fs%U(i,j,k)=fs%U(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%zm(k)/fs%cfg%zL)
+                  if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)+amp*vel*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
+                  ! if (fs%vmask(i,j,k).eq.0) fs%V(i,j,k)=fs%V(i,j,k)+2.00_WP*twoPi*omega*fs%cfg%zm(k)*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
+                  ! if (fs%wmask(i,j,k).eq.0) fs%W(i,j,k)=fs%W(i,j,k)-2.00_WP*twoPi*omega*fs%cfg%ym(j)*cos(8.0_WP*twoPi*fs%cfg%xm(i)/fs%cfg%xL)
                end do
             end do
          end do
@@ -326,7 +329,7 @@ contains
 
       ! Create a FENE model 
       create_fene: block
-         use ils_class,  only: gmres_pilut
+         use ils_class,  only: gmres_pilut,bbox,pcg_bbox,gmres_amg
          use multiscalar_class, only: bquick
          integer :: j
          ! Create FENE model solver
@@ -347,7 +350,7 @@ contains
          ! Configure implicit scalar solver
          fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
          ! Setup the solver
-         call fm%setup(implicit_ils=gmres_pilut)
+         call fm%setup(implicit_ils=gmres_pilut) 
       end block create_fene
 
       ! Pressure gradient to drive periodic flow
@@ -471,7 +474,9 @@ contains
       ! Create a monitor file
       create_monitor: block
          ! Prepare some info about fields
-         call fs%get_cfl(time%dt,time%cfl)
+         call fs%get_cfl(time%dt,cflc)
+         call fm%get_cfl(time%dt,fs%rho,lambda,visc_p,cflp)
+         time%cfl=cflc
          call fs%get_max()
          call fm%get_max()
          ! Create simulation monitor
@@ -498,6 +503,9 @@ contains
          call cflfile%add_column(fs%CFLv_x,'Viscous xCFL')
          call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
          call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
+         call cflfile%add_column(fm%CFLp_x,'Polymer Stress xCFL')
+         call cflfile%add_column(fm%CFLp_y,'Polymer Stress yCFL')
+         call cflfile%add_column(fm%CFLp_z,'Polymer Stress zCFL')
          call cflfile%write()
          ! Create forcing monitor
          forcefile=monitor(fs%cfg%amRoot,'forcing')
@@ -511,7 +519,7 @@ contains
       ! Theory solution for 2D FENE-P channel flow from D.O.A. Cruz et al. (2005)
       theory: block
          use string, only: str_medium
-         real(WP) :: b2,epsilon,A,B,C                        !> Terms for theoretical stress tensor calculation in laminar flow
+         real(WP) :: b2,eps,A,B,C,lam                        !> Terms for theoretical stress tensor calculation in laminar flow
          real(WP) :: Fp_H,Fm_H,Gp_H,Gm_H,Fp_y,Fm_y,Gp_y,Gm_y !> Terms for velocity curves
          integer :: i,j,k,iunit,ierr
          real(WP), dimension(:), allocatable :: Txy,Txx,u
@@ -521,11 +529,11 @@ contains
          allocate(u  (fs%cfg%jmin:fs%cfg%jmax)); u  =0.0_WP
          ! Polymer terms
          b2=Lmax**2.00_WP-3.00_WP
-         epsilon=1.00_WP/((b2+5.00_WP))
-         lambda=((b2+2.00_WP)/(b2+5.00_WP))*lambda
+         eps=1.00_WP/((b2+5.00_WP))
+         lam=((b2+2.00_WP)/(b2+5.00_WP))*lambda
          ! Constant coefficents 
-         A=(visc_p**2.00_WP/(6.00_WP*epsilon*lambda**2.00_WP))*(1.00_WP+visc_p/visc_s)
-         C=(visc_p**2.00_WP/(4.00_WP*epsilon*lambda**2.00_WP))*(visc_p/visc_s)*px 
+         A=(visc_p**2.00_WP/(6.00_WP*eps*lam**2.00_WP))*(1.00_WP+visc_p/visc_s)
+         C=(visc_p**2.00_WP/(4.00_WP*eps*lam**2.00_WP))*(visc_p/visc_s)*px 
          ! Loop over channel height to calculate velocity and stress
             do j=fs%cfg%jmin,fs%cfg%jmax
                ! Position dependent coefficent being solved for in cubic equation
@@ -533,7 +541,7 @@ contains
                ! Shear stress
                Txy(j)=(B+sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP)-abs(B-sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP) 
                ! Normal stress
-               Txx(j)=2.00_WP*(lambda/visc_p)*Txy(j)**2.00_WP
+               Txx(j)=2.00_WP*(lam/visc_p)*Txy(j)**2.00_WP
                !> Velocity curve parameters
                if (fs%cfg%ym(j).lt.0.00_WP) then
                   ! @ -H/2
@@ -599,8 +607,12 @@ contains
       ! Perform time integration
       do while (.not.time%done())
          
+         ! Calcualte CFL numbers
+         call fs%get_cfl(time%dt,cflc)                        !> Connvective CFL
+         call fm%get_cfl(time%dt,fs%rho,lambda,visc_p,cflp)   !> Polymer stress CFL
+         time%cfl=cflc
+         
          ! Increment time
-         call fs%get_cfl(time%dt,time%cfl)
          call time%adjust_dt()
          call time%increment()
          
@@ -674,23 +686,12 @@ contains
             
             ! Add FENE source terms
             fene: block
-               integer :: i,j,k,isc
                ! Calculate CgradU terms
                call fm%get_CgradU(gradu)    
                ! Calculate T terms
                call fm%get_stressTensor(lambda,Lmax,visc_p)     
                ! Add source terms to calculated residual
-               do isc=1,fm%nscalar
-                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                        do i=fs%cfg%imino_,fs%cfg%imaxo_
-                           if (fm%mask(i,j,k).eq.0) then
-                              resSC(i,j,k,isc)=resSC(i,j,k,isc)+(fm%CgradU(i,j,k,isc)-(1.00_WP/visc_p)*fm%T(i,j,k,isc))*time%dt
-                           end if
-                        end do
-                     end do
-                  end do
-               end do
+               resSC=resSC+(fm%CgradU-(1.00_WP/visc_p)*fm%T)*time%dt
             end block fene
 
             ! Form implicit residual
@@ -740,33 +741,20 @@ contains
                ! call MPI_ALLREDUCE(myWvol,Wvol ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr)
                ! call MPI_ALLREDUCE(myW   ,meanW,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); meanW=meanW/Wvol
                ! where (fs%wmask.eq.0) resW=resW+Wbulk-meanW
-               ! Drive flow through constant pressure gradient
+               ! Enforce constant pressure gradient
                where (fs%umask.eq.0) resU=resU+(-px*time%dt)
             end block forcing
 
             ! Add in polymer stress
             polymer: block
-               integer :: i,j,k
                ! Calculate updated elastic tensor terms
                call fm%get_stressTensor(lambda,Lmax,visc_p)
                ! Get its divergence 
                call fm%get_divT(fs) 
                ! Add divT to momentum equation 
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%umask(i,j,k).eq.0) then ! x face/U velocity
-                           resU(i,j,k)=resU(i,j,k)+(fm%divT(i,j,k,1)*time%dt)
-                        end if
-                        if (fs%vmask(i,j,k).eq.0) then ! y face/V velocity
-                           resV(i,j,k)=resV(i,j,k)+(fm%divT(i,j,k,2)*time%dt)
-                        end if
-                        if (fs%wmask(i,j,k).eq.0) then ! z face/W velocity
-                           resW(i,j,k)=resW(i,j,k)+(fm%divT(i,j,k,3)*time%dt)
-                        end if
-                     end do
-                  end do
-               end do
+               where (fs%umask.eq.0) resU=resU+fm%divT(:,:,:,1)*time%dt !> x face/U velocity
+               where (fs%vmask.eq.0) resV=resV+fm%divT(:,:,:,2)*time%dt !> y face/V velocity
+               where (fs%wmask.eq.0) resW=resW+fm%divT(:,:,:,3)*time%dt !> z face/W velocity
             end block polymer
 
             ! Form implicit residuals

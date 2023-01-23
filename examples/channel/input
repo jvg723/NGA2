@@ -1,26 +1,26 @@
 # Parallelization
-Partition :	4 2 1
+Partition :	2 2 2
 
 # Mesh definition
-Lx :	5
-Ly :	1
-Lz :	0.04
-nx :	128
-ny :	40
-nz :	1
+Lx :	12.56
+Ly :	2
+Lz :	4
+nx :	384
+ny :	320
+nz :	384
 Stretching : 2.1
 
 # Fluid properties and velocity
-Solvent dynamic viscosity : 0.01
+Solvent dynamic viscosity : 0.004
 Density                   : 1
 Ubulk                     : 1
 Wbulk                     : 0
-Perturbation              : 0
+Perturbation              : 0.5
 Angular velocity          : 0
 
 # FENE model properties
 Maximum extension of polymer chain : 10
-Polymer Relaxation Time            : 5
+Polymer Relaxation Time            : 1
 Beta                               : 0.8
 Stress diffusivisty                : 0
 

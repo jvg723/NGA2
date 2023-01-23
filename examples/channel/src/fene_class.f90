@@ -1,6 +1,5 @@
 !> FENE model class
 !> Extends multiscalar class for the calculation of source terms
-!> Assumes constant diffusivity and density.
 module fene_class
    use multiscalar_class, only: multiscalar
    use config_class,      only: config
@@ -19,10 +18,14 @@ module fene_class
       real(WP), dimension(:,:,:,:), allocatable :: T       !< Stress tensor
       real(WP), dimension(:,:,:,:), allocatable :: divT    !< Stress tensor divergence
 
+      ! CFL numbers
+      real(WP) :: CFLp_x,CFLp_y,CFLp_z                     !< Polymer CFL numbers
+
    contains
       procedure :: get_CgradU                             !< Calculate product and transpose of C_dot_gradU
       procedure :: get_stressTensor                       !< Calculate the stress tensor
       procedure :: get_divT                               !< Calculate stress tensor divergence
+      procedure :: get_cfl                                !< Calculate maximum CFL
    end type fene
    
    !> Declare fene model constructor
@@ -87,27 +90,16 @@ contains
       real(WP), dimension(:,:,:), allocatable :: trC,f_r        
       integer  :: i,j,k
       
-      ! Build stress tensor
+      ! Scalars used in calculating sdtress
       trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6)   !< trace of C
       f_r=(Lmax**2.00_WP-3.00_WP)/(Lmax**2.00_WP-trC)          !< Peterlin Function
-      do k=this%cfg%kmino_,this%cfg%kmaxo_
-         do j=this%cfg%jmino_,this%cfg%jmaxo_
-            do i=this%cfg%imino_,this%cfg%imaxo_
-               ! xx tensor component
-               this%T(i,j,k,1)=(visc_p/lambda)*(f_r(i,j,k)*this%SC(i,j,k,1)-1.00_WP)
-               ! yx/xy tensor component
-               this%T(i,j,k,2)=(visc_p/lambda)*(f_r(i,j,k)*this%SC(i,j,k,2)-0.00_WP)
-               ! zx/xz tensor component
-               this%T(i,j,k,3)=(visc_p/lambda)*(f_r(i,j,k)*this%SC(i,j,k,3)-0.00_WP)
-               ! yy tensor component
-               this%T(i,j,k,4)=(visc_p/lambda)*(f_r(i,j,k)*this%SC(i,j,k,4)-1.00_WP)
-               ! zy/yz tensor component
-               this%T(i,j,k,5)=(visc_p/lambda)*(f_r(i,j,k)*this%SC(i,j,k,5)-0.00_WP)
-               ! zz tensor component
-               this%T(i,j,k,6)=(visc_p/lambda)*(f_r(i,j,k)*this%SC(i,j,k,6)-1.00_WP)
-            end do
-         end do
-      end do
+      ! Build stress tensor
+      this%T(:,:,:,1)=(visc_p/lambda)*(f_r*this%SC(:,:,:,1)-1.00_WP) !> xx tensor component
+      this%T(:,:,:,2)=(visc_p/lambda)*(f_r*this%SC(:,:,:,2)-0.00_WP) !> yx/xy tensor component
+      this%T(:,:,:,3)=(visc_p/lambda)*(f_r*this%SC(:,:,:,3)-0.00_WP) !> zx/xz tensor component
+      this%T(:,:,:,4)=(visc_p/lambda)*(f_r*this%SC(:,:,:,4)-1.00_WP) !> yy tensor component
+      this%T(:,:,:,5)=(visc_p/lambda)*(f_r*this%SC(:,:,:,5)-0.00_WP) !> zy/yz tensor component
+      this%T(:,:,:,6)=(visc_p/lambda)*(f_r*this%SC(:,:,:,6)-1.00_WP) !> zz tensor component
 
       ! Deallocate trace(C) array
 	   deallocate(trC,f_r)
@@ -161,5 +153,41 @@ contains
       deallocate(Txy,Tyz,Tzx)
 
    end subroutine get_divT
+
+   !> Calculate the CFL for viscoelastic flow
+   subroutine get_cfl(this,dt,rho,lambda,visc_p,cflp)
+      use incomp_class, only: incomp
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      class(fene), intent(inout) :: this
+      real(WP), intent(in)  :: dt
+      real(WP), intent(in)  :: rho,lambda,visc_p
+      real(WP), intent(out) :: cflp
+      integer :: i,j,k,ierr
+      real(WP) :: my_CFLp_x,my_CFLp_y,my_CFLp_z
+      
+      ! Set the CFLs to zero
+      my_CFLp_x=0.0_WP; my_CFLp_y=0.0_WP; my_CFLp_z=0.0_WP
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               my_CFLp_x=max(my_CFLp_x,(sqrt(2.00_WP*(this%T(i,j,k,1)+(visc_p/rho)/lambda)))*this%cfg%dxmi(i))
+               my_CFLp_y=max(my_CFLp_y,(sqrt(2.00_WP*(this%T(i,j,k,4)+(visc_p/rho)/lambda)))*this%cfg%dymi(j))
+               my_CFLp_z=max(my_CFLp_z,(sqrt(2.00_WP*(this%T(i,j,k,6)+(visc_p/rho)/lambda)))*this%cfg%dzmi(k))
+            end do
+         end do
+      end do
+      my_CFLp_x=my_CFLp_x*dt; my_CFLp_y=my_CFLp_y*dt; my_CFLp_z=my_CFLp_z*dt
+      
+      ! Get the parallel max
+      call MPI_ALLREDUCE(my_CFLp_x,this%CFLp_x,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_CFLp_y,this%CFLp_y,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_CFLp_z,this%CFLp_z,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      
+      ! Return the maximum polymer stress CFL
+      cflp=max(this%CFLp_x,this%CFLp_y,this%CFLp_z)
+      
+   end subroutine get_cfl
    
 end module fene_class
