@@ -50,12 +50,12 @@ module tpns_class
       character(len=str_medium) :: name='UNNAMED_TPNS'    !< Solver name (default=UNNAMED_TPNS)
       
       ! Constant property fluids
-      real(WP) :: contact_angle                           !< This is our static contact angle
-      real(WP) :: sigma                                   !< This is our constant surface tension coefficient
-      real(WP) :: rho_l,rho_g                             !< These are our constant densities in liquid and gas
-      ! real(WP) :: visc_l,visc_g                           !< These is our constant dynamic viscosities in liquid and gas
-      real(WP) :: visc_g                                  !< Constant dynamic viscosities in gas
-      real(WP), dimension(:,:,:), allocatable :: visc_l   !< This is our liquid viscosity 
+      real(WP) :: contact_angle                                  !< This is our static contact angle
+      real(WP) :: sigma                                          !< This is our constant surface tension coefficient
+      real(WP) :: rho_l,rho_g                                    !< These are our constant densities in liquid and gas
+      ! real(WP) :: visc_l,visc_g                                !< These is our constant dynamic viscosities in liquid and gas
+      ! real(WP) :: visc_g                                       !< Constant dynamic viscosities in gas
+      real(WP), dimension(:,:,:), allocatable :: visc_l,visc_g   !< This is our liquid viscosity 
       
       ! Gravitational acceleration
       real(WP), dimension(3) :: gravity=0.0_WP            !< Acceleration of gravity
@@ -223,8 +223,9 @@ contains
       allocate(self%visc_yz(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%visc_yz=0.0_WP
       allocate(self%visc_zx(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%visc_zx=0.0_WP
       
-      ! Allocate liquid phase viscosity
+      ! Allocate liquid and gas viscosity
       allocate(self%visc_l(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%visc_l=0.0_WP
+      allocate(self%visc_g(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%visc_g=0.0_WP
 
       ! Allocate flow divergence
       allocate(self%div(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%div=0.0_WP
@@ -1822,6 +1823,7 @@ contains
       real(WP) :: my_CFLc_x,my_CFLc_y,my_CFLc_z,my_CFLv_x,my_CFLv_y,my_CFLv_z,my_CFLst
       real(WP) :: max_nu,current_visc_l
       real(wp) :: my_max_visc_l=0.0_WP       !< Place holder for max liquid viscosity in domain
+      real(wp) :: my_max_visc_g=0.0_WP       !< Place holder for max gas viscosity in domain
       
       ! Get surface tension CFL first
       my_CFLst=huge(1.0_WP)
@@ -1837,16 +1839,17 @@ contains
       call MPI_ALLREDUCE(my_CFLst,this%CFLst,1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
       this%CFLst=dt/this%CFLst
       
-      ! Loop through the domain to find the cell with the largest liquid viscocity
+      ! Loop through the domain to find the cell with the largest liquid and gas viscocity
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
                my_max_visc_l=max(my_max_visc_l,abs(this%visc_l(i,j,k)))
+               my_max_visc_g=max(my_max_visc_g,abs(this%visc_g(i,j,k)))
             end do
          end do
       end do
       ! Get largest kinematic viscosity based on variable liquid viscosity
-      max_nu=max(my_max_visc_l/this%rho_l,this%visc_g/this%rho_g)
+      max_nu=max(my_max_visc_l/this%rho_l,my_max_visc_g/this%rho_g)
 
       ! ! Get largest kinematic viscosity
       ! max_nu=max(this%visc_l/this%rho_l,this%visc_g/this%rho_g)
@@ -2414,25 +2417,25 @@ contains
                gas_vol=sum(vf%Gvol(:,:,:,i,j,k))
                tot_vol=gas_vol+liq_vol
                this%visc(i,j,k)=0.0_WP
-               if (tot_vol.gt.0.0_WP) this%visc(i,j,k)=this%visc_g*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+               if (tot_vol.gt.0.0_WP) this%visc(i,j,k)=this%visc_g(i,j,k)*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g(i,j,k)*liq_vol/tot_vol+epsilon(1.0_WP))
                ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
                liq_vol=sum(vf%Lvol(0,0,:,i,j,k))+sum(vf%Lvol(1,0,:,i-1,j,k))+sum(vf%Lvol(0,1,:,i,j-1,k))+sum(vf%Lvol(1,1,:,i-1,j-1,k))
                gas_vol=sum(vf%Gvol(0,0,:,i,j,k))+sum(vf%Gvol(1,0,:,i-1,j,k))+sum(vf%Gvol(0,1,:,i,j-1,k))+sum(vf%Gvol(1,1,:,i-1,j-1,k))
                tot_vol=gas_vol+liq_vol
                this%visc_xy(i,j,k)=0.0_WP
-               if (tot_vol.gt.0.0_WP) this%visc_xy(i,j,k)=this%visc_g*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+               if (tot_vol.gt.0.0_WP) this%visc_xy(i,j,k)=this%visc_g(i,j,k)*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g(i,j,k)*liq_vol/tot_vol+epsilon(1.0_WP))
                ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
                liq_vol=sum(vf%Lvol(:,0,0,i,j,k))+sum(vf%Lvol(:,1,0,i,j-1,k))+sum(vf%Lvol(:,0,1,i,j,k-1))+sum(vf%Lvol(:,1,1,i,j-1,k-1))
                gas_vol=sum(vf%Gvol(:,0,0,i,j,k))+sum(vf%Gvol(:,1,0,i,j-1,k))+sum(vf%Gvol(:,0,1,i,j,k-1))+sum(vf%Gvol(:,1,1,i,j-1,k-1))
                tot_vol=gas_vol+liq_vol
                this%visc_yz(i,j,k)=0.0_WP
-               if (tot_vol.gt.0.0_WP) this%visc_yz(i,j,k)=this%visc_g*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+               if (tot_vol.gt.0.0_WP) this%visc_yz(i,j,k)=this%visc_g(i,j,k)*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g(i,j,k)*liq_vol/tot_vol+epsilon(1.0_WP))
                ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
                liq_vol=sum(vf%Lvol(0,:,0,i,j,k))+sum(vf%Lvol(0,:,1,i,j,k-1))+sum(vf%Lvol(1,:,0,i-1,j,k))+sum(vf%Lvol(1,:,1,i-1,j,k-1))
                gas_vol=sum(vf%Gvol(0,:,0,i,j,k))+sum(vf%Gvol(0,:,1,i,j,k-1))+sum(vf%Gvol(1,:,0,i-1,j,k))+sum(vf%Gvol(1,:,1,i-1,j,k-1))
                tot_vol=gas_vol+liq_vol
                this%visc_zx(i,j,k)=0.0_WP
-               if (tot_vol.gt.0.0_WP) this%visc_zx(i,j,k)=this%visc_g*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+               if (tot_vol.gt.0.0_WP) this%visc_zx(i,j,k)=this%visc_g(i,j,k)*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g(i,j,k)*liq_vol/tot_vol+epsilon(1.0_WP))
             end do
          end do
       end do
@@ -2737,7 +2740,7 @@ contains
          write(output_unit,'(" >   liquid density = ",es12.5)') this%rho_l
          ! write(output_unit,'(" > liquid viscosity = ",es12.5)') this%visc_l
          write(output_unit,'(" >      gas density = ",es12.5)') this%rho_g
-         write(output_unit,'(" >    gas viscosity = ",es12.5)') this%visc_g
+         ! write(output_unit,'(" >    gas viscosity = ",es12.5)') this%visc_g
       end if
       
    end subroutine tpns_print

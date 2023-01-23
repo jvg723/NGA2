@@ -40,7 +40,7 @@ module vfs_class
    integer,  parameter :: advect_band=2                           !< How far we do the transport
    integer,  parameter :: distance_band=2                         !< How far we build the distance
    integer,  parameter :: max_interface_planes=2                  !< Maximum number of interfaces allowed (2 for R2P)
-   real(WP), parameter :: VFlo=1.0e-6_WP                          !< Minimum VF value considered
+   real(WP), parameter :: VFlo=1.0e-8_WP                          !< Minimum VF value considered
    real(WP), parameter :: VFhi=1.0_WP-VFlo                        !< Maximum VF value considered
    real(WP), parameter :: volume_epsilon_factor =1.0e-15_WP       !< Minimum volume  to consider for computational geometry (normalized by min_meshsize**3)
    real(WP), parameter :: surface_epsilon_factor=1.0e-15_WP       !< Minimum surface to consider for computational geometry (normalized by min_meshsize**2)
