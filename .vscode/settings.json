@@ -1,0 +1,10 @@
+{
+    "python.analysis.typeCheckingMode": "basic",
+    "fortran-ls.executablePath": "/opt/homebrew/bin/fortls",
+    "fortran.fortls.path": "/opt/homebrew/bin/fortls",
+    "fortran.fortls.symbolTypes": false,
+    "fortran-ls.useSignatureHelp": false,
+    "fortran-ls.incrementalSync": false,
+    "fortran-ls.includeSymbolMem": false,
+    "fortran-ls.displayVerWarning": false
+}
