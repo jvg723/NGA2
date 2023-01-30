@@ -40,11 +40,8 @@ module simulation
    !> Post-processing
    type(event) :: ppevt
 
-   !> Turbulent liquid flow parameters
-   ! real(WP) :: Utheta,Utheta_max
-   real(WP) :: Utheta_max
-
-   real(WP), dimension(:,:,:),   allocatable :: Utheta,rad,theta
+   !> Liquid axial flow velocity at inlet
+   real(WP) :: U0
    
 contains
    
@@ -59,6 +56,26 @@ contains
       if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.(diam/4.0_WP)**2.0_WP.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
    end function annulus
 
+   !> Function that localizes the center of an annulus located at x=z=y=0 for bulk axial flow
+   function bulk_axial(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
+   end function bulk_axial
+
+    !> Function that localizes the leftmost domain boundary around the annulus
+   function left_boundary_outflow(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.gt.((diam/2.0_WP)**2.0_WP)+(diam/2.0_WP)) isIn=.true.
+   end function left_boundary_outflow
+
    !> Function that localizes the rightmost domain boundary
    function right_boundary_outflow(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
@@ -66,7 +83,7 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.eq.pg%imax+1.and.pg%ym(j).le.abs(Ly)) isIn=.true.
+      if (i.eq.pg%imax+1) isIn=.true.
    end function right_boundary_outflow
    
    
@@ -136,10 +153,6 @@ contains
          allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         
-         allocate(Utheta(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(rad(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(theta(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -205,22 +218,33 @@ contains
          integer :: i,j,k
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
-         ! Read in flow conditions
-         call param_read('Liquid Reynolds number',Rel); fs%visc_l=1.0_WP/(Rel+epsilon(Rel)); visc_l=1.0_WP/(Rel+epsilon(Rel))
-         call param_read('Viscosity ratio',r_visc); fs%visc_g=fs%visc_l/r_visc; visc_g=visc_l/r_visc
-         call param_read('Density ratio',r_rho); fs%rho_l=1.0_WP; fs%rho_g=fs%rho_l/r_rho
-         call param_read('Gas Weber number',Weg); fs%sigma=1.0_WP/(Weg+epsilon(Weg))
-         ! Read in power law constant for non-newtonian liquid
-         call param_read('Power law constant',n)
-         ! Set low and high SR viscosity values
-         visc_0=r_visc*visc_g
-         visc_inf=0.0_WP
-         ! Characteristic time scale
-         lambda=r_visc
+         ! ! Read in flow conditions
+         ! call param_read('Liquid Reynolds number',Rel); fs%visc_l=1.0_WP/(Rel+epsilon(Rel))
+         ! call param_read('Viscosity ratio',r_visc); fs%visc_g=fs%visc_l/r_visc
+         ! call param_read('Density ratio',r_rho); fs%rho_l=1.0_WP; fs%rho_g=fs%rho_l/r_rho
+         ! call param_read('Gas Weber number',Weg); fs%sigma=1.0_WP/(Weg+epsilon(Weg))
+         ! ! Read in power law constant for non-newtonian liquid
+         ! call param_read('Power law constant',n)
+         ! ! Set low and high SR viscosity values
+         ! visc_0=r_visc*visc_g
+         ! visc_inf=0.0_WP
+         ! ! Characteristic time scale
+         ! lambda=r_visc
+         ! Assign constant viscosity to each phase
+         call param_read('Liquid dynamic viscosity',visc_l); fs%visc_l=visc_l
+         call param_read('Gas dynamic viscosity'   ,visc_g); fs%visc_g=visc_g
+         ! Assign constant density to each phase
+         call param_read('Liquid density',fs%rho_l)
+         call param_read('Gas density'   ,fs%rho_g)
+         ! Read in surface tension coefficient
+         call param_read('Surface tension coefficient',fs%sigma)
          ! Inflow on the left
          call fs%add_bcond(name='inflow', type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=annulus)
+         call fs%add_bcond(name='bulk', type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=bulk_axial)
+         ! Neumann on the left around annulus
+         call fs%add_bcond(name='lhs_neumann', type=clipped_neumann,face='x',dir=-1,canCorrect=.false.,locator=left_boundary_outflow)
          ! Outflow on the right
-         call fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.true. ,locator=right_boundary_outflow)
+         call fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=right_boundary_outflow)
          ! Configure pressure solver
          call param_read('Pressure iteration',fs%psolv%maxit)
          call param_read('Pressure tolerance',fs%psolv%rcvg)
@@ -237,31 +261,38 @@ contains
          use random,     only: random_uniform
          use mathtools,  only: twoPi
          type(bcond), pointer :: mybc
-         real(WP)             :: omega,a
-         ! real(WP)             :: theta
+         real(WP)             :: omega,a,theta,rad,Utheta,Utheta_max
          integer  :: n,i,j,k
          ! Zero initial field in the domain
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-         ! Rankine vortex parameters for liquid phase
-         call param_read('Tangential velocity',Utheta_max)
+         ! Rankine vortex parameters for inflow
+         call param_read('Axial velocity',U0)
          a=diam/4.0_WP
+         Utheta_max=1.2_WP*U0
          omega=Utheta_max/a
          call fs%get_bcond('inflow',mybc)
-         ! Apply Dirichlet at inlet
+         ! Apply swirl component dirichlet at inlet
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
             ! Calculate tangential velocity along annulus radius
-            rad(i,j,k)=sqrt(fs%cfg%zm(k)**2.0_WP+fs%cfg%ym(j)**2.0_WP)
-            ! theta(i,j,k)=atan(fs%cfg%ym(j)/fs%cfg%zm(k))
-            theta(i,j,k)=atan2(fs%cfg%zm(k),fs%cfg%ym(j))
-            if (rad(i,j,k).le.a) then
-               Utheta(i,j,k)=Utheta_max
-            elseif (rad(i,j,k).gt.a) then
-               Utheta(i,j,k)=(omega*a**2.0_WP)/rad(i,j,k)
+            rad=0.0_WP;theta=0.0_WP
+            rad=sqrt(fs%cfg%zm(k)**2.0_WP+fs%cfg%ym(j)**2.0_WP)
+            theta=atan2(fs%cfg%zm(k),fs%cfg%ym(j))
+            if (rad.le.a) then
+               Utheta=Utheta_max
+            elseif (rad.gt.a) then
+               Utheta=(omega*a**2.0_WP)/rad
             end if
             ! Put in tangential velocity into cartesian components
-            fs%V(i,j,k)= Utheta(i,j,k)*cos(theta(i,j,k))
-            fs%W(i,j,k)=-Utheta(i,j,k)*sin(theta(i,j,k))
+            fs%V(i,j,k)= Utheta*cos(theta)
+            fs%W(i,j,k)=-Utheta*sin(theta)
+         end do
+         call fs%get_bcond('bulk',mybc)
+         ! Apply bulk component dirichlet at inlet
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            ! Bulk injection velocity
+            fs%U(i,j,k)=U0
          end do
          ! Apply all other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
@@ -313,9 +344,6 @@ contains
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('SRmag',SRmag)
-         call ens_out%add_scalar('Utheta',Utheta)
-         call ens_out%add_scalar('rad',rad)
-         call ens_out%add_scalar('theta',theta)
          call ens_out%add_scalar('visc_l',fs%visc_l)
          call ens_out%add_surface('vofplic',smesh)
          ! Output to ensight
@@ -383,7 +411,7 @@ contains
       implicit none
       
       ! Perform time integration
-      do while (.not.time%done())!.and.amp.lt.0.1_WP*vf%cfg%yL.and.time%t.lt.20.0_WP*tau)
+      do while (.not.time%done())
          
          ! Increment time
          call fs%get_cfl(time%dt,time%cfl)

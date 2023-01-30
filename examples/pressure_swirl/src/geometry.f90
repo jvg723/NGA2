@@ -35,7 +35,7 @@ contains
          call param_read('Lx',Lx); call param_read('nx',nx); allocate(x(nx+1))
          call param_read('Ly',Ly); call param_read('ny',ny); allocate(y(ny+1))
          call param_read('Lz',Lz); call param_read('nz',nz); allocate(z(nz+1))
-         call param_read('D',diam)
+         call param_read('diameter',diam)
          
          ! Create simple rectilinear grid
          do i=1,nx+1
@@ -49,7 +49,7 @@ contains
          end do
          
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='pressure_swirl')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.true.,zper=.true.,name='pressure_swirl')
          
       end block create_grid
       
