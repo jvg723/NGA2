@@ -11,7 +11,7 @@ Partition :	2 2 2
 # nz        : 100
 
 # Mesh and geometry definition - Dimensional case
-Lx          : 2.0e-3 
+Lx          : 2.0e-3
 Ly          : 4.0e-3
 Lz          : 4.0e-3
 diameter    : 2.1e-4    # Annulus geoemtry  
@@ -38,7 +38,7 @@ Surface tension coefficient : 0.02198
 Axial velocity       :        22.75
 
 # Time integration
-Max timestep size : 1e-1
+Max timestep size : 1e-6
 Max cfl number :    0.8
 Max time :          1000
 

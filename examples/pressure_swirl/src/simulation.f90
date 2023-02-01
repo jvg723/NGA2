@@ -32,7 +32,7 @@ module simulation
    real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:),   allocatable :: SRmag
    real(WP), dimension(:,:,:,:), allocatable :: SR
-   
+
    !> Problem definition
    real(WP) :: Rel,Weg,r_visc,r_rho
    real(WP) :: n,lambda,visc_0,visc_inf,visc_l,visc_g
@@ -41,7 +41,7 @@ module simulation
    type(event) :: ppevt
 
    !> Liquid axial flow velocity at inlet
-   real(WP) :: U0
+   real(WP) :: Ubulk
    
 contains
    
@@ -52,39 +52,77 @@ contains
       class(pgrid), intent(in) :: pg
       integer, intent(in) :: i,j,k
       logical :: isIn
+      real(WP) :: diam_m
       isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.(diam/4.0_WP)**2.0_WP.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
+      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.((diam/4.0_WP)**2.0_WP)-epsilon(diam).and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
    end function annulus
 
-   !> Function that localizes the center of an annulus located at x=z=y=0 for bulk axial flow
-   function bulk_axial(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
-   end function bulk_axial
-
-    !> Function that localizes the leftmost domain boundary around the annulus
-   function left_boundary_outflow(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.gt.((diam/2.0_WP)**2.0_WP)+(diam/2.0_WP)) isIn=.true.
-   end function left_boundary_outflow
-
-   !> Function that localizes the rightmost domain boundary
-   function right_boundary_outflow(pg,i,j,k) result(isIn)
+   !> Function that localizes the top (x+) of the domain
+   function xp_locator(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
       class(pgrid), intent(in) :: pg
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
       if (i.eq.pg%imax+1) isIn=.true.
-   end function right_boundary_outflow
+   end function xp_locator
+
+   !> Function that localizes the bottom (x-) of the domain boundary around the annulus
+   function xm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.(diam**2.0_WP)) isIn=.true.
+   end function xm_locator
+
+   !> Function that localizes the top (y+) of the domain
+   function yp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmax+1) isIn=.true.
+   end function yp_locator
+   
+   
+   !> Function that localizes the bottom (y-) of the domain
+   function ym_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmin) isIn=.true.
+   end function ym_locator
+   
+   
+   !> Function that localizes the top (z+) of the domain
+   function zp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmax+1) isIn=.true.
+   end function zp_locator
+   
+   
+   !> Function that localizes the bottom (z-) of the domain
+   function zm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmin) isIn=.true.
+   end function zm_locator
    
    
   !> Specialized subroutine that outputs the vertical liquid distribution
@@ -238,13 +276,15 @@ contains
          call param_read('Gas density'   ,fs%rho_g)
          ! Read in surface tension coefficient
          call param_read('Surface tension coefficient',fs%sigma)
-         ! Inflow on the left
+         ! Inflow on the within annulus
          call fs%add_bcond(name='inflow', type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=annulus)
-         call fs%add_bcond(name='bulk', type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=bulk_axial)
-         ! Neumann on the left around annulus
-         call fs%add_bcond(name='lhs_neumann', type=clipped_neumann,face='x',dir=-1,canCorrect=.false.,locator=left_boundary_outflow)
-         ! Outflow on the right
-         call fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=right_boundary_outflow)
+         ! clipped Neumann on all other boundaries
+         call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
+         call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
+         call fs%add_bcond(name='bc_yp',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
+         call fs%add_bcond(name='bc_ym',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
+         call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
          call param_read('Pressure iteration',fs%psolv%maxit)
          call param_read('Pressure tolerance',fs%psolv%rcvg)
@@ -252,7 +292,7 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
+         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_pfmg)
       end block create_and_initialize_flow_solver
 
       ! Initialize our velocity field
@@ -266,33 +306,23 @@ contains
          ! Zero initial field in the domain
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
          ! Rankine vortex parameters for inflow
-         call param_read('Axial velocity',U0)
+         call param_read('Axial velocity',Ubulk)
          a=diam/4.0_WP
-         Utheta_max=1.2_WP*U0
+         Utheta_max=1.35_WP*Ubulk
          omega=Utheta_max/a
+         ! Apply bulk and swirl component dirichlet at inlet
          call fs%get_bcond('inflow',mybc)
-         ! Apply swirl component dirichlet at inlet
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
             ! Calculate tangential velocity along annulus radius
             rad=0.0_WP;theta=0.0_WP
             rad=sqrt(fs%cfg%zm(k)**2.0_WP+fs%cfg%ym(j)**2.0_WP)
             theta=atan2(fs%cfg%zm(k),fs%cfg%ym(j))
-            if (rad.le.a) then
-               Utheta=Utheta_max
-            elseif (rad.gt.a) then
-               Utheta=(omega*a**2.0_WP)/rad
-            end if
-            ! Put in tangential velocity into cartesian components
+            Utheta=(omega*a**2.0_WP)/rad
             fs%V(i,j,k)= Utheta*cos(theta)
             fs%W(i,j,k)=-Utheta*sin(theta)
-         end do
-         call fs%get_bcond('bulk',mybc)
-         ! Apply bulk component dirichlet at inlet
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
             ! Bulk injection velocity
-            fs%U(i,j,k)=U0
+            fs%U(i,j,k)=Ubulk
          end do
          ! Apply all other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
@@ -407,7 +437,6 @@ contains
    
    !> Perform an NGA2 simulation - this mimicks NGA's old time integration for multiphase
    subroutine simulation_run
-      ! use tpns_class, only: static_contact
       implicit none
       
       ! Perform time integration
@@ -418,27 +447,25 @@ contains
          call time%adjust_dt()
          call time%increment()
 
-         ! Apply time-varying Dirichlet conditions
-         ! This is where time-dpt Dirichlet would be enforced
-
          ! Calculate SR
          call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
 
-         ! ! Model non-Newtonian fluid
+         ! ! Model shear thinning fluid
          ! nonewt: block
          !    integer :: i,j,k
-         !    ! real(WP), parameter :: C=1.137e-3_WP
+         !    real(WP), parameter :: C=1.137e-3_WP
+         !    real(WP), parameter :: n=0.3_WP
          !    ! Update viscosity
          !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
          !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
          !          do i=fs%cfg%imino_,fs%cfg%imaxo_
          !             ! Power law model 
-         !             ! SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-         !             ! SRmag(i,j,k)=max(SRmag(i,j,k),1000.0_WP**(1.0_WP/(n-1.0_WP)))
-         !             ! fs%visc_l(i,j,k)=C*SRmag(i,j,k)**(n-1.0_WP)
+         !             SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+         !             SRmag(i,j,k)=max(SRmag(i,j,k),1000.0_WP**(1.0_WP/(n-1.0_WP)))
+         !             fs%visc_l(i,j,k)=C*SRmag(i,j,k)**(n-1.0_WP)
          !             ! Carreau Model
-         !             SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-         !             fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(lambda*SRmag(i,j,k))**2.00_WP)**((n-1.00_WP)/2.00_WP)
+         !             ! SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+         !             ! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(lambda*SRmag(i,j,k))**2.00_WP)**((n-1.00_WP)/2.00_WP)
          !          end do
          !       end do
          !    end do
@@ -525,26 +552,26 @@ contains
          if (ens_evt%occurs()) then 
             ! Update surfmesh object
             update_smesh: block
-            use irl_fortran_interface
-            integer :: nplane,np,i,j,k
-            ! Transfer polygons to smesh
-            call vf%update_surfmesh(smesh)
-            ! Also populate nplane variable
-            smesh%var(1,:)=1.0_WP
-            np=0
-            do k=vf%cfg%kmin_,vf%cfg%kmax_
-               do j=vf%cfg%jmin_,vf%cfg%jmax_
-                  do i=vf%cfg%imin_,vf%cfg%imax_
-                     do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
-                        if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                           np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
-                        end if
+               use irl_fortran_interface
+               integer :: nplane,np,i,j,k
+               ! Transfer polygons to smesh
+               call vf%update_surfmesh(smesh)
+               ! Also populate nplane variable
+               smesh%var(1,:)=1.0_WP
+               np=0
+               do k=vf%cfg%kmin_,vf%cfg%kmax_
+                  do j=vf%cfg%jmin_,vf%cfg%jmax_
+                     do i=vf%cfg%imin_,vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                           end if
+                        end do
                      end do
                   end do
                end do
-            end do
-         end block update_smesh
-         ! Perform ensight output 
+            end block update_smesh
+            ! Perform ensight output 
             call ens_out%write_data(time%t)
          end if
          
@@ -556,7 +583,22 @@ contains
 
          ! Specialized post-processing
          if (ppevt%occurs()) call postproc_data()
-         
+
+         ! After we're done clip all VOF at the exit area and along the sides - hopefully nothing's left
+         clip_vof: block
+            integer :: i,j,k
+            do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+               do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                  do i=fs%cfg%imino_,fs%cfg%imaxo_
+                     if (i.ge.vf%cfg%imax-5) vf%VF(i,j,k)=0.0_WP
+                     if (j.ge.vf%cfg%jmax-5) vf%VF(i,j,k)=0.0_WP
+                     if (j.le.vf%cfg%jmin+5) vf%VF(i,j,k)=0.0_WP
+                     if (k.ge.vf%cfg%kmax-5) vf%VF(i,j,k)=0.0_WP
+                     if (k.le.vf%cfg%kmin+5) vf%VF(i,j,k)=0.0_WP
+                  end do
+               end do
+            end do
+         end block clip_vof
          
       end do
       

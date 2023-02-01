@@ -49,7 +49,7 @@ contains
          end do
          
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.true.,zper=.true.,name='pressure_swirl')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='pressure_swirl')
          
       end block create_grid
       
@@ -73,7 +73,7 @@ contains
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
                   ! Wall for outer annulus cylinder
-                  if (i.eq.cfg%imin.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.ge.(diam/2.0_WP)**2.0_WP.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.le.((diam/2.0_WP)**2.0_WP)+(diam/2.0_WP)) cfg%VF(i,j,k)=0.0_WP
+                  if (i.eq.cfg%imin.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.ge.(diam/2.0_WP)**2.0_WP.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.lt.((diam)**2.0_WP)) cfg%VF(i,j,k)=0.0_WP
                end do
             end do
          end do
