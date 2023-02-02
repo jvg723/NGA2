@@ -54,7 +54,7 @@ contains
       logical :: isIn
       real(WP) :: diam_m
       isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.((diam/4.0_WP)**2.0_WP)-epsilon(diam).and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
+      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.((diam/4.0_WP)**2.0_WP).and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
    end function annulus
 
    !> Function that localizes the top (x+) of the domain
@@ -308,7 +308,7 @@ contains
          ! Rankine vortex parameters for inflow
          call param_read('Axial velocity',Ubulk)
          a=diam/4.0_WP
-         Utheta_max=1.35_WP*Ubulk
+         Utheta_max=10.0_WP*Ubulk
          omega=Utheta_max/a
          ! Apply bulk and swirl component dirichlet at inlet
          call fs%get_bcond('inflow',mybc)

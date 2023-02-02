@@ -72,6 +72,8 @@ contains
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
+                  ! Wall for inner annulus cylinder
+                  if (i.eq.cfg%imin.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.lt.(diam/4.0_WP)**2.0_WP) cfg%VF(i,j,k)=0.0_WP
                   ! Wall for outer annulus cylinder
                   if (i.eq.cfg%imin.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.ge.(diam/2.0_WP)**2.0_WP.and.cfg%ym(j)**2.0_WP+cfg%zm(k)**2.0_WP.lt.((diam)**2.0_WP)) cfg%VF(i,j,k)=0.0_WP
                end do

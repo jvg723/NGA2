@@ -39,7 +39,7 @@ Axial velocity       :        22.75
 
 # Time integration
 Max timestep size : 1e-6
-Max cfl number :    0.8
+Max cfl number :    0.7
 Max time :          1000
 
 # Pressure solver
@@ -51,5 +51,5 @@ Implicit tolerance : 1e-6
 Implicit iteration : 100
 
 # Ensight output
-Ensight output period : 1e-3
+Ensight output period : 1e-4
 Postproc output period : 10
