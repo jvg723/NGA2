@@ -1,7 +1,7 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,         only: WP
-   use geometry,          only: cfg,Lx,Ly,Lz,diam
+   use geometry,          only: cfg
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use timetracker_class, only: timetracker
@@ -32,30 +32,24 @@ module simulation
    real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:),   allocatable :: SRmag
    real(WP), dimension(:,:,:,:), allocatable :: SR
-
+   
    !> Problem definition
-   real(WP) :: Rel,Weg,r_visc,r_rho
-   real(WP) :: n,lambda,visc_0,visc_inf,visc_l,visc_g
-
-   !> Post-processing
-   type(event) :: ppevt
-
-   !> Liquid axial flow velocity at inlet
-   real(WP) :: Ubulk
+   real(WP) :: R1,R2   !< Inner and outer radii of annulus
+   real(WP) :: Ul,SW   !< Liquid axial velocity and swirl ratio
    
 contains
    
    
-    !> Function that localizes the center of an annulus located at x=z=y=0
-   function annulus(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      real(WP) :: diam_m
-      isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.((diam/4.0_WP)**2.0_WP).and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) isIn=.true.
-   end function annulus
+   !> Function that defines a level set function for an annular liquid region
+	function levelset_annulus(xyz,t) result(G)
+		implicit none
+		real(WP), dimension(3),intent(in) :: xyz
+		real(WP), intent(in) :: t
+		real(WP) :: G,r
+      r=sqrt(xyz(2)**2+xyz(3)**2)
+	   G=min(r-R1,R2-r)
+	end function levelset_annulus
+   
 
    !> Function that localizes the top (x+) of the domain
    function xp_locator(pg,i,j,k) result(isIn)
@@ -66,113 +60,17 @@ contains
       isIn=.false.
       if (i.eq.pg%imax+1) isIn=.true.
    end function xp_locator
+   
 
-   !> Function that localizes the bottom (x-) of the domain boundary around the annulus
+   !> Function that localizes the bottom (x-) of the domain boundary
    function xm_locator(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
       class(pgrid), intent(in) :: pg
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j)**2.0_WP+pg%zm(k)**2.0_WP.ge.(diam**2.0_WP)) isIn=.true.
+      if (i.le.pg%imin) isIn=.true.
    end function xm_locator
-
-   !> Function that localizes the top (y+) of the domain
-   function yp_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (j.eq.pg%jmax+1) isIn=.true.
-   end function yp_locator
-   
-   
-   !> Function that localizes the bottom (y-) of the domain
-   function ym_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (j.eq.pg%jmin) isIn=.true.
-   end function ym_locator
-   
-   
-   !> Function that localizes the top (z+) of the domain
-   function zp_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmax+1) isIn=.true.
-   end function zp_locator
-   
-   
-   !> Function that localizes the bottom (z-) of the domain
-   function zm_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmin) isIn=.true.
-   end function zm_locator
-   
-   
-  !> Specialized subroutine that outputs the vertical liquid distribution
-   subroutine postproc_data()
-      ! use mathtools, only: Pi
-      use string,    only: str_medium
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
-      use parallel,  only: MPI_REAL_WP
-      implicit none
-      integer :: iunit,ierr,i,j,k
-      real(WP), dimension(:), allocatable :: myVOF,VOF
-      real(WP), dimension(:), allocatable :: myVEL,VEL
-      character(len=str_medium) :: filename,timestamp
-      ! Allocate vertical line storage
-      allocate(myVOF(vf%cfg%jmin:vf%cfg%jmax)); myVOF=0.0_WP
-      allocate(myVEL(vf%cfg%jmin:vf%cfg%jmax)); myVEL=0.0_WP
-      allocate(  VOF(vf%cfg%jmin:vf%cfg%jmax)); VOF=0.0_WP
-      allocate(  VEL(vf%cfg%jmin:vf%cfg%jmax)); VEL=0.0_WP
-      ! Initialize local data to zero
-      myVOF=0.0_WP; myVEL=0.0_WP
-      ! Integrate all data over x and z
-      do k=vf%cfg%kmin_,vf%cfg%kmax_
-         do j=vf%cfg%jmin_,vf%cfg%jmax_
-            do i=vf%cfg%imin_,vf%cfg%imax_
-               myVOF(j)=myVOF(j)+vf%VF(i,j,k)
-               myVEL(j)=myVEL(j)+fs%U(i,j,k)
-            end do
-         end do
-      end do
-      ! All-reduce the data
-      call MPI_ALLREDUCE(myVOF,VOF,vf%cfg%ny,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); VOF=VOF/real(vf%cfg%nx*vf%cfg%nz,WP)
-      call MPI_ALLREDUCE(myVEL,VEL,vf%cfg%ny,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); VEL=VEL/real(vf%cfg%nx*vf%cfg%nz,WP)
-      ! If root, print it out
-      if (vf%cfg%amRoot) then
-         ! call execute_command_line('mkdir -p stats')
-         ! filename='profile_'
-         filename='./stats/profile_'
-         write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         ! open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12)') 'Height','VOF','VEL'
-         do j=vf%cfg%jmin,vf%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') vf%cfg%ym(j),VOF(j),VEL(j)
-         end do
-         close(iunit)
-      end if
-      ! Deallocate work arrays
-      deallocate(myVOF,VOF)
-      deallocate(myVEL,VEL)
-   end subroutine postproc_data
    
    
    !> Initialization of problem solver
@@ -190,13 +88,13 @@ contains
          allocate(Vi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
-         time=timetracker(amRoot=cfg%amRoot,name='pressure_swirl')
+         time=timetracker(amRoot=cfg%amRoot,name='swirl_atomizer')
          call param_read('Max timestep size',time%dtmax)
          call param_read('Max cfl number',time%cflmax)
          call param_read('Max time',time%tmax)
@@ -209,27 +107,54 @@ contains
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
          use vfs_class, only: lvira,r2p,VFhi,VFlo
-         use mathtools, only: twoPi
-         use random,    only: random_uniform
-         use parallel,  only: MPI_REAL_WP
-         use mpi_f08
-         integer :: i,j,k
+         integer :: i,j,k,n,si,sj,sk
+			real(WP), dimension(3,8) :: cube_vertex
+			real(WP), dimension(3) :: v_cent,a_cent
+			real(WP) :: vol,area
+			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
          vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
-         ! Initialize to flat interface in the annulus
+         ! Set full domain to gas
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
-                  if (i.eq.vf%cfg%imin.and.vf%cfg%ym(j)**2.0_WP+vf%cfg%zm(k)**2.0_WP.ge.(diam/4.0_WP)**2.0_WP.and.vf%cfg%ym(j)**2.0_WP+vf%cfg%zm(k)**2.0_WP.lt.(diam/2.0_WP)**2.0_WP) then
-                     vf%VF(i,j,k)=1.0_WP
-                  else
-                     vf%VF(i,j,k)=0.0_WP
-                  end if
+                  vf%VF(i,j,k)=0.0_WP
                   vf%Lbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
                   vf%Gbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
                end do
             end do
          end do
+         ! Initialize an annular interface at the inlet only
+         call param_read('Inner radius',R1)
+         call param_read('Outer radius',R2)
+         if (vf%cfg%iproc.eq.1) then
+            do k=vf%cfg%kmino_,vf%cfg%kmaxo_
+               do j=vf%cfg%jmino_,vf%cfg%jmaxo_
+                  do i=vf%cfg%imino,vf%cfg%imin-1
+                     ! Set cube vertices
+				         n=0
+                     do sk=0,1
+                        do sj=0,1
+                           do si=0,1
+                              n=n+1; cube_vertex(:,n)=[vf%cfg%x(i+si),vf%cfg%y(j+sj),vf%cfg%z(k+sk)]
+                           end do
+                        end do
+                     end do
+                     ! Call adaptive refinement code to get volume and barycenters recursively
+				         vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
+                     call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_annulus,0.0_WP,amr_ref_lvl)
+                     vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
+                     if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
+                        vf%Lbary(:,i,j,k)=v_cent
+                        vf%Gbary(:,i,j,k)=([vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]-vf%VF(i,j,k)*vf%Lbary(:,i,j,k))/(1.0_WP-vf%VF(i,j,k))
+                     else
+                        vf%Lbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
+                        vf%Gbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
+                     end if
+                  end do
+               end do
+            end do
+         end if
          ! Update the band
          call vf%update_band()
          ! Perform interface reconstruction from VOF field
@@ -249,25 +174,12 @@ contains
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use tpns_class, only: dirichlet,clipped_neumann,neumann
-         use ils_class, only: pcg_pfmg,gmres_amg
-         use mathtools, only: Pi
-         use random,    only: random_uniform
+         use tpns_class, only: dirichlet,clipped_neumann
+         use ils_class,  only: pcg_pfmg
          integer :: i,j,k
+         real(WP) :: visc_l,visc_g
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
-         ! ! Read in flow conditions
-         ! call param_read('Liquid Reynolds number',Rel); fs%visc_l=1.0_WP/(Rel+epsilon(Rel))
-         ! call param_read('Viscosity ratio',r_visc); fs%visc_g=fs%visc_l/r_visc
-         ! call param_read('Density ratio',r_rho); fs%rho_l=1.0_WP; fs%rho_g=fs%rho_l/r_rho
-         ! call param_read('Gas Weber number',Weg); fs%sigma=1.0_WP/(Weg+epsilon(Weg))
-         ! ! Read in power law constant for non-newtonian liquid
-         ! call param_read('Power law constant',n)
-         ! ! Set low and high SR viscosity values
-         ! visc_0=r_visc*visc_g
-         ! visc_inf=0.0_WP
-         ! ! Characteristic time scale
-         ! lambda=r_visc
          ! Assign constant viscosity to each phase
          call param_read('Liquid dynamic viscosity',visc_l); fs%visc_l=visc_l
          call param_read('Gas dynamic viscosity'   ,visc_g); fs%visc_g=visc_g
@@ -278,15 +190,10 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
-         ! Inflow on the within annulus
-         call fs%add_bcond(name='inflow', type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=annulus)
-         ! clipped Neumann on all other boundaries
-         call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
-         call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
-         ! call fs%add_bcond(name='bc_yp',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
-         ! call fs%add_bcond(name='bc_ym',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
-         ! call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
-         ! call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
+         ! Inflow on the left of domain
+         call fs%add_bcond(name='inflow',type=dirichlet,      face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
+         ! Clipped Neumann outflow on the right of domain
+         call fs%add_bcond(name='bc_xp' ,type=clipped_neumann,face='x',dir=+1,canCorrect=.true. ,locator=xp_locator)
          ! Configure pressure solver
          call param_read('Pressure iteration',fs%psolv%maxit)
          call param_read('Pressure tolerance',fs%psolv%rcvg)
@@ -294,37 +201,36 @@ contains
          call param_read('Implicit iteration',fs%implicit%maxit)
          call param_read('Implicit tolerance',fs%implicit%rcvg)
          ! Setup the solver
-         call fs%setup(pressure_ils=gmres_amg,implicit_ils=pcg_pfmg)
+         call fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
       end block create_and_initialize_flow_solver
+      
 
       ! Initialize our velocity field
       initialize_velocity: block
          use tpns_class, only: bcond
-         use random,     only: random_uniform
-         use mathtools,  only: twoPi
          type(bcond), pointer :: mybc
-         real(WP)             :: omega,a,theta,rad,Utheta,Utheta_max
+         real(WP) :: r,theta
          integer  :: n,i,j,k
          ! Zero initial field in the domain
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-         ! Rankine vortex parameters for inflow
-         call param_read('Axial velocity',Ubulk)
-         a=diam/4.0_WP
-         Utheta_max=1.2_WP*Ubulk
-         omega=Utheta_max/a
-         ! Apply bulk and swirl component dirichlet at inlet
+         ! Read in inflow parameters
+         call param_read('Liquid velocity',Ul)
+         call param_read('Swirl ratio',SW)
+         ! Apply axial and swirl component Dirichlet at inlet
          call fs%get_bcond('inflow',mybc)
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            ! ! Calculate tangential velocity along annulus radius
-            rad=0.0_WP;theta=0.0_WP
-            rad=sqrt(fs%cfg%zm(k)**2.0_WP+fs%cfg%ym(j)**2.0_WP)
-            theta=atan2(fs%cfg%zm(k),fs%cfg%ym(j))
-            Utheta=(omega*a**2.0_WP)/rad
-            fs%V(i,j,k)= Utheta*cos(theta)
-            fs%W(i,j,k)=-Utheta*sin(theta)
-            ! Bulk injection velocity
-            fs%U(i,j,k)=Ubulk
+            ! Set U velocity
+            r=sqrt(cfg%ym(j)**2+cfg%zm(k)**2) !< Radius in cylindrical coordinates
+            if (r.ge.R1.and.r.le.R2) fs%U(i,j,k)=Ul
+            ! Set V velocity
+            r=sqrt(cfg%y(j)**2+cfg%zm(k)**2)  !< Radius in cylindrical coordinates
+            theta=atan2(cfg%y(j),cfg%zm(k))   !< Angle  in cylindrical coordinates
+            if (r.ge.R1.and.r.le.R2) fs%V(i,j,k)=+4.0_WP*SW*Ul*(-r**2+(R2+R1)*r-R2*R1)/((R2-R1)**2)*cos(theta)
+            ! Set W velocity
+            r=sqrt(cfg%ym(j)**2+cfg%z(k)**2)  !< Radius in cylindrical coordinates
+            theta=atan2(cfg%ym(j),cfg%z(k))   !< Angle  in cylindrical coordinates
+            if (r.ge.R1.and.r.le.R2) fs%W(i,j,k)=-4.0_WP*SW*Ul*(-r**2+(R2+R1)*r-R2*R1)/((R2-R1)**2)*sin(theta)
          end do
          ! Apply all other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
@@ -337,6 +243,7 @@ contains
          ! Compute divergence
          call fs%get_div()
       end block initialize_velocity
+      
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -376,8 +283,6 @@ contains
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('Pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
-         call ens_out%add_scalar('SRmag',SRmag)
-         call ens_out%add_scalar('visc_l',fs%visc_l)
          call ens_out%add_surface('vofplic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -422,19 +327,7 @@ contains
          call cflfile%write()
       end block create_monitor
       
-
-      ! Create specialized post-processing
-      create_postproc: block
-         ! Create event for data postprocessing
-         ppevt=event(time=time,name='Postproc output')
-         call param_read('Postproc output period',ppevt%tper)
-         ! Create directory to write to
-         if (cfg%amRoot) call execute_command_line('mkdir -p stats')
-         ! Perform the output
-         if (ppevt%occurs()) call postproc_data()
-      end block create_postproc
-
-
+      
    end subroutine simulation_init
    
    
@@ -451,7 +344,7 @@ contains
          call time%increment()
 
          ! Calculate SR
-         call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
+         ! call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
 
          ! ! Model shear thinning fluid
          ! nonewt: block
@@ -583,10 +476,7 @@ contains
          call vf%get_max()
          call mfile%write()
          call cflfile%write()
-
-         ! Specialized post-processing
-         if (ppevt%occurs()) call postproc_data()
-
+         
          ! After we're done clip all VOF at the exit area and along the sides - hopefully nothing's left
          clip_vof: block
             integer :: i,j,k
@@ -620,7 +510,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,SRmag)
       
    end subroutine simulation_final
    

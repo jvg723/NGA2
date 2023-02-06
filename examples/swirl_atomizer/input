@@ -1,32 +1,19 @@
 # Parallelization
-Partition :	2 2 2
+Partition :	8 1 1
 
-# # Mesh and geometry definition - Non-Dimensional case
-# Lx        : 10
-# Ly        : 20
-# Lz        : 20
-# diameter  : 1    # Annulus geoemtry  
-# nx        : 50
-# ny        : 100
-# nz        : 100
+# Domain definition
+Lx : 1.0e-3
+Ly : 1.0e-3
+Lz : 1.0e-3
+nx : 100
+ny : 100
+nz : 100
 
-# Mesh and geometry definition - Dimensional case
-Lx          : 2.0e-3
-Ly          : 4.0e-3
-Lz          : 4.0e-3
-diameter    : 2.1e-4    # Annulus geoemtry  
-nx          : 50
-ny          : 100
-nz          : 100
-
-# # Fluid properties and inital profile - Non-Dimensional case
-# Liquid Reynolds number :  3400
-# Gas Weber number :        50
-# Viscosity ratio :         60       !< This is mu_l/mu_g
-# Density ratio :           80       !< This is rho_l/rho_g
-# Power law constant   :    0.3
-# Axial velocity       :    1
-# #non-Newtonian liquid phase
+# Problem definition
+Inner radius :    0.5025e-4
+Outer radius :    1.05e-4
+Liquid velocity : 22.75
+Swirl ratio :     1.2
 
 # Fluid properties - Dimensional case
 Gravity :                     -9.81 0 0
@@ -35,21 +22,19 @@ Gas dynamic viscosity :       1.821e-5
 Liquid density :              786.1
 Gas density :                 1.205
 Surface tension coefficient : 0.02198
-Axial velocity       :        22.75
 
 # Time integration
-Max timestep size : 1e-6
+Max timestep size : 5e-7
 Max cfl number :    0.8
 Max time :          1000
 
 # Pressure solver
-Pressure tolerance : 1e-6
+Pressure tolerance : 1e-4
 Pressure iteration : 100
 
 # Implicit velocity solver
-Implicit tolerance : 1e-6
+Implicit tolerance : 1e-4
 Implicit iteration : 100
 
 # Ensight output
-Ensight output period : 1e-4
-Postproc output period : 10
+Ensight output period : 1e-5

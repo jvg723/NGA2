@@ -26,7 +26,6 @@ VPATH_LOCATIONS   += $(Ulocs)
 # Define external libraries - this can also be in .profile
 HYPRE_DIR = /Users/josephgiliberto/Builds/HYPRE
 IRL_DIR   = /Users/josephgiliberto/Builds/IRL
-LAPACK_DIR= /opt/homebrew/Cellar/lapack/3.11
 
 # NGA compilation definitions
 include $(NGA_HOME)/tools/GNUMake/Make.defs
