@@ -5,7 +5,9 @@ NGA_HOME ?= ../..
 PRECISION = DOUBLE
 USE_MPI   = TRUE
 USE_FFTW  = TRUE
+USE_P3DFFT= TRUE
 USE_HYPRE = TRUE
+USE_LAPACK= TRUE
 PROFILE   = FALSE
 DEBUG     = FALSE
 COMP      = gnu
@@ -22,14 +24,18 @@ INCLUDE_LOCATIONS += $(Ulocs)
 VPATH_LOCATIONS   += $(Ulocs)
 
 # Define external libraries - this can also be in .profile
-HYPRE_DIR = /Users/desjardi/Builds/hypre
-FFTW_DIR  = /Users/desjardi/Builds/fftw
+HYPRE_DIR  = /Users/desjardi/Repositories/Builds/hypre
+FFTW_DIR   = /opt/homebrew/Cellar/fftw/3.3.10_1
+P3DFFT_DIR = /Users/desjardi/Repositories/Builds/p3dfft
 
 # NGA compilation definitions
 include $(NGA_HOME)/tools/GNUMake/Make.defs
 
+# Needed for linking to P3DFFT... We'll need to sort that out!
+F90FLAGS += -fallow-argument-mismatch
+
 # Include NGA base code
-Bdirs   := core constant_density data solver config grid libraries
+Bdirs   := particles core constant_density data solver config grid libraries
 Bpack   += $(foreach dir, $(Bdirs), $(NGA_HOME)/src/$(dir)/Make.package)
 include $(Bpack)
 
