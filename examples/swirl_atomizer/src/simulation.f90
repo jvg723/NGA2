@@ -276,15 +276,17 @@ contains
          call param_read('Gas density'   ,fs%rho_g)
          ! Read in surface tension coefficient
          call param_read('Surface tension coefficient',fs%sigma)
+         ! Assign acceleration of gravity
+         call param_read('Gravity',fs%gravity)
          ! Inflow on the within annulus
          call fs%add_bcond(name='inflow', type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=annulus)
          ! clipped Neumann on all other boundaries
          call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
          call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
-         call fs%add_bcond(name='bc_yp',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
-         call fs%add_bcond(name='bc_ym',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
-         call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
-         call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
+         ! call fs%add_bcond(name='bc_yp',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
+         ! call fs%add_bcond(name='bc_ym',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         ! call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
+         ! call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
          call param_read('Pressure iteration',fs%psolv%maxit)
          call param_read('Pressure tolerance',fs%psolv%rcvg)
@@ -308,13 +310,13 @@ contains
          ! Rankine vortex parameters for inflow
          call param_read('Axial velocity',Ubulk)
          a=diam/4.0_WP
-         Utheta_max=10.0_WP*Ubulk
+         Utheta_max=1.2_WP*Ubulk
          omega=Utheta_max/a
          ! Apply bulk and swirl component dirichlet at inlet
          call fs%get_bcond('inflow',mybc)
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            ! Calculate tangential velocity along annulus radius
+            ! ! Calculate tangential velocity along annulus radius
             rad=0.0_WP;theta=0.0_WP
             rad=sqrt(fs%cfg%zm(k)**2.0_WP+fs%cfg%ym(j)**2.0_WP)
             theta=atan2(fs%cfg%zm(k),fs%cfg%ym(j))
@@ -365,13 +367,14 @@ contains
       ! Add Ensight output
       create_ensight: block
          ! Create Ensight output from cfg
-         ens_out=ensight(cfg=cfg,name='pressure_swirl')
+         ens_out=ensight(cfg=cfg,name='swirl_atomizer')
          ! Create event for Ensight output
          ens_evt=event(time=time,name='Ensight output')
          call param_read('Ensight output period',ens_evt%tper)
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('VOF',vf%VF)
+         call ens_out%add_scalar('Pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('SRmag',SRmag)
          call ens_out%add_scalar('visc_l',fs%visc_l)

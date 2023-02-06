@@ -29,7 +29,7 @@ nz          : 100
 # #non-Newtonian liquid phase
 
 # Fluid properties - Dimensional case
-Gravity :                     0 -9.81 0
+Gravity :                     -9.81 0 0
 Liquid dynamic viscosity :    1.1074e-3
 Gas dynamic viscosity :       1.821e-5
 Liquid density :              786.1
@@ -39,7 +39,7 @@ Axial velocity       :        22.75
 
 # Time integration
 Max timestep size : 1e-6
-Max cfl number :    0.7
+Max cfl number :    0.8
 Max time :          1000
 
 # Pressure solver
