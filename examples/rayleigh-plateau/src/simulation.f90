@@ -39,77 +39,27 @@ module simulation
    integer :: nwaveX
    real(WP), dimension(:), allocatable :: wnumbX,wshiftX,wampX
 
-   !> Post-processing
-   type(event) :: ppevt
-
-   !> Liquid velocity
-   real(WP) :: U0
+   !> Max dianeter of ligament
+   real(WP) :: Rmin,Rmax
    
 contains
    
    
-   !> Function that defines a level set function for a initial wavy interface @ +/- Lyl/2
-   function levelset_wavy(xyz,t) result(G)
+   !> Function that defines a level set function for a periodic liquid ligament
+   function levelset_ligament(xyz,t) result(G)
       implicit none
       real(WP), dimension(3),intent(in) :: xyz
       real(WP), intent(in) :: t
-      real(WP) :: G
+      real(WP) :: G,r
       integer :: nX
-      G=-abs(xyz(2))
-      do nX=1,nwaveX
-         G=G+wampX(nX)*cos(wnumbX(nX)*(xyz(1)-wshiftX(nX)))
-      end do
-   end function levelset_wavy
-   
-   
-  !> Specialized subroutine that outputs the vertical liquid distribution
-   subroutine postproc_data()
-      ! use mathtools, only: Pi
-      use string,    only: str_medium
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
-      use parallel,  only: MPI_REAL_WP
-      implicit none
-      integer :: iunit,ierr,i,j,k
-      real(WP), dimension(:), allocatable :: myVOF,VOF
-      real(WP), dimension(:), allocatable :: myVEL,VEL
-      character(len=str_medium) :: filename,timestamp
-      ! Allocate vertical line storage
-      allocate(myVOF(vf%cfg%jmin:vf%cfg%jmax)); myVOF=0.0_WP
-      allocate(myVEL(vf%cfg%jmin:vf%cfg%jmax)); myVEL=0.0_WP
-      allocate(  VOF(vf%cfg%jmin:vf%cfg%jmax)); VOF=0.0_WP
-      allocate(  VEL(vf%cfg%jmin:vf%cfg%jmax)); VEL=0.0_WP
-      ! Initialize local data to zero
-      myVOF=0.0_WP; myVEL=0.0_WP
-      ! Integrate all data over x and z
-      do k=vf%cfg%kmin_,vf%cfg%kmax_
-         do j=vf%cfg%jmin_,vf%cfg%jmax_
-            do i=vf%cfg%imin_,vf%cfg%imax_
-               myVOF(j)=myVOF(j)+vf%VF(i,j,k)
-               myVEL(j)=myVEL(j)+fs%U(i,j,k)
-            end do
-         end do
-      end do
-      ! All-reduce the data
-      call MPI_ALLREDUCE(myVOF,VOF,vf%cfg%ny,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); VOF=VOF/real(vf%cfg%nx*vf%cfg%nz,WP)
-      call MPI_ALLREDUCE(myVEL,VEL,vf%cfg%ny,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); VEL=VEL/real(vf%cfg%nx*vf%cfg%nz,WP)
-      ! If root, print it out
-      if (vf%cfg%amRoot) then
-         ! call execute_command_line('mkdir -p stats')
-         ! filename='profile_'
-         filename='./stats/profile_'
-         write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         ! open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12)') 'Height','VOF','VEL'
-         do j=vf%cfg%jmin,vf%cfg%jmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') vf%cfg%ym(j),VOF(j),VEL(j)
-         end do
-         close(iunit)
+      r=sqrt(xyz(2)**2+xyz(3)**2)
+      if (r.gt.Rmin.and.r.le.Rmax) then
+         G=-abs(xyz(2))
+         ! do nX=1,nwaveX
+         !    G=G+wampX(nX)*cos((xyz(1)))
+         ! end do
       end if
-      ! Deallocate work arrays
-      deallocate(myVOF,VOF)
-      deallocate(myVEL,VEL)
-   end subroutine postproc_data
+   end function levelset_ligament
    
    
    !> Initialization of problem solver
@@ -158,6 +108,8 @@ contains
          ! Create a VOF solver
          vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
          ! Prepare initialize interface parameters
+         call param_read('Maximum Radius',Rmax)
+         call param_read('Minimum Radius',Rmin)
          nwaveX=6
          allocate(wnumbX(nwaveX),wshiftX(nwaveX),wampX(nwaveX))
          wampX=1.0_WP/real(nwaveX,WP)
@@ -183,7 +135,7 @@ contains
                   end do
                   ! Call adaptive refinement code to get volume and barycenters recursively
                   vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_wavy,0.0_WP,amr_ref_lvl)
+                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_ligament,0.0_WP,amr_ref_lvl)
                   vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
                   if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
                      vf%Lbary(:,i,j,k)=v_cent
@@ -233,7 +185,7 @@ contains
          ! Characteristic time scale
          lambda=r_visc
          ! Liquid velocity parameters
-         call param_read('Liquid velocity',U0)
+         ! call param_read('Liquid velocity',U0)
          ! Configure pressure solver
          call param_read('Pressure iteration',fs%psolv%maxit)
          call param_read('Pressure tolerance',fs%psolv%rcvg)
@@ -344,41 +296,25 @@ contains
          call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
          call cflfile%write()
       end block create_monitor
-      
-
-      ! Create specialized post-processing
-      create_postproc: block
-         ! Create event for data postprocessing
-         ppevt=event(time=time,name='Postproc output')
-         call param_read('Postproc output period',ppevt%tper)
-         ! Create directory to write to
-         if (cfg%amRoot) call execute_command_line('mkdir -p stats')
-         ! Perform the output
-         if (ppevt%occurs()) call postproc_data()
-      end block create_postproc
 
 
    end subroutine simulation_init
    
    
-   !> Perform an NGA2 simulation - this mimicks NGA's old time integration for multiphase
+   !> Perform an NGA2 simulation 
    subroutine simulation_run
-      ! use tpns_class, only: static_contact
       implicit none
       
       ! Perform time integration
-      do while (.not.time%done())!.and.amp.lt.0.1_WP*vf%cfg%yL.and.time%t.lt.20.0_WP*tau)
+      do while (.not.time%done())
          
          ! Increment time
          call fs%get_cfl(time%dt,time%cfl)
          call time%adjust_dt()
          call time%increment()
 
-         ! Apply time-varying Dirichlet conditions
-         ! This is where time-dpt Dirichlet would be enforced
-
          ! Calculate SR
-         call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
+         call fs%get_strainrate(SR=SR)
 
          ! ! Model non-Newtonian fluid
          ! nonewt: block
@@ -508,11 +444,7 @@ contains
          call fs%get_max()
          call vf%get_max()
          call mfile%write()
-         call cflfile%write()
-
-         ! ! Specialized post-processing
-         ! if (ppevt%occurs()) call postproc_data()
-         
+         call cflfile%write()       
          
       end do
       
@@ -524,14 +456,8 @@ contains
    subroutine simulation_final
       implicit none
       
-      ! Get rid of all objects - need destructors
-      ! monitor
-      ! ensight
-      ! bcond
-      ! timetracker
-      
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SRmag,SR)
       
    end subroutine simulation_final
    

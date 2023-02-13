@@ -1,17 +1,17 @@
 # Parallelization
-Partition :	2 2 2
+Partition :	8 1 1
 
-# Mesh definition and geometry
+# Mesh definition
 Lx       : 32
 Ly       : 16
 Lz       : 16
-Diameter : 28
-nx       : 160
-ny       : 80
-nz       : 80
-# nx :	      50
-# ny :	      10
-# nz :	      10
+nx       : 80
+ny       : 40
+nz       : 40
+
+# Initial ligament geometry
+Maximum Radius : 4
+Minimum Radius : 2
 
 # Fluid properties and inital profile
 Liquid Reynolds number :  1000
