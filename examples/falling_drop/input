@@ -6,8 +6,8 @@ Lx :	0.001
 Ly :	0.1
 Lz :	0.1
 nx :	1
-ny :	100
-nz :	100
+ny :	200
+nz :	200
 
 # Fluid properties
 Gravity :                     0 -9.81 0
@@ -16,6 +16,12 @@ Gas dynamic viscosity :       1.780e-5
 Liquid density :              1000
 Gas density :                 1.226
 Surface tension coefficient : 0.0728
+
+# FENE model properties
+Maximum extension of polymer chain : 10
+Polymer Relaxation Time            : 1
+Beta                               : 0.8
+Stress diffusivisty                : 0
 
 # Time integration
 Max timestep size : 1e-3
