@@ -819,20 +819,14 @@ contains
    
    !> Add a boundary condition
    subroutine add_bcond(this,name,type,locator,face,dir,canCorrect)
-      use string,   only: lowercase
-      use messager, only: die
+      use string,         only: lowercase
+      use messager,       only: die
+      use iterator_class, only: locator_ftype
       implicit none
       class(incomp), intent(inout) :: this
       character(len=*), intent(in) :: name
       integer, intent(in) :: type
-      external :: locator
-      interface
-         logical function locator(pargrid,ind1,ind2,ind3)
-            use pgrid_class, only: pgrid
-            class(pgrid), intent(in) :: pargrid
-            integer, intent(in) :: ind1,ind2,ind3
-         end function locator
-      end interface
+      procedure(locator_ftype) :: locator
       character(len=1), intent(in) :: face
       integer, intent(in) :: dir
       logical, intent(in) :: canCorrect
@@ -1542,7 +1536,7 @@ contains
       cflc=max(this%CFLc_x,this%CFLc_y,this%CFLc_z)
       
       ! If asked for, also return the maximum overall CFL
-      if (present(CFL)) cfl =max(this%CFLc_x,this%CFLc_y,this%CFLc_z,this%CFLv_x,this%CFLv_y,this%CFLv_z)
+      if (present(CFL)) cfl=max(this%CFLc_x,this%CFLc_y,this%CFLc_z,this%CFLv_x,this%CFLv_y,this%CFLv_z)
       
    end subroutine get_cfl
    
