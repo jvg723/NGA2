@@ -18,8 +18,8 @@ Wbulk : 0
 Perturbation : 0
 
 # FENE model properties
-Maximum extension of polymer chain : 1
-Polymer Relaxation Time            : 1
+Maximum extension of polymer chain : 100
+Polymer Relaxation Time            : 20
 Beta                               : 0.9
 Stress diffusivisty                : 0
 

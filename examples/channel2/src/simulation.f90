@@ -288,16 +288,16 @@ contains
          ! Setup the solver
          call fm%setup(implicit_ils=gmres)
          ! > Initalize C to 0
-         ! fm%SC=0.0_WP
-         do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-            do i=fs%cfg%imino_,fs%cfg%imaxo_
-               if (cfg%xm(i).ge.2.0_WP.and.cfg%xm(i).le.3.0_WP) then
-                  fm%SC(i,j,:,:)=1.0_WP
-               else 
-                  fm%SC(i,j,:,:)=0.0_WP
-               end if 
-            end do 
-         end do 
+         fm%SC=0.0_WP
+         ! do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+         !    do i=fs%cfg%imino_,fs%cfg%imaxo_
+         !       if (cfg%xm(i).ge.2.0_WP.and.cfg%xm(i).le.3.0_WP) then
+         !          fm%SC(i,j,:,:)=1.0_WP
+         !       else 
+         !          fm%SC(i,j,:,:)=0.0_WP
+         !       end if 
+         !    end do 
+         ! end do 
          
          call fm%get_stressTensor(lambda,Lmax,visc_p) 
       end block create_fene
@@ -439,19 +439,19 @@ contains
                ! Assemble explicit residual
                resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
                ! ! ! Apply this residual
-               ! SC_=2.0_WP*fm%SC-fm%SCold+resSC
+               SC_=2.0_WP*fm%SC-fm%SCold+resSC
             end block pre_check
             
-            ! ! Check boundedess of explicit SC calculation
-            ! call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+            ! Check boundedess of explicit SC calculation
+            call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
 
-            ! ! Calculate explicit SC post checking bounds
-            ! post_check: block
-            !    ! Explicit calculation of resSC from scalar equation
-            !    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-            !    ! Assemble explicit residual
-            !    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-            ! end block post_check
+            ! Calculate explicit SC post checking bounds
+            post_check: block
+               ! Explicit calculation of resSC from scalar equation
+               call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+               ! Assemble explicit residual
+               resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+            end block post_check
             
             ! Add FENE source terms
             fene: block
@@ -460,8 +460,8 @@ contains
                ! Calculate T terms
                call fm%get_stressTensor(lambda,Lmax,visc_p)     
                ! Add source terms to calculated residual
-               ! resSC=resSC+(fm%CgradU-(1.00_WP/visc_p)*fm%T)*time%dt
-               resSC=resSC+fm%CgradU*time%dt
+               resSC=resSC+(fm%CgradU-(1.00_WP/visc_p)*fm%T)*time%dt
+               ! resSC=resSC+fm%CgradU*time%dt
             end block fene
 
             ! ! Form implicit residual
