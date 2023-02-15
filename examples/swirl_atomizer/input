@@ -3,8 +3,8 @@
 2 Partition : 8 1 1
 
 # Annular pipe domain definition
-1 Outer Pipe diameter : 1
-1 Inner Pipe diameter : 0.5
+1 Outer Pipe diameter : 1.2
+1 Inner Pipe diameter : 0.8
 1 Pipe length         : 4
 1 nx                  : 256
 1 ny                  : 64
@@ -18,21 +18,25 @@
 2 ny : 100
 2 nz : 100
 
+# Pipe properties
+Bulk axial velocity : 1
+Bulk theta velocity : 1.421
+!!! Note that for uniform velocity: SN=2/3*u_theta/u_x*(Rout^3-Rin^3)/(Rout*(Rout^2-Rin^2))
+Fluctuation amp  :    0.1
+
 # Fluid properties
-Liquid dynamic viscosity    : 1e-3
-Gas dynamic viscosity       : 1e-5
+Liquid dynamic viscosity    : 2e-4
 Liquid density              : 1
+Gas dynamic viscosity       : 1e-5
 Gas density                 : 1e-3
 Surface tension coefficient : 1e-3
-Axial velocity              : 1
-Swirl ratio                 : 1
 
 # Time integration
-1 Max timestep size : 4e-3
+1 Max timestep size : 0.01
 2 Max timestep size : 4e-3
 Max cfl number      : 0.9
 Max time            : 400
-Transistion         : 150
+Transistion         : 100
 
 # Pressure solver
 Pressure tolerance : 1e-5

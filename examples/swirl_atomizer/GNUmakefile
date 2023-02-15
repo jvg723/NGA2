@@ -6,10 +6,11 @@ PRECISION = DOUBLE
 USE_MPI   = TRUE
 USE_HYPRE = TRUE
 USE_LAPACK= TRUE
+USE_FFTW  = TRUE
+USE_P3DFFT= TRUE
 USE_IRL   = TRUE
-USE_ODRPACK=FALSE
 PROFILE   = FALSE
-DEBUG     = FALSE 
+DEBUG     = FALSE
 COMP      = gnu
 EXEBASE   = nga
 
@@ -26,12 +27,13 @@ VPATH_LOCATIONS   += $(Ulocs)
 # Define external libraries - this can also be in .profile
 HYPRE_DIR = /Users/josephgiliberto/Builds/HYPRE
 IRL_DIR   = /Users/josephgiliberto/Builds/IRL
+FFTW_DIR  =/opt/homebrew/Cellar/fftw/3.3.10_1
 
 # NGA compilation definitions
 include $(NGA_HOME)/tools/GNUMake/Make.defs
 
 # Include NGA base code
-Bdirs   := core two_phase data solver config grid libraries
+Bdirs   := core two_phase data solver config grid libraries subgrid constant_density
 Bpack   += $(foreach dir, $(Bdirs), $(NGA_HOME)/src/$(dir)/Make.package)
 include $(Bpack)
 

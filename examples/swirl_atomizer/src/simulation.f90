@@ -50,15 +50,6 @@ contains
          allocate(W1on2(cfg2%imino_:cfg2%imaxo_,cfg2%jmino_:cfg2%jmaxo_,cfg2%kmino_:cfg2%kmaxo_)); W1on2=0.0_WP
       end block coupler_prep
 
-      ! Setup nudging region in block 2
-      b2%nudge_trans=20.0_WP*b2%cfg%min_meshsize
-      b2%nudge_xmin =b1%cfg%x(3*b1%cfg%nx/4)
-      b2%nudge_xmax =b1%cfg%x(3*b1%cfg%nx/4)
-      b2%nudge_ymin =b1%cfg%y(b2%cfg%jmin)
-      b2%nudge_ymax =b1%cfg%y(b2%cfg%jmax+1)
-      b2%nudge_zmin =b1%cfg%z(b2%cfg%kmin)
-      b2%nudge_zmax =b1%cfg%z(b2%cfg%kmax+1)
-
       ! Time for annular pipe to become turbulent 
       call param_read('Transistion',transition_time)
       
@@ -69,34 +60,40 @@ contains
    subroutine simulation_run
       implicit none
       integer :: i,j,k
+
+      ! Advance block 1 until annular pipe is turbulent
+      do while (b1%time%t.le.transition_time)
+            
+         call b1%step()
+
+      end do
+
+      ! Reset block 1 time to 0
+      b1%time%t=0.0_WP
+
+      ! Exchange velocity field using cpl12x/y/z couplers  for the initial inflow velocity in block 2
+      U1on2=0.0_WP; call cpl12x%push(b1%fs%U); call cpl12x%transfer(); call cpl12x%pull(U1on2)
+      V1on2=0.0_WP; call cpl12y%push(b1%fs%V); call cpl12y%transfer(); call cpl12y%pull(V1on2)
+      W1on2=0.0_WP; call cpl12z%push(b1%fs%W); call cpl12z%transfer(); call cpl12z%pull(W1on2)
       
       ! Perform time integration - block 2 is the main driver here
       do while (.not.b2%time%done())
          
-         if(b1%time.le.transistion_time) then 
+         ! Advance block 2
+         call b2%step(U1on2,V1on2,W1on2)
 
-            ! Advance block 1 until annular pipe is turbulent
+         ! Advance block 1 until we've caught up
+         do while (b1%time%t.lt.b2%time%t)
+
+            ! Advance block 1
             call b1%step()
 
-         else
-            
-            ! Advance block 2
-            call b2%step()
+            ! Exchange data using cpl12x/y/z couplers and the most recent velocity
+            U1on2=0.0_WP; call cpl12x%push(b1%fs%U); call cpl12x%transfer(); call cpl12x%pull(U1on2)
+            V1on2=0.0_WP; call cpl12y%push(b1%fs%V); call cpl12y%transfer(); call cpl12y%pull(V1on2)
+            W1on2=0.0_WP; call cpl12z%push(b1%fs%W); call cpl12z%transfer(); call cpl12z%pull(W1on2)
 
-            ! Advance block 1 until we've caught up
-            do while (b1%time%t.lt.b2%time%t)
-
-               ! Advance block 1
-               call b1%step()
-
-               ! Exchange data using cpl12x/y/z couplers and the most recent velocity
-               U1on2=0.0_WP; call cpl12x%push(b1%fs%U); call cpl12x%transfer(); call cpl12x%pull(U1on2)
-               V1on2=0.0_WP; call cpl12y%push(b1%fs%V); call cpl12y%transfer(); call cpl12y%pull(V1on2)
-               W1on2=0.0_WP; call cpl12z%push(b1%fs%W); call cpl12z%transfer(); call cpl12z%pull(W1on2)
-
-            end do
-
-         end if 
+         end do
  
       end do
       

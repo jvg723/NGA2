@@ -1,8 +1,9 @@
 !> Definition for block 2 simulation: swirl atomizer
 module block2_class
    use precision,         only: WP
-   use geometry,          only: D1,D2
+   use geometry,          only: Dout,Din
    use config_class,      only: config
+   use hypre_str_class,   only: hypre_str
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use timetracker_class, only: timetracker
@@ -17,28 +18,27 @@ module block2_class
    
    !> block 2 object
    type :: block2
-   class(config),    pointer :: cfg             !< Pointer to config
-   type(tpns),        public :: fs              !< Two phase incompressible flow solver
-   type(vfs),         public :: vf              !< VF solver
-   type(timetracker), public :: time            !< Time tracker
-   type(surfmesh),    public :: smesh           !< Surfmesh                                       
-   type(ensight)             :: ens_out         !< Ensight output
-   type(event)               :: ens_evt         !< Ensight event
-   type(monitor)             :: mfile,cflfile   !< Monitor files
-   !> Private work arrays
-   real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:),   allocatable :: SRmag
-   real(WP), dimension(:,:,:,:), allocatable :: SR
+      class(config), pointer :: cfg             !< Pointer to config
+      type(hypre_str)        :: ps              !< Structured hypre pressure solver
+	   type(hypre_str)        :: vs              !< Structured hypre implicit solver
+      type(tpns)             :: fs              !< Two phase incompressible flow solver
+      type(vfs)              :: vf              !< VF solver
+      type(timetracker)      :: time            !< Time tracker
+      type(surfmesh)         :: smesh           !< Surfmesh                                       
+      type(ensight)          :: ens_out         !< Ensight output
+      type(event)            :: ens_evt         !< Ensight event
+      type(monitor)          :: mfile,cflfile   !< Monitor files
+      !> Private work arrays
+      real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
+      real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
+      real(WP), dimension(:,:,:),   allocatable :: SRmag
+      real(WP), dimension(:,:,:,:), allocatable :: SR
    contains
       procedure :: init                   !< Initialize block
       procedure :: step                   !< Advance block
       procedure :: final                  !< Finalize block
    end type block2
-   
-   !> Problem definition
-   real(WP) :: R1,R2   !< Inner and outer radii of annulus
-   real(WP) :: Ul,SW   !< Liquid axial velocity and swirl ratio
+
    
 contains
    
@@ -50,7 +50,7 @@ contains
 		real(WP), intent(in) :: t
 		real(WP) :: G,r
       r=sqrt(xyz(2)**2+xyz(3)**2)
-	   G=min(r-R1,R2-r)
+	   G=min(r-0.5_WP*Din,0.5_WP*Dout-r)
 	end function levelset_annulus
    
 
@@ -99,7 +99,7 @@ contains
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
          b%time=timetracker(amRoot=b%cfg%amRoot,name='swirl_atomizer')
-         call param_read('1 Max timestep size',b%time%dtmax)
+         call param_read('2 Max timestep size',b%time%dtmax)
          call param_read('Max cfl number',b%time%cflmax)
          call param_read('Max time',b%time%tmax)
          b%time%dt=b%time%dtmax
@@ -129,11 +129,9 @@ contains
             end do
          end do
          ! Initialize an annular interface at the inlet only
-         call param_read('Inner radius',R1)
-         call param_read('Outer radius',R2)
          if (b%vf%cfg%iproc.eq.1) then
-            do k=b%vf%cfg%kmino_b%,vf%cfg%kmaxo_
-               do j=b%vf%cfg%jmino_b%,vf%cfg%jmaxo_
+            do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
+               do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
                   do i=b%vf%cfg%imino,b%vf%cfg%imin-1
                      ! Set cube vertices
 				         n=0
@@ -179,7 +177,7 @@ contains
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use tpns_class, only: dirichlet,clipped_neumann
-         use ils_class,  only: pcg_pfmg
+         use hypre_str_class,  only: pcg_pfmg
          integer :: i,j,k
          real(WP) :: visc_l,visc_g
          ! Create flow solver
@@ -197,43 +195,22 @@ contains
          ! Clipped Neumann outflow on the right of domain
          call b%fs%add_bcond(name='bc_xp' ,type=clipped_neumann,face='x',dir=+1,canCorrect=.true. ,locator=xp_locator)
          ! Configure pressure solver
-         call param_read('Pressure iteration',b%fs%psolv%maxit)
-         call param_read('Pressure tolerance',b%fs%psolv%rcvg)
+			b%ps=hypre_str(cfg=b%cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         call param_read('Pressure iteration',b%ps%maxit)
+         call param_read('Pressure tolerance',b%ps%rcvg)
          ! Configure implicit velocity solver
-         call param_read('Implicit iteration',b%fs%implicit%maxit)
-         call param_read('Implicit tolerance',b%fs%implicit%rcvg)
-         ! Setup the solver
-         call b%fs%setup(pressure_ils=pcg_pfmg,implicit_ils=pcg_pfmg)
+         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=pcg_pfmg,nst=7)
+         call param_read('Implicit iteration',b%vs%maxit)
+         call param_read('Implicit tolerance',b%vs%rcvg)
+			! Setup the solver
+			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
       
 
-      ! Initialize our velocity field
+      ! Initialize our velocity field 
       initialize_velocity: block
-         use tpns_class, only: bcond
-         type(bcond), pointer :: mybc
-         real(WP) :: r,theta
-         integer  :: n,i,j,k
          ! Zero initial field in the domain
          b%fs%U=0.0_WP; b%fs%V=0.0_WP; b%fs%W=0.0_WP
-         ! Read in inflow parameters
-         call param_read('Liquid velocity',Ul)
-         call param_read('Swirl ratio',SW)
-         ! Apply axial and swirl component Dirichlet at inlet
-         call b%fs%get_bcond('inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            ! Set U velocity
-            r=sqrt(b%cfg%ym(j)**2+b%cfg%zm(k)**2) !< Radius in cylindrical coordinates
-            if (r.ge.R1.and.r.le.R2) b%fs%U(i,j,k)=Ul
-            ! Set V velocity
-            r=sqrt(b%cfg%y(j)**2+b%cfg%zm(k)**2)  !< Radius in cylindrical coordinates
-            theta=atan2(b%cfg%y(j),b%cfg%zm(k))   !< Angle  in cylindrical coordinates
-            if (r.ge.R1.and.r.le.R2) b%fs%V(i,j,k)=+4.0_WP*SW*Ul*(-r**2+(R2+R1)*r-R2*R1)/((R2-R1)**2)*cos(theta)
-            ! Set W velocity
-            r=sqrt(b%cfg%ym(j)**2+b%cfg%z(k)**2)  !< Radius in cylindrical coordinates
-            theta=atan2(b%cfg%ym(j),b%cfg%z(k))   !< Angle  in cylindrical coordinates
-            if (r.ge.R1.and.r.le.R2) b%fs%W(i,j,k)=-4.0_WP*SW*Ul*(-r**2+(R2+R1)*r-R2*R1)/((R2-R1)**2)*sin(theta)
-         end do
          ! Apply all other boundary conditions
          call b%fs%apply_bcond(b%time%t,b%time%dt)
          ! Compute MFR through all boundary conditions
@@ -255,7 +232,7 @@ contains
          b%smesh=surfmesh(nvar=1,name='plic')
          b%smesh%varname(1)='nplane'
          ! Transfer polygons to smesh
-         call b%vf%update_surfmesh(smesh)
+         call b%vf%update_surfmesh(b%smesh)
          ! Also populate nplane variable
          b%smesh%var(1,:)=1.0_WP
          np=0
@@ -334,14 +311,32 @@ contains
    
    
    !> Take a time step with block 2
-   subroutine step(b)
+   subroutine step(b,Uinflow,Vinflow,Winflow)
       implicit none
       class(block2), intent(inout) :: b
+      real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Uinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Vinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Winflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
          
       ! Increment time
       call b%fs%get_cfl(b%time%dt,b%time%cfl)
       call b%time%adjust_dt()
       call b%time%increment()
+
+      ! Apply time-varying Dirichlet conditions
+      reapply_dirichlet: block
+         use tpns_class, only: bcond
+         type(bcond), pointer :: mybc
+         integer  :: n,i,j,k
+         ! Apply velocity from turbulent annular pipe
+         call b%fs%get_bcond('inflow',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            b%fs%U(i,j,k)=Uinflow(i,j,k)
+            b%fs%V(i,j,k)=Vinflow(i,j,k)
+            b%fs%W(i,j,k)=Winflow(i,j,k)
+         end do
+      end block reapply_dirichlet
 
       ! Calculate SR
       ! call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
@@ -459,7 +454,7 @@ contains
                do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
                   do i=b%vf%cfg%imin_,b%vf%cfg%imax_
                      do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
-                        if (getNumberOfVerticesb%(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
                         end if
                      end do
@@ -498,7 +493,7 @@ contains
       
    
    !> Finalize b2 simulation
-   subroutine final
+   subroutine final(b)
       implicit none
       class(block2), intent(inout) :: b
       
