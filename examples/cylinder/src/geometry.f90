@@ -8,6 +8,8 @@ module geometry
    !> Single config
    type(ibconfig), public :: cfg
    
+   real(WP), public :: Rcyl
+
    public :: geometry_init
    
 contains
@@ -35,17 +37,17 @@ contains
          
          ! Create simple rectilinear grid
          do i=1,nx+1
-            x(i)=real(i-1,WP)/real(nx,WP)*Lx-0.5_WP*Lx
+            x(i)=real(i-1,WP)/real(nx,WP)*Lx-0.25_WP*Lx
          end do
          do j=1,ny+1
-            y(j)=real(j-1,WP)/real(ny,WP)*Ly
+            y(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
          end do
          do k=1,nz+1
             z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
          end do
          
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.true.,yper=.false.,zper=.true.,name='FallingDrop')
+         grid=sgrid(coord=cartesian,no=1,x=x,y=y,z=z,xper=.false.,yper=.true.,zper=.true.,name='cylinder')
          
       end block create_grid
       
@@ -66,18 +68,20 @@ contains
          use mathtools,      only: twoPi
          use ibconfig_class, only: bigot,sharp
          integer :: i,j,k
+         ! Read in cylinder radius
+         call param_read('Cylinder radius',Rcyl)
          ! Create IB field
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
-                  cfg%Gib(i,j,k)=0.02_WP+0.015_WP*cos(3.0_WP*twoPi*cfg%zm(k)/cfg%zL)*cos(3.0_WP*twoPi*cfg%xm(i)/cfg%xL)-cfg%ym(j)
+                  cfg%Gib(i,j,k)=Rcyl-sqrt(cfg%xm(i)**2+cfg%ym(j)**2)
                end do
             end do
          end do
          ! Get normal vector
          call cfg%calculate_normal()
          ! Get VF field
-         call cfg%calculate_vf(method=sharp,allow_zero_vf=.true.)
+         call cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
       end block create_walls
       
       
