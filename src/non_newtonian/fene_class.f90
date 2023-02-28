@@ -17,9 +17,6 @@ module fene_class
       real(WP), dimension(:,:,:,:), allocatable :: CgradU  !< Sum of distortion terms (CdotU and (CdotU)T)
       real(WP), dimension(:,:,:,:), allocatable :: T       !< Stress tensor
       real(WP), dimension(:,:,:,:), allocatable :: divT    !< Stress tensor divergence
-      
-      real(WP), dimension(:,:,:), allocatable :: trC    !< Trace of conformation tensor
-      real(WP), dimension(:,:,:), allocatable :: f_r    !< Peterlin function
 
       ! CFL numbers
       real(WP) :: CFLp_x,CFLp_y,CFLp_z                     !< Polymer CFL numbers
@@ -54,9 +51,7 @@ contains
       allocate(self%CgradU(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%CgradU=0.0_WP
       allocate(self%T     (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%T     =0.0_WP
       allocate(self%divT  (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,3           )); self%divT  =0.0_WP
-      
-      allocate(self%trC  (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%trC=0.0_WP
-      allocate(self%f_r  (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%f_r=0.0_WP
+   
    end function construct_fene_from_args
 
    !> Calculate components of tensor (c*graduT)+(C*gradu)^T
@@ -65,27 +60,21 @@ contains
       class(fene), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradu
       integer :: i,j,k
-      do k=this%cfg%kmino_,this%cfg%kmaxo_
-         do j=this%cfg%jmino_,this%cfg%jmaxo_
-            do i=this%cfg%imino_,this%cfg%imaxo_
-               ! xx tensor component
-               this%CgradU(i,j,k,1)=2.00_WP*(this%SC(i,j,k,1)*gradu(1,1,i,j,k)+this%SC(i,j,k,2)*gradu(2,1,i,j,k)+this%SC(i,j,k,3)*gradu(3,1,i,j,k))
-               ! yx/xy tensor component
-               this%CgradU(i,j,k,2)=(this%SC(i,j,k,2)*gradu(1,1,i,j,k)+this%SC(i,j,k,4)*gradu(2,1,i,j,k)+this%SC(i,j,k,5)*gradu(3,1,i,j,k))+&
-               &                    (this%SC(i,j,k,1)*gradu(1,2,i,j,k)+this%SC(i,j,k,2)*gradu(2,2,i,j,k)+this%SC(i,j,k,3)*gradu(3,2,i,j,k))
-               ! zx/xz tensor component
-               this%CgradU(i,j,k,3)=(this%SC(i,j,k,3)*gradu(1,1,i,j,k)+this%SC(i,j,k,5)*gradu(2,1,i,j,k)+this%SC(i,j,k,6)*gradu(3,1,i,j,k))+&
-               &                    (this%SC(i,j,k,1)*gradu(1,3,i,j,k)+this%SC(i,j,k,2)*gradu(2,3,i,j,k)+this%SC(i,j,k,3)*gradu(3,3,i,j,k))
-               ! yy tensor component
-               this%CgradU(i,j,k,4)=2.00_WP*(this%SC(i,j,k,2)*gradu(1,2,i,j,k)+this%SC(i,j,k,4)*gradu(2,2,i,j,k)+this%SC(i,j,k,5)*gradu(3,2,i,j,k))
-               ! zy/yz tensor component
-               this%CgradU(i,j,k,5)=(this%SC(i,j,k,2)*gradu(1,3,i,j,k)+this%SC(i,j,k,4)*gradu(2,3,i,j,k)+this%SC(i,j,k,5)*gradu(3,3,i,j,k))+&
-               &                    (this%SC(i,j,k,3)*gradu(1,2,i,j,k)+this%SC(i,j,k,5)*gradu(2,2,i,j,k)+this%SC(i,j,k,6)*gradu(3,2,i,j,k))
-               ! zz tensor component
-               this%CgradU(i,j,k,6)=2.00_WP*(this%SC(i,j,k,3)*gradu(1,3,i,j,k)+this%SC(i,j,k,5)*gradu(2,3,i,j,k)+this%SC(i,j,k,6)*gradu(3,3,i,j,k))
-            end do
-         end do
-      end do
+      ! xx tensor component
+      this%CgradU(:,:,:,1)=2.00_WP*(this%SC(:,:,:,1)*gradu(1,1,:,:,:)+this%SC(:,:,:,2)*gradu(2,1,:,:,:)+this%SC(:,:,:,3)*gradu(3,1,:,:,:))
+      ! yx/xy tensor component
+      this%CgradU(:,:,:,2)=(this%SC(:,:,:,2)*gradu(1,1,:,:,:)+this%SC(:,:,:,4)*gradu(2,1,:,:,:)+this%SC(:,:,:,5)*gradu(3,1,:,:,:))+&
+      &                    (this%SC(:,:,:,1)*gradu(1,2,:,:,:)+this%SC(:,:,:,2)*gradu(2,2,:,:,:)+this%SC(:,:,:,3)*gradu(3,2,:,:,:))
+      ! zx/xz tensor component
+      this%CgradU(:,:,:,3)=(this%SC(:,:,:,3)*gradu(1,1,:,:,:)+this%SC(:,:,:,5)*gradu(2,1,:,:,:)+this%SC(:,:,:,6)*gradu(3,1,:,:,:))+&
+      &                    (this%SC(:,:,:,1)*gradu(1,3,:,:,:)+this%SC(:,:,:,2)*gradu(2,3,:,:,:)+this%SC(:,:,:,3)*gradu(3,3,:,:,:))
+      ! yy tensor component
+      this%CgradU(:,:,:,4)=2.00_WP*(this%SC(:,:,:,2)*gradu(1,2,:,:,:)+this%SC(:,:,:,4)*gradu(2,2,:,:,:)+this%SC(:,:,:,5)*gradu(3,2,:,:,:))
+      ! zy/yz tensor component
+      this%CgradU(:,:,:,5)=(this%SC(:,:,:,2)*gradu(1,3,:,:,:)+this%SC(:,:,:,4)*gradu(2,3,:,:,:)+this%SC(:,:,:,5)*gradu(3,3,:,:,:))+&
+      &                    (this%SC(:,:,:,3)*gradu(1,2,:,:,:)+this%SC(:,:,:,5)*gradu(2,2,:,:,:)+this%SC(:,:,:,6)*gradu(3,2,:,:,:))
+      ! zz tensor component
+      this%CgradU(:,:,:,6)=2.00_WP*(this%SC(:,:,:,3)*gradu(1,3,:,:,:)+this%SC(:,:,:,5)*gradu(2,3,:,:,:)+this%SC(:,:,:,6)*gradu(3,3,:,:,:))
    end subroutine get_CgradU
 
    !> Calculate the viscoelastic stress tensor
@@ -93,48 +82,44 @@ contains
       implicit none
       class(fene), intent(inout) :: this
       real(WP), intent(in)       :: Lmax,lambda,visc_p
-      ! real(WP), dimension(:,:,:), allocatable :: trC,f_r
-      ! real(WP) :: trC,f_r        
+      real(WP), dimension(:,:,:), allocatable :: trC,f_r        
       integer  :: i,j,k
-      
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               ! Scalars used in calculating stress
-               this%trC(i,j,k)=this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6)   !< trace of C
-               this%f_r(i,j,k)=(Lmax**2.00_WP-3.00_WP)/(Lmax**2.00_WP-this%trC(i,j,k))          !< Peterlin Function
-               ! Build stress tensor
-               this%T(i,j,k,1)=(visc_p/lambda)*(this%f_r(i,j,k)*this%SC(i,j,k,1)-1.00_WP) !> xx tensor component
-               this%T(i,j,k,2)=(visc_p/lambda)*(this%f_r(i,j,k)*this%SC(i,j,k,2)-0.00_WP) !> yx/xy tensor component
-               this%T(i,j,k,3)=(visc_p/lambda)*(this%f_r(i,j,k)*this%SC(i,j,k,3)-0.00_WP) !> zx/xz tensor component
-               this%T(i,j,k,4)=(visc_p/lambda)*(this%f_r(i,j,k)*this%SC(i,j,k,4)-1.00_WP) !> yy tensor component
-               this%T(i,j,k,5)=(visc_p/lambda)*(this%f_r(i,j,k)*this%SC(i,j,k,5)-0.00_WP) !> zy/yz tensor component
-               this%T(i,j,k,6)=(visc_p/lambda)*(this%f_r(i,j,k)*this%SC(i,j,k,6)-1.00_WP) !> zz tensor component
-            end do
-         end do
-      end do
 
-      ! ! Deallocate trace(C) array
-	   ! deallocate(trC,f_r)
+      ! Allocate scalar arrays 
+	   allocate(trC(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); trC=0.0_WP
+      allocate(f_r(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); f_r=0.0_WP
+      
+      ! Scalars used in calculating stress
+      trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6)   !< trace of C
+      f_r=(Lmax**2-3.00_WP)/(Lmax**2-trC)          !< Peterlin Function
+      
+      ! Build stress tensor
+      this%T(:,:,:,1)=(visc_p/lambda)*(f_r*this%SC(:,:,:,1)-1.00_WP) !> xx tensor component
+      this%T(:,:,:,2)=(visc_p/lambda)*(f_r*this%SC(:,:,:,2)-0.00_WP) !> yx/xy tensor component
+      this%T(:,:,:,3)=(visc_p/lambda)*(f_r*this%SC(:,:,:,3)-0.00_WP) !> zx/xz tensor component
+      this%T(:,:,:,4)=(visc_p/lambda)*(f_r*this%SC(:,:,:,4)-1.00_WP) !> yy tensor component
+      this%T(:,:,:,5)=(visc_p/lambda)*(f_r*this%SC(:,:,:,5)-0.00_WP) !> zy/yz tensor component
+      this%T(:,:,:,6)=(visc_p/lambda)*(f_r*this%SC(:,:,:,6)-1.00_WP) !> zz tensor component
+
+      ! Deallocate trace(C) array
+	   deallocate(trC,f_r)
 
    end subroutine get_stressTensor
    
 
    !> Calculate the viscoelastic tensor divergence
    subroutine get_divT(this,fs)
-      ! use tpns_class, only: tpns
       use incomp_class, only: incomp
       implicit none
       class(fene), intent(inout) :: this
       class(incomp), intent(in)  :: fs
-      ! class(tpns), intent(in)  :: fs
       integer :: i,j,k
       real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
 
       ! Allocate tensor components
-	   allocate(Txy(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-      allocate(Tyz(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-      allocate(Tzx(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+	   allocate(Txy(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); Txy=0.0_WP
+      allocate(Tyz(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); Tyz=0.0_WP
+      allocate(Tzx(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); Tzx=0.0_WP
       
       ! Interpolate tensor components to cell faces
       do k=this%cfg%kmin_,this%cfg%kmax_+1
