@@ -283,7 +283,7 @@ contains
       
       ! Create a single-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use ils_class, only: gmres_amg,pcg_pfmg
+         use hypre_str_class, only: pcg_pfmg,gmres_pfmg
          use mathtools, only: twoPi
          integer :: i,j,k
          real(WP) :: amp,vel,omega
@@ -303,8 +303,7 @@ contains
          call param_read('Implicit iteration',vs%maxit)
          call param_read('Implicit tolerance',vs%rcvg)
          ! Setup the solver
-         call fs%setup(pressure_ils=gmres_amg,implicit_ils=smg)      !> 3D case
-         ! call fs%setup(pressure_ils=pcg_smg,implicit_ils=smg)      !> 2D Case
+         call fs%setup(pressure_solver=ps,implicit_solver=vs)     
          ! Initialize velocity based on specified bulk
          call param_read('Ubulk',Ubulk)
          call param_read('Wbulk',Wbulk)
@@ -330,14 +329,12 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
-      ! Newtonian Solvers: pressure=gmres_amg,implicit=gmres_amg
-      ! Non-Newtonian Solvers: pressure=gmres_amg,implicit=pcg_smg
 
+      
       ! Create a FENE model 
       create_fene: block
-         use ils_class,  only: gmres_pilut,bbox,pcg_bbox,gmres_amg
+         use ils_class,  only: gmres
          use multiscalar_class, only: bquick
-         integer :: j
          ! Create FENE model solver
          fm=fene(cfg=cfg,scheme=bquick,name='FENE model')
          ! Assign aritifical stress diffusivisty
@@ -356,8 +353,18 @@ contains
          ! Configure implicit scalar solver
          fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
          ! Setup the solver
-         call fm%setup(implicit_ils=gmres_pilut) 
+         call fm%setup(implicit_ils=gmres) 
+         ! Intalize conformation tensor to identity matrix
+         fm%SC(:,:,:,1)=1.00_WP !Cxx
+         fm%SC(:,:,:,2)=0.00_WP !Cyx
+         fm%SC(:,:,:,3)=0.00_WP !Czx
+         fm%SC(:,:,:,4)=1.00_WP !Cyy
+         fm%SC(:,:,:,5)=0.00_WP !Czy
+         fm%SC(:,:,:,6)=1.00_WP !Czz
+         ! Initalize stress tensor
+         call fm%get_stressTensor(lambda,Lmax,visc_p)
       end block create_fene
+
 
       ! Pressure gradient to drive periodic flow
       pressure_grad: block
@@ -368,87 +375,9 @@ contains
          ! Flow rate through the channel
          Q=Ubulk*H 
          ! Contant pressure gradient
-         px=-12.00_WP*(visc_0/H**3.00_WP)*Q 
+         px=-12.00_WP*(visc_0/H**3)*Q 
       end block pressure_grad
 
-      ! Initalize FEBNE model tensors
-      init_fene: block
-         ! real(WP) :: H,Lc,Uc,Q,epsilon,visc,px,A,B,C   !> Terms for theoretical stress tensor calculation in laminar flow
-         ! integer :: i,j,k,iunit,ierr
-         ! use mpi_f08,  only: MPI_BCAST
-         ! use parallel, only: comm,amRoot,MPI_REAL_WP 
-         ! real(WP) :: omega,phi,F                  !> Terms for mean shear flow assumption
-         ! real(WP), dimension(128) :: dudy=0.0_WP  !> Turbulent velocity gradient for initializing C tensor
-         
-         ! !> Initalize C and T tensor for laminar channel flow using analytical solution from D.O.A. Cruz et al. (2005)
-         ! ! Set conformation tensor to 0
-         ! fm%SC=0.0_WP
-         ! ! Characteristic scales
-         ! H=fs%cfg%yL
-         ! Lc=fs%cfg%yL
-         ! Uc=Ubulk
-         ! ! Flow rate through the channel
-         ! Q=Uc*H 
-         ! ! Polymer terms
-         ! epsilon=1.00_WP-(3.00_WP/Lmax**2.00_WP)
-         ! ! Total dynamic viscosity (solvent+polymer)
-         ! visc=visc_s+visc_p                                            
-         ! ! Pressure gradient in channel
-         ! px=-12.00_WP*(visc/H**3.00_WP)*Q 
-         ! ! Constant coefficents 
-         ! A=(visc_p**2.00_WP/(6.00_WP*epsilon*lambda**2.00_WP))*(1.00_WP+visc_p/visc_s)
-         ! C=(visc_p**2.00_WP/(4.00_WP*epsilon*lambda**2.00_WP))*(visc_p/visc_s)*px 
-         ! ! For 2D flow set stress yz,xz,yy and zz terms to 0
-         ! fm%T(:,:,:,3)=0.00_WP   !Txz
-         ! fm%T(:,:,:,4)=0.00_WP   !Tyy
-         ! fm%T(:,:,:,5)=0.00_WP   !Tyz
-         ! fm%T(:,:,:,6)=0.00_WP   !Tzz
-         ! ! Calculate shear and normal stress
-         ! do k=fs%cfg%kmin_,fs%cfg%kmax_
-         !    do j=fs%cfg%jmin_,fs%cfg%jmax_
-         !       do i=fs%cfg%imin_,fs%cfg%imax_
-         !          ! Position dependent coefficent being solved for in cubic equation
-         !          B=C*fs%cfg%ym(j)
-         !          ! Position dependent shear and normmal stress
-         !          fm%T(i,j,k,2)=(B+sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP)-abs(B-sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP) !Txy
-         !          fm%T(i,j,k,1)=2.00_WP*(lambda/visc_p)*fm%T(i,j,k,2)**2.00_WP                                                                       !Txx
-         !       end do
-         !    end do
-         ! end do
-
-         ! !> Initalize C and T tensor for turbulent channel flow using procedure of R. Sureshkummar et. al (1997)
-         ! ! Read inital dudy from root processor
-         ! if (amRoot) then
-         !    open(newunit=iunit,file='./initial_conditions/velgrad.txt',form='formatted',status='old',access='stream',iostat=ierr)  
-         !       do j=1,128   
-         !          read(iunit,'(es12.5)') dudy(j) 
-         !       end do 
-         !    close(iunit)
-         ! end if
-         ! ! Then the root broadcasts
-         ! call MPI_BCAST(dudy,128,MPI_REAL_WP,0,comm,ierr)
-         ! ! Calculate conformation tensor
-         ! do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-         !    ! Analytical solution parameters
-         !    omega=((sqrt(2.00_WP)*Wei)/Lmax)*dudy(j)
-         !    phi=log((3.00_WP*sqrt(3.00_WP)*omega/2.00_WP)+sqrt(1.00_WP+(3.00_WP*sqrt(3.00_WP)*omega/2.00_WP)**2.00_WP))
-         !    F=(sqrt(3.00_WP)*omega)/(2.00_WP*sinh((phi+epsilon(phi))/3.00_WP))
-         !    ! Prescribe analytical solution
-         !    fm%SC(:,j,:,1)=(1.00_WP/(F+epsilon(F)))*(1.00_WP+(2.00_WP*Wei**2.00_WP/(F+epsilon(F))**2.00_WP)*(dudy(j)**2.00_WP)) ! Cxx
-         !    fm%SC(:,j,:,2)=(Wei/(F+epsilon(F))**2.00_WP)*dudy(j)                                                                ! Cxy
-         !    fm%SC(:,j,:,3)=0.00_WP                                                                                              ! Cxz
-         !    fm%SC(:,j,:,4)=1.00_WP/(F+epsilon(F))                                                                               ! Cyy
-         !    fm%SC(:,j,:,5)=0.00_WP                                                                                              ! Cyz
-         !    fm%SC(:,j,:,6)=1.00_WP/(F+epsilon(F))                                                                               ! Czz
-         ! end do  
-         ! ! Calculate stress tensor
-         ! call fm%get_stressTensor(fm%SC,Wei,Lmax) 
-         
-         ! > Initalize C to 0
-         fm%SC=0.0_WP
-         call fm%get_stressTensor(lambda,Lmax,visc_p)
-
-      end block init_fene
       
       ! Add Ensight output
       create_ensight: block
@@ -498,6 +427,8 @@ contains
          call mfile%add_column(fs%divmax,'Maximum divergence')
          call mfile%add_column(fs%psolv%it,'Pressure iteration')
          call mfile%add_column(fs%psolv%rerr,'Pressure error')
+         call mfile%add_column(fm%implicit%it,'Scalar iteration')
+         call mfile%add_column(fm%implicit%rerr,'Scalar error')
          call mfile%write()
          ! Create CFL monitor
          cflfile=monitor(fs%cfg%amRoot,'cfl')

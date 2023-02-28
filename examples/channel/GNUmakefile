@@ -32,7 +32,7 @@ FFTW_DIR  = /usr/local/Cellar/fftw/3.3.10_1
 include $(NGA_HOME)/tools/GNUMake/Make.defs
 
 # Include NGA base code
-Bdirs   := core constant_density data solver config subgrid grid libraries
+Bdirs   := core constant_density data solver config subgrid grid libraries non_newtonian
 Bpack   += $(foreach dir, $(Bdirs), $(NGA_HOME)/src/$(dir)/Make.package)
 include $(Bpack)
 
