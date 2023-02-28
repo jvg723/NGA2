@@ -172,7 +172,7 @@ contains
       end select
       
       ! Create implicit multiscalar solver object
-      self%implicit=ils(cfg=self%cfg,name='multiscalar',nst=1+6*abs(self%stp1))
+      self%implicit=ils(cfg=self%cfg,name='multiscalar',nst=3)
       
       ! Prepare default metrics
       call self%init_metrics()
