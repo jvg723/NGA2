@@ -19,8 +19,8 @@ Surface tension coefficient : 0.0728
 
 # FENE model properties
 Maximum extension of polymer chain : 10
-Polymer Relaxation Time            : 1
-Beta                               : 0.8
+Polymer Relaxation Time            : 5
+Beta                               : 0.5
 Stress diffusivisty                : 0
 
 # Time integration

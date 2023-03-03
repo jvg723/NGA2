@@ -41,7 +41,7 @@ module simulation
 	real(WP) :: radius,depth
 	
 	 !> Fluid viscosity (solvent,polymer,total)
-	real(WP) :: visc_l,visc_p
+	real(WP) :: visc_s,visc_l,visc_p,visc_g
 
 	!> Artifical diffusivity for conformation tensor
 	real(WP) :: stress_diff
@@ -125,7 +125,7 @@ contains
 							end do
 						end do
 						! Call adaptive refinement code to get volume and barycenters recursively
-				      vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
+				      	vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
 						call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_falling_drop,0.0_WP,amr_ref_lvl)
 						vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
 						if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
@@ -157,7 +157,7 @@ contains
 		
 		! Create a two-phase flow solver without bconds
 	   create_and_initialize_flow_solver: block
-		   use hypre_str_class, only: pcg_pfmg
+			use hypre_str_class, only: pcg_pfmg
 			! Create flow solver
 			fs=tpns(cfg=cfg,name='Two-phase NS')
 			! Assign constant viscosity to each phase
@@ -167,17 +167,17 @@ contains
 		   	call param_read('Liquid density',fs%rho_l)
 			call param_read('Gas density',fs%rho_g)
 			! Read in surface tension coefficient
-		   call param_read('Surface tension coefficient',fs%sigma)
-		   ! Assign acceleration of gravity
-		   call param_read('Gravity',fs%gravity)
+			call param_read('Surface tension coefficient',fs%sigma)
+			! Assign acceleration of gravity
+			call param_read('Gravity',fs%gravity)
 			! Configure pressure solver
 			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
-         call param_read('Pressure iteration',ps%maxit)
-         call param_read('Pressure tolerance',ps%rcvg)
-         ! Configure implicit velocity solver
-         vs=hypre_str(cfg=cfg,name='Velocity',method=pcg_pfmg,nst=7)
-         call param_read('Implicit iteration',vs%maxit)
-         call param_read('Implicit tolerance',vs%rcvg)
+			call param_read('Pressure iteration',ps%maxit)
+			call param_read('Pressure tolerance',ps%rcvg)
+			! Configure implicit velocity solver
+			vs=hypre_str(cfg=cfg,name='Velocity',method=pcg_pfmg,nst=7)
+			call param_read('Implicit iteration',vs%maxit)
+			call param_read('Implicit tolerance',vs%rcvg)
 			! Setup the solver
 			call fs%setup(pressure_solver=ps,implicit_solver=vs)
 			! Zero initial field
@@ -189,7 +189,7 @@ contains
 
 		! Create a FENE model 
 		create_fene: block
-			use ils_class,  only: gmres_amg,gmres_pilut
+			use ils_class,  only: gmres
 			use multiscalar_class, only: bquick
 			! Create FENE model solver
 			fm=fene(cfg=cfg,scheme=bquick,name='FENE model')
@@ -205,15 +205,21 @@ contains
 			! Solvent/polymer viscosity ratio
 			call param_read('Beta',Beta)
 			! Polymer viscosity
-			visc_p=visc_l*((1.00_WP-Beta)/Beta)
+			visc_p=visc_s*((1.00_WP-Beta)/Beta)
 			! Configure implicit scalar solver
 			fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
 			! Setup the solver
-			call fm%setup(implicit_ils=gmres_pilut)
-			! Initalize C to 0
-			fm%SC=0.0_WP
-			call fm%get_stressTensor(lambda,Lmax,visc_p) 
-		end block create_fene
+			call fm%setup(implicit_ils=gmres) 
+			! Intalize conformation tensor to identity matrix
+			fm%SC(:,:,:,1)=1.00_WP !Cxx
+			fm%SC(:,:,:,2)=0.00_WP !Cyx
+			fm%SC(:,:,:,3)=0.00_WP !Czx
+			fm%SC(:,:,:,4)=1.00_WP !Cyy
+			fm%SC(:,:,:,5)=0.00_WP !Czy
+			fm%SC(:,:,:,6)=1.00_WP !Czz
+			! Initalize stress tensor
+			call fm%get_stressTensor(lambda,Lmax,visc_p)
+	 	end block create_fene
 	   
 	   
 		! Add Ensight output
@@ -228,6 +234,18 @@ contains
 		   call ens_out%add_scalar('VOF',vf%VF)
 		   call ens_out%add_scalar('pressure',fs%P)
 		   call ens_out%add_scalar('curvature',vf%curv)
+		   call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
+		   call ens_out%add_scalar('Cxy',fm%SC(:,:,:,2))
+		   call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
+		   call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
+		   call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
+		   call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
+		   call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
+		   call ens_out%add_scalar('Txy',fm%T (:,:,:,2))
+		   call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
+		   call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
+		   call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
+		   call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 		end block create_ensight

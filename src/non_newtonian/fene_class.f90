@@ -109,10 +109,12 @@ contains
 
    !> Calculate the viscoelastic tensor divergence
    subroutine get_divT(this,fs)
-      use incomp_class, only: incomp
+      !  use incomp_class, only: incomp
+      use tpns_class, only: tpns
       implicit none
       class(fene), intent(inout) :: this
-      class(incomp), intent(in)  :: fs
+      ! class(incomp), intent(in)  :: fs
+      class(tpns), intent(in)  :: fs
       integer :: i,j,k
       real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
 
