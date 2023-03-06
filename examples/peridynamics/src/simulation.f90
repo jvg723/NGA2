@@ -4,8 +4,10 @@ module simulation
 	use geometry,          only: cfg
 	use hypre_str_class,   only: hypre_str
 	use incomp_class,      only: incomp
+	use df_class,          only: dfibm
 	use timetracker_class, only: timetracker
 	use ensight_class,     only: ensight
+	use partmesh_class,    only: partmesh
 	use event_class,       only: event
 	use monitor_class,     only: monitor
 	implicit none
@@ -15,21 +17,22 @@ module simulation
 	type(hypre_str),   public :: ps
 	type(hypre_str),   public :: vs
 	type(incomp),      public :: fs
+	type(dfibm),       public :: df
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
-	type(ensight) :: ens_out
-	type(event)   :: ens_evt
+	type(partmesh) :: pmesh
+	type(ensight)  :: ens_out
+	type(event)    :: ens_evt
 	
 	!> Simulation monitor file
-	type(monitor) :: mfile,cflfile
+	type(monitor) :: mfile,cflfile,ibfile
 	
 	public :: simulation_init,simulation_run,simulation_final
 	
 	!> Private work arrays
 	real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
 	real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-	real(WP), dimension(:,:,:), allocatable :: Uib,Vib,Wib,srcM
 	
 	
 contains
@@ -73,10 +76,6 @@ contains
 			allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(Uib (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(Vib (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(Wib (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(srcM(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 		end block allocate_work_arrays
 		
 		
@@ -116,47 +115,8 @@ contains
 			! Setup the solver
 		   call fs%setup(pressure_solver=ps,implicit_solver=vs)
 	   end block create_flow_solver
-	   
-
-		! Evaluate IB velocity and mass source
-		calc_ib_velocity: block
-			integer :: i,j,k
-			real(WP) :: Uradius,Utheta,Vradius,Vtheta,Wradius,Wtheta
-			do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-				do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-					do i=fs%cfg%imino_,fs%cfg%imaxo_
-						! Cylindrical coordinates per component
-					   Uradius=sqrt(cfg%x(i)**2+cfg%ym(j)**2)
-						Utheta=atan2(cfg%ym(j),cfg%x(i))
-						Vradius=sqrt(cfg%xm(i)**2+cfg%y(j)**2)
-						Vtheta=atan2(cfg%y(j),cfg%xm(i))
-						Wradius=sqrt(cfg%xm(i)**2+cfg%ym(j)**2)
-						Wtheta=atan2(cfg%ym(j),cfg%xm(i))
-						! Pure rotation
-					   !Uib(i,j,k)=-2.0_WP*Uradius*sin(Utheta)
-					   !Vib(i,j,k)=+2.0_WP*Vradius*cos(Vtheta)
-					   !Wib(i,j,k)= 0.0_WP
-					   ! Pure blowing
-					   Uib(i,j,k)=+0.3_WP*cos(Utheta)
-						Vib(i,j,k)=+0.3_WP*sin(Vtheta)
-						Wib(i,j,k)= 0.0_WP
-					end do
-				end do
-			end do
-			! Compute IB mass source
-		   do k=fs%cfg%kmin_,fs%cfg%kmax_
-				do j=fs%cfg%jmin_,fs%cfg%jmax_
-					do i=fs%cfg%imin_,fs%cfg%imax_
-						srcM(i,j,k)=(1.0_WP-cfg%VF(i,j,k))*(sum(fs%divp_x(:,i,j,k)*Uib(i:i+1,j,k))+&
-						&                                   sum(fs%divp_y(:,i,j,k)*Vib(i,j:j+1,k))+&
-						&                                   sum(fs%divp_z(:,i,j,k)*Wib(i,j,k:k+1)))
-					end do
-				end do
-			end do
-			call cfg%sync(srcM)
-		end block calc_ib_velocity
-
-
+		
+		
 		! Initialize our velocity field
       initialize_velocity: block
          use incomp_class, only: bcond
@@ -173,12 +133,77 @@ contains
 			! Compute MFR through all boundary conditions
          call fs%get_mfr()
          ! Adjust MFR for global mass balance
-         call fs%correct_mfr(src=srcM)
+         call fs%correct_mfr()
          ! Compute cell-centered velocity
          call fs%interp_vel(Ui,Vi,Wi)
          ! Compute divergence
-         call fs%get_div(src=srcM)
+         call fs%get_div()
       end block initialize_velocity
+		
+
+		! Initialize our direct forcing solver
+      initialize_df: block
+         use mathtools, only: twoPi,Pi
+			use random,    only: random_uniform
+         integer :: i,j,k,np
+         real(WP) :: radius,theta
+         ! Create solver
+         df=dfibm(cfg=cfg,name='IBM')
+         ! Read cylinder properties
+         call param_read('Number of markers',np)
+         ! Root process initializes marker particles
+         if (df%cfg%amRoot) then
+            call df%resize(np)
+            ! Distribute marker particles
+            do i=1,np
+					! Set various parameters for the marker
+               df%p(i)%id =1
+               ! Set position
+					radius=huge(1.0_WP)
+					do while (radius.gt.0.5_WP)
+						df%p(i)%pos=[random_uniform(-0.5_WP,+0.5_WP),random_uniform(-0.5_WP,+0.5_WP),0.0_WP]
+						radius=sqrt(dot_product(df%p(i)%pos,df%p(i)%pos))
+						theta=atan2(df%p(i)%pos(2),df%p(i)%pos(1))
+					end do
+					! Assign velocity
+					df%p(i)%vel=0.0_WP
+               ! Assign element volume
+               df%p(i)%dV=0.25_WP*Pi*df%cfg%zL/real(np,WP)
+               ! Locate the particle on the mesh
+               df%p(i)%ind=df%cfg%get_ijk_global(df%p(i)%pos,[df%cfg%imin,df%cfg%jmin,df%cfg%kmin])
+               ! Activate the particle
+               df%p(i)%flag=0
+            end do
+         end if
+         call df%sync()
+         
+         ! Get initial volume fraction
+         call df%update_VF()
+         
+         ! All processes initialize IBM objects
+         call df%setup_obj()
+         
+         if (df%cfg%amRoot) then
+            print*,"===== Direct Forcing Setup Description ====="
+            print*,'Number of marker particles', df%np
+            print*,'Number of IBM objects', df%nobj
+            print*,'Particle spacing / dx', Pi/real(np,WP)/df%cfg%xL*real(df%cfg%nx,WP)
+         end if
+      end block initialize_df
+
+
+      ! Create partmesh object for Lagrangian particle output
+      create_pmesh: block
+		   integer :: i
+         pmesh=partmesh(nvar=1,nvec=1,name='ibm')
+         pmesh%varname(1)='dV'
+         pmesh%vecname(1)='velocity'
+         call df%update_partmesh(pmesh)
+         do i=1,df%np_
+            pmesh%var(1,i)=df%p(i)%dV
+            pmesh%vec(:,1,i)=df%p(i)%vel
+         end do
+		end block create_pmesh
 
 
 	   ! Add Ensight output
@@ -191,7 +216,8 @@ contains
 		   ! Add variables to output
 		   call ens_out%add_vector('velocity',Ui,Vi,Wi)
 		   call ens_out%add_scalar('pressure',fs%P)
-			call ens_out%add_scalar('Gib',cfg%Gib)
+			call ens_out%add_scalar('VF',df%VF)
+			call ens_out%add_particle('particles',pmesh)
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 	   end block create_ensight
@@ -202,6 +228,7 @@ contains
 		   ! Prepare some info about fields
 		   call fs%get_cfl(time%dt,time%cfl)
 		   call fs%get_max()
+			call df%get_max()
 		   ! Create simulation monitor
 		   mfile=monitor(fs%cfg%amRoot,'simulation')
 		   call mfile%add_column(time%n,'Timestep number')
@@ -227,6 +254,23 @@ contains
 		   call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
 		   call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
 		   call cflfile%write()
+			! Create IBM monitor
+         ibfile=monitor(amroot=df%cfg%amRoot,name='ibm')
+         call ibfile%add_column(time%n,'Timestep number')
+         call ibfile%add_column(time%t,'Time')
+         call ibfile%add_column(df%VFmin,'VF min')
+         call ibfile%add_column(df%VFmax,'VF max')
+         call ibfile%add_column(df%Fx,'Fx')
+         call ibfile%add_column(df%Fy,'Fy')
+         call ibfile%add_column(df%Fz,'Fz')
+         call ibfile%add_column(df%np,'Marker number')
+         call ibfile%add_column(df%Umin,'Marker Umin')
+         call ibfile%add_column(df%Umax,'Marker Umax')
+         call ibfile%add_column(df%Vmin,'Marker Vmin')
+         call ibfile%add_column(df%Vmax,'Marker Vmax')
+         call ibfile%add_column(df%Wmin,'Marker Wmin')
+         call ibfile%add_column(df%Wmax,'Marker Wmax')
+         call ibfile%write()
 	   end block create_monitor
 	   
 	   
@@ -274,35 +318,31 @@ contains
             fs%V=2.0_WP*fs%V-fs%Vold+resV
             fs%W=2.0_WP*fs%W-fs%Wold+resW
 				
-				! Apply direct IB forcing
-            ibforcing: block
-				   integer :: i,j,k
-					real(WP) :: VFx,VFy,VFz
-					do k=fs%cfg%kmin_,fs%cfg%kmax_
-						do j=fs%cfg%jmin_,fs%cfg%jmax_
-							do i=fs%cfg%imin_,fs%cfg%imax_
-								! Compute staggered VF
-								VFx=sum(fs%itpr_x(:,i,j,k)*cfg%VF(i-1:i,j,k))
-								VFy=sum(fs%itpr_y(:,i,j,k)*cfg%VF(i,j-1:j,k))
-								VFz=sum(fs%itpr_z(:,i,j,k)*cfg%VF(i,j,k-1:k))
-								! Enforce IB velocity
-								fs%U(i,j,k)=VFx*fs%U(i,j,k)+(1.0_WP-VFx)*Uib(i,j,k)
-								fs%V(i,j,k)=VFy*fs%V(i,j,k)+(1.0_WP-VFy)*Vib(i,j,k)
-								fs%W(i,j,k)=VFz*fs%W(i,j,k)+(1.0_WP-VFz)*Wib(i,j,k)
-							end do
-						end do
-					end do
-					call fs%cfg%sync(fs%U)
-					call fs%cfg%sync(fs%V)
-					call fs%cfg%sync(fs%W)
-				end block ibforcing
+				! Add momentum source term from direct forcing
+            ib_forcing: block
+               integer :: i,j,k
+               resU=fs%rho
+               call df%get_source(dt=time%dt,U=fs%U,V=fs%V,W=fs%W,rho=resU)
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        fs%U(i,j,k)=fs%U(i,j,k)+sum(fs%itpr_x(:,i,j,k)*df%srcU(i-1:i,j,k))
+                        fs%V(i,j,k)=fs%V(i,j,k)+sum(fs%itpr_y(:,i,j,k)*df%srcV(i,j-1:j,k))
+                        fs%W(i,j,k)=fs%W(i,j,k)+sum(fs%itpr_z(:,i,j,k)*df%srcW(i,j,k-1:k))
+                     end do
+                  end do
+               end do
+               call fs%cfg%sync(fs%U)
+               call fs%cfg%sync(fs%V)
+               call fs%cfg%sync(fs%W)
+            end block ib_forcing
 				
 				! Apply other boundary conditions
 			   call fs%apply_bcond(time%t,time%dt)
 				
 				! Solve Poisson equation
-            call fs%correct_mfr(src=srcM)
-            call fs%get_div(src=srcM)
+            call fs%correct_mfr()
+            call fs%get_div()
             fs%psolv%rhs=-fs%cfg%vol*fs%div*fs%rho/time%dt
             fs%psolv%sol=0.0_WP
             call fs%psolv%solve()
@@ -322,15 +362,17 @@ contains
 			
 			! Recompute interpolated velocity and divergence
 		   call fs%interp_vel(Ui,Vi,Wi)
-			call fs%get_div(src=srcM)
+			call fs%get_div()
 			
 			! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 			
 			! Perform and output monitoring
 		   call fs%get_max()
+			call df%get_max()
 			call mfile%write()
 			call cflfile%write()
+			call ibfile%write()
 			
 		end do
 		
@@ -348,7 +390,7 @@ contains
 	   ! timetracker
 	   
 	   ! Deallocate work arrays
-	   deallocate(resU,resV,resW,Ui,Vi,Wi,Uib,Vib,Wib,srcM)
+	   deallocate(resU,resV,resW,Ui,Vi,Wi)
 	   
 	end subroutine simulation_final
 	

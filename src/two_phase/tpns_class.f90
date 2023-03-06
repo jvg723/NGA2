@@ -2316,7 +2316,6 @@ contains
    !> Solve for implicit velocity residual
    !> NEED TO CHECK IMPLICITATION OF THE CONVECTIVE TERM ON THE DIAGONALS
    subroutine solve_implicit(this,dt,resU,resV,resW)
-      use ils_class, only: amg
       implicit none
       class(tpns), intent(inout) :: this
       real(WP), intent(in) :: dt

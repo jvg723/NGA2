@@ -141,7 +141,9 @@ contains
 			! Update the band
 		   	call vf%update_band()
 			! Perform interface reconstruction from VOF field
-		   	call vf%build_interface()
+		   call vf%build_interface()
+			! Set interface planes at the boundaries
+         call vf%set_full_bcond()
 			! Create discontinuous polygon mesh from IRL interface
 		   	call vf%polygonalize_interface()
 			! Calculate distance from polygons

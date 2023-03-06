@@ -1,8 +1,13 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
-   use precision,     only: WP
-   use geometry,      only: cfg,plymesh
-   use ensight_class, only: ensight
+   use precision,         only: WP
+   use geometry,          only: cfg
+   use incomp_class,      only: incomp
+   use sgsmodel_class,    only: sgsmodel
+   use timetracker_class, only: timetracker
+   use ensight_class,     only: ensight
+   use event_class,       only: event
+   use monitor_class,     only: monitor
    implicit none
    private
    
@@ -27,11 +32,8 @@ contains
          ens_out=ensight(cfg=cfg,name='plytester')
          
          ! Add variables to output
-         call ens_out%add_surface('ply',plymesh)
          call ens_out%add_scalar('Gib',cfg%Gib)
 
-         ! Output to ensight
-         call ens_out%write_data(time=0.0_WP)
          
       end block create_ensight
       
