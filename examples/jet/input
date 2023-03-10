@@ -1,0 +1,47 @@
+# Parallelization
+1 Partition : 8 1 1
+2 Partition : 8 1 1
+
+# Annular pipe domain definition
+1 Pipe diameter       : 1.1
+1 Pipe length         : 4
+1 nx                  : 128
+1 ny                  : 32
+1 nz                  : 32
+
+# Swirl atomizer domain definition
+2 Lx : 5
+2 Ly : 5
+2 Lz : 5
+2 nx : 100
+2 ny : 100
+2 nz : 100
+
+# Pipe properties
+Bulk velocity    : 1
+Fluctuation amp  : 0.2
+
+# Fluid properties
+Liquid dynamic viscosity    : 2e-4
+Liquid density              : 1
+Gas dynamic viscosity       : 1e-5
+Gas density                 : 1e-3
+Surface tension coefficient : 1e-3
+
+# Time integration
+1 Max timestep size : 0.01
+2 Max timestep size : 4e-3
+Max cfl number      : 0.9
+Max time            : 400
+Transistion         : 5
+
+# Pressure solver
+Pressure tolerance : 1e-5
+Pressure iteration : 100
+
+# Implicit velocity solver
+Implicit tolerance : 1e-5
+Implicit iteration : 100
+
+# Ensight output
+Ensight output period : 1e-1
