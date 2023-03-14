@@ -14,7 +14,7 @@ module block2_class
    use monitor_class,     only: monitor
    implicit none
    private
-   ! Test
+
    public :: block2
    
    !> block 2 object
