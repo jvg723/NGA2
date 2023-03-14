@@ -6,6 +6,7 @@ module block2_class
    use hypre_str_class,   only: hypre_str
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
+   use ccl_class,         only: ccl
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
@@ -23,6 +24,7 @@ module block2_class
 	   type(hypre_str)        :: vs              !< Structured hypre implicit solver
       type(tpns)             :: fs              !< Two phase incompressible flow solver
       type(vfs)              :: vf              !< VF solver
+      type(ccl)              :: cc              !< Connected component labeling class
       type(timetracker)      :: time            !< Time tracker
       type(surfmesh)         :: smesh           !< Surfmesh                                       
       type(ensight)          :: ens_out         !< Ensight output
@@ -39,6 +41,12 @@ module block2_class
       procedure :: final                  !< Finalize block
    end type block2
 
+   !> Liquid structure model parameters
+   real(WP) :: filmthickness_over_dx  =5.0e-1_WP
+   real(WP) :: min_filmthickness      =1.0e-3_WP
+   real(WP) :: diam_over_filmthickness=1.0e+1_WP
+   real(WP) :: max_eccentricity       =5.0e-1_WP
+   real(WP) :: d_threshold            =1.0e-1_WP
    
 contains
    
@@ -222,6 +230,21 @@ contains
          ! Compute divergence
          call b%fs%get_div()
       end block initialize_velocity
+
+      ! Create a connected-component labeling object
+      create_and_initialize_ccl: block
+         use vfs_class, only: VFlo
+         ! Create the CCL object
+         b%cc=ccl(cfg=b%cfg,name='CCL')
+         b%cc%max_interface_planes=2
+         b%cc%VFlo=VFlo
+         b%cc%dot_threshold=-0.5_WP
+         b%cc%thickness_cutoff=filmthickness_over_dx
+         ! Perform CCL step
+         call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+         call b%cc%film_classify(Lbary=b%vf%Lbary,Gbary=b%vf%Gbary)
+         call b%cc%deallocate_lists()
+      end block create_and_initialize_ccl
       
 
       ! Create surfmesh object for interface polygon output
