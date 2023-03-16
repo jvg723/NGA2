@@ -8,6 +8,7 @@ module simulation
 	use fene_class,        only: fene
 	use timetracker_class, only: timetracker
 	use ensight_class,     only: ensight
+   use surfmesh_class,    only: surfmesh
 	use event_class,       only: event
 	use monitor_class,     only: monitor
 	implicit none
@@ -22,8 +23,9 @@ module simulation
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
-	type(ensight) :: ens_out
-	type(event)   :: ens_evt
+   type(surfmesh) :: smesh
+	type(ensight)  :: ens_out
+	type(event)    :: ens_evt
 	
 	!> Simulation monitor file
 	type(monitor) :: mfile,cflfile
@@ -59,9 +61,9 @@ contains
 		real(WP), intent(in) :: t
 		real(WP) :: G
 		! Create the droplet
-		G=radius-sqrt(sum((xyz-center)**2))
-		! Add the pool
-		G=max(G,depth-xyz(2))
+	   G=radius-sqrt(sum((xyz-center)**2))
+	   ! Add the pool
+	   G=max(G,depth-xyz(2))
 	end function levelset_falling_drop
 	
 	
@@ -159,7 +161,7 @@ contains
 		
 		! Create a two-phase flow solver without bconds
 	   create_and_initialize_flow_solver: block
-			use hypre_str_class, only: pcg_pfmg
+		   use hypre_str_class, only: pcg_pfmg
 			! Create flow solver
 			fs=tpns(cfg=cfg,name='Two-phase NS')
 			! Assign constant viscosity to each phase
@@ -169,17 +171,17 @@ contains
 		   	call param_read('Liquid density',fs%rho_l)
 			call param_read('Gas density',fs%rho_g)
 			! Read in surface tension coefficient
-			call param_read('Surface tension coefficient',fs%sigma)
-			! Assign acceleration of gravity
-			call param_read('Gravity',fs%gravity)
+		   call param_read('Surface tension coefficient',fs%sigma)
+		   ! Assign acceleration of gravity
+		   call param_read('Gravity',fs%gravity)
 			! Configure pressure solver
 			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
-			call param_read('Pressure iteration',ps%maxit)
-			call param_read('Pressure tolerance',ps%rcvg)
-			! Configure implicit velocity solver
-			vs=hypre_str(cfg=cfg,name='Velocity',method=pcg_pfmg,nst=7)
-			call param_read('Implicit iteration',vs%maxit)
-			call param_read('Implicit tolerance',vs%rcvg)
+         call param_read('Pressure iteration',ps%maxit)
+         call param_read('Pressure tolerance',ps%rcvg)
+         ! Configure implicit velocity solver
+         vs=hypre_str(cfg=cfg,name='Velocity',method=pcg_pfmg,nst=7)
+         call param_read('Implicit iteration',vs%maxit)
+         call param_read('Implicit tolerance',vs%rcvg)
 			! Setup the solver
 			call fs%setup(pressure_solver=ps,implicit_solver=vs)
 			! Zero initial field
@@ -224,8 +226,8 @@ contains
 	 	end block create_fene
 	   
 	   
-		! Add Ensight output
-		create_ensight: block
+	   ! Add Ensight output
+	   create_ensight: block
 		   ! Create Ensight output from cfg
 		   ens_out=ensight(cfg=cfg,name='FallingDrop')
 			! Create event for Ensight output
@@ -236,18 +238,6 @@ contains
 		   call ens_out%add_scalar('VOF',vf%VF)
 		   call ens_out%add_scalar('pressure',fs%P)
 		   call ens_out%add_scalar('curvature',vf%curv)
-		   call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
-		   call ens_out%add_scalar('Cxy',fm%SC(:,:,:,2))
-		   call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
-		   call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
-		   call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
-		   call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
-		   call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
-		   call ens_out%add_scalar('Txy',fm%T (:,:,:,2))
-		   call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
-		   call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
-		   call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
-		   call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 		end block create_ensight
@@ -296,6 +286,7 @@ contains
 	
 	!> Perform an NGA2 simulation - this mimicks NGA's old time integration for multiphase
 	subroutine simulation_run
+      use tpns_class, only: static_contact
 		implicit none
 		
 		! Perform time integration
@@ -439,7 +430,7 @@ contains
 			   	call fs%update_laplacian()
 				call fs%correct_mfr()
 				call fs%get_div()
-				call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
+				call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf,contact_model=static_contact)
 				fs%psolv%rhs=-fs%cfg%vol*fs%div/time%dt
 				fs%psolv%sol=0.0_WP
 				call fs%psolv%solve()
@@ -463,7 +454,7 @@ contains
 			call fs%get_div()
 			
 			! Output to ensight
-		   	if (ens_evt%occurs()) call ens_out%write_data(time%t)
+		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 			
 			! Perform and output monitoring
 		   	call fs%get_max()
