@@ -16,21 +16,6 @@ module block2_class
    private
 
    public :: block2
-
-   !> Object to store information about liquid structures
-   type :: structure_list
-      integer :: id
-      real(WP) :: vol
-      real(WP) :: x
-      real(WP) :: y
-      real(WP) :: z
-      real(WP) :: u
-      real(WP) :: v
-      real(WP) :: w
-      real(WP) :: diameter
-      real(WP) :: eccentricity
-      real(WP), dimension(3) :: lengths
-   end type structure_list
    
    !> block 2 object
    type :: block2
@@ -59,10 +44,7 @@ module block2_class
    !> Eccentricity threshold
    real(WP) :: max_eccentricity=5.0e-1_WP
 
-   ! Arrays to store liquid structure properies for post processing
-   type(structure_list), dimension(:), pointer :: ligament_list => null()
-   type(structure_list), dimension(:), pointer :: particle_list => null()
-   
+
 contains
    
    
@@ -343,6 +325,16 @@ contains
          call b%cflfile%write()
       end block create_monitor
       
+      ! ! Create a specialized post-processing file
+      ! create_postproc: block
+      !    ! Create event for data postprocessing
+      !    ppevt=event(time=time,name='Postproc output')
+      !    call param_read('Postproc output period',ppevt%tper)
+      !    ! Create directory to write to
+      !    if (cfg%amRoot) call execute_command_line('mkdir -p structure_stats')
+      !    ! Perform the output
+      !    ! if (ppevt%occurs()) call postproc_vel()
+      ! end block create_postproc
       
    end subroutine init
    
@@ -527,121 +519,76 @@ contains
       
    end subroutine step
 
-   !> Collect information about liquid structures
-   subroutine structure_identification(b)
-      implicit none
-      class(block2), intent(inout) :: b
-      real(WP) :: x_over_xL=0.9_WP
+   ! !> Collect information about liquid structures
+   ! subroutine structure_identification(b)
+   !    implicit none
+   !    class(block2), intent(inout) :: b
+   !    real(WP) :: x_over_xL=0.9_WP !< Parameter to set location of collection along x-axis
 
-      ! Perform detailed CCL pass to identify structures
-      b%cc%max_interface_planes=2
-      call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
-      call b%cc%get_min_thickness()
-      call b%cc%sort_by_thickness()
-
-      ! Allocate and initalize array for list of ligaments
-      allocate(ligament_list(1:b%cc%n_meta_struct))
-      ligament_list(:)%id = 0
-      ligament_list(:)%vol= 0.0_WP
-      ligament_list(:)%x  = 0.0_WP
-      ligament_list(:)%y  = 0.0_WP
-      ligament_list(:)%z  = 0.0_WP
-      ligament_list(:)%u  = 0.0_WP
-      ligament_list(:)%v  = 0.0_WP
-      ligament_list(:)%w  = 0.0_WP
-      ligament_list(:)%eccentricity=0.0_WP
-      ligament_list(:)%lengths(1)=0.0_WP
-      ligament_list(:)%lengths(2)=0.0_WP
-      ligament_list(:)%lengths(3)=0.0_WP
+   !    ! Perform detailed CCL pass to identify structures
+   !    b%cc%max_interface_planes=2
+   !    call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+   !    call b%cc%get_min_thickness()
+   !    call b%cc%sort_by_thickness()
       
-      ! Allocate and initalize array for list of particles
-      allocate(particle_list(1:b%cc%n_meta_struct))
-      particle_list(:)%id = 0
-      particle_list(:)%vol= 0.0_WP
-      particle_list(:)%x  = 0.0_WP
-      particle_list(:)%y  = 0.0_WP
-      particle_list(:)%z  = 0.0_WP
-      particle_list(:)%u  = 0.0_WP
-      particle_list(:)%v  = 0.0_WP
-      particle_list(:)%w  = 0.0_WP
-      particle_list(:)%eccentricity=0.0_WP
-      particle_list(:)%diameter=0.0_WP
-      particle_list(:)%lengths(1)=0.0_WP
-      particle_list(:)%lengths(2)=0.0_WP
-      particle_list(:)%lengths(3)=0.0_WP
-      
-      ! Loop through identified detached structs and sort by ligaments and particles
-      sort_structures: block
-         use mathtools, only: pi
-         integer :: m,n,i,j,k
-         real(WP) :: lmin,lmax,eccent,diam
+   !    ! Loop through identified detached structs and sort by ligaments and particles
+   !    sort_structures: block
+   !       use mathtools, only: pi
+   !       integer :: m,n,i,j,k
+   !       real(WP) :: lmin,lmax,eccent,diam
          
-         ! Loops over film segments contained locally
-         do m=1,b%cc%n_meta_struct
+   !       ! Loops over film segments contained locally
+   !       do m=1,b%cc%n_meta_struct
             
-            ! Check if structure x center of gravity if .ge. x plane location
-            if (b%cc%meta_structures_list(m)%x.lt.x_over_xL*b%cfg%xL) cycle
+   !          ! Check if structure x_cg .lt. x plane location
+   !          if (b%cc%meta_structures_list(m)%x.lt.x_over_xL*b%cfg%xL) cycle
             
-            ! Test sphericity of structure to sort into ligaments and particles
-            lmin=b%cc%meta_structures_list(m)%lengths(3)
-            if (lmin.eq.0.0_WP) lmin=b%cc%meta_structures_list(m)%lengths(2) ! Handle 2D case
-            lmax=b%cc%meta_structures_list(m)%lengths(1)
-            eccent=sqrt(1.0_WP-lmin**2/lmax**2)
-            if (eccent.gt.max_eccentricity) then !> Structure is a ligament
-               ! Structure id
-               ligament_list(m)%id=b%cc%meta_structures_list(m)%id 
-               ! Structure volume
-               ligament_list(m)%vol=b%cc%meta_structures_list(m)%vol
-               ! Structure x/y/z center of gravity
-               ligament_list(m)%x=b%cc%meta_structures_list(m)%x  
-               ligament_list(m)%y=b%cc%meta_structures_list(m)%y  
-               ligament_list(m)%z=b%cc%meta_structures_list(m)%z
-               ! Structure u/v/w velocity  
-               ligament_list(m)%u=b%cc%meta_structures_list(m)%u  
-               ligament_list(m)%v=b%cc%meta_structures_list(m)%v  
-               ligament_list(m)%w=b%cc%meta_structures_list(m)%w
-               ! Structure eccentricity
-               ligament_list(m)%eccentricity=eccent
-               ! Structure characteristic lengths
-               ligament_list(m)%lengths(1)=b%cc%meta_structures_list(m)%lengths(1)
-               ligament_list(m)%lengths(2)=b%cc%meta_structures_list(m)%lengths(2)
-               ligament_list(m)%lengths(3)=b%cc%meta_structures_list(m)%lengths(3)  
-            else                                 !> Structure is a particle
-               ! Calculate particle diameter
-               diam=(6.0_WP*b%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
-               ! Structure id
-               particle_list(m)%id=b%cc%meta_structures_list(m)%id 
-               ! Structure volume
-               particle_list(m)%vol=b%cc%meta_structures_list(m)%vol
-               ! Structure x/y/z center of gravity
-               particle_list(m)%x=b%cc%meta_structures_list(m)%x  
-               particle_list(m)%y=b%cc%meta_structures_list(m)%y  
-               particle_list(m)%z=b%cc%meta_structures_list(m)%z
-               ! Structure u/v/w velocity  
-               particle_list(m)%u=b%cc%meta_structures_list(m)%u  
-               particle_list(m)%v=b%cc%meta_structures_list(m)%v  
-               particle_list(m)%w=b%cc%meta_structures_list(m)%w
-               ! Structure diameter
-               particle_list(m)%diameter=diam
-               ! Structure eccentricity
-               particle_list(m)%eccentricity=eccent
-               ! Structure characteristic lengths
-               particle_list(m)%lengths(1)=b%cc%meta_structures_list(m)%lengths(1)
-               particle_list(m)%lengths(2)=b%cc%meta_structures_list(m)%lengths(2)
-               particle_list(m)%lengths(3)=b%cc%meta_structures_list(m)%lengths(3) 
-            end if 
+   !          ! Test sphericity of structure to sort into ligaments and particles
+   !          lmin=b%cc%meta_structures_list(m)%lengths(3)
+   !          if (lmin.eq.0.0_WP) lmin=b%cc%meta_structures_list(m)%lengths(2) ! Handle 2D case
+   !          lmax=b%cc%meta_structures_list(m)%lengths(1)
+   !          eccent=sqrt(1.0_WP-lmin**2/lmax**2)
+   !          if (eccent.gt.max_eccentricity) then !> Structure is a ligament
+
+   !          else                                 !> Structure is a particle
+   !             ! Calculate particle diameter
+   !             diam=(6.0_WP*b%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
+
+   !          end if 
+
+
+   !          ! Structure id
+   !          particle_list(m)%id=b%cc%meta_structures_list(m)%id 
+   !          ! Structure volume
+   !          particle_list(m)%vol=b%cc%meta_structures_list(m)%vol
+   !          ! Structure x/y/z center of gravity
+   !          particle_list(m)%x=b%cc%meta_structures_list(m)%x  
+   !          particle_list(m)%y=b%cc%meta_structures_list(m)%y  
+   !          particle_list(m)%z=b%cc%meta_structures_list(m)%z
+   !          ! Structure u/v/w velocity  
+   !          particle_list(m)%u=b%cc%meta_structures_list(m)%u  
+   !          particle_list(m)%v=b%cc%meta_structures_list(m)%v  
+   !          particle_list(m)%w=b%cc%meta_structures_list(m)%w
+
+   !          ! Structure characteristic lengths
+   !          particle_list(m)%lengths(1)=b%cc%meta_structures_list(m)%lengths(1)
+   !          particle_list(m)%lengths(2)=b%cc%meta_structures_list(m)%lengths(2)
+   !          particle_list(m)%lengths(3)=b%cc%meta_structures_list(m)%lengths(3) 
+   !          ! time step, time step number
+
+
                 
-         end do
+   !       end do
          
-      end block sort_structures
+   !    end block sort_structures
       
-      ! Clean up CCL
-      call b%cc%deallocate_lists()
+   !    ! Clean up CCL
+   !    call b%cc%deallocate_lists()
 
-      ! Deallocate arrays for printing
-      deallocate(ligament_list,particle_list)
+   !    ! Deallocate arrays for printing
+   !    deallocate(ligament_list,particle_list)
       
-   end subroutine structure_identification
+   ! end subroutine structure_identification
       
    
    !> Finalize b2 simulation
