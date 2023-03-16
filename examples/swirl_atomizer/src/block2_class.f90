@@ -3,6 +3,7 @@ module block2_class
    use precision,         only: WP
    use geometry,          only: Dout,Din
    use config_class,      only: config
+   use iterator_class,    only: iterator
    use hypre_str_class,   only: hypre_str
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
@@ -35,6 +36,9 @@ module block2_class
       real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
       real(WP), dimension(:,:,:),   allocatable :: SRmag
       real(WP), dimension(:,:,:,:), allocatable :: SR
+      !> Iterator for VOF removal
+      type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
+      real(WP) :: vof_removed              !< Integral of VOF removed
    contains
       procedure :: init                   !< Initialize block
       procedure :: step                   !< Advance block
@@ -44,6 +48,8 @@ module block2_class
    !> Eccentricity threshold
    real(WP) :: max_eccentricity=5.0e-1_WP
 
+   !> Hardcode size of buffer layer for VOF removal
+   integer, parameter :: nlayer=4
 
 contains
    
@@ -79,6 +85,67 @@ contains
       isIn=.false.
       if (i.le.pg%imin) isIn=.true.
    end function xm_locator
+
+   !> Function that localizes the top (y+) of the domain
+   function yp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmax+1) isIn=.true.
+   end function yp_locator
+   
+   
+   !> Function that localizes the bottom (y-) of the domain
+   function ym_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmin) isIn=.true.
+   end function ym_locator
+   
+   
+   !> Function that localizes the top (z+) of the domain
+   function zp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmax+1) isIn=.true.
+   end function zp_locator
+   
+   
+   !> Function that localizes the bottom (z-) of the domain
+   function zm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmin) isIn=.true.
+   end function zm_locator
+
+   !> Function that localizes region of VOF removal
+   function vof_removal_layer_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.ge.pg%imax-nlayer.or.&
+      &   j.le.pg%jmin+nlayer.or.&
+      &   j.ge.pg%jmax-nlayer.or.&
+      &   k.le.pg%kmin+nlayer.or.&
+      &   k.ge.pg%kmax-nlayer) isIn=.true.
+   end function vof_removal_layer_locator
    
    
    !> Initialization of problem solver
@@ -177,11 +244,17 @@ contains
          ! Reset moments to guarantee compatibility with interface reconstruction
          call b%vf%reset_volume_moments()
       end block create_and_initialize_vof
-      
+
+      ! Create an iterator for removing VOF at edges
+      create_iterator: block
+         b%vof_removal_layer=iterator(b%cfg,'VOF removal',vof_removal_layer_locator)
+         b%vof_removed=0.0_WP
+      end block create_iterator
+
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use tpns_class, only: dirichlet,clipped_neumann
+         use tpns_class, only: dirichlet,clipped_neumann,slip
          use hypre_str_class,  only: pcg_pfmg
          integer :: i,j,k
          real(WP) :: visc_l,visc_g
@@ -198,7 +271,12 @@ contains
          ! Inflow on the left of domain
          call b%fs%add_bcond(name='inflow',type=dirichlet,      face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
          ! Clipped Neumann outflow on the right of domain
-         call b%fs%add_bcond(name='bc_xp' ,type=clipped_neumann,face='x',dir=+1,canCorrect=.true. ,locator=xp_locator)
+         call b%fs%add_bcond(name='bc_xp' ,type=clipped_neumann,face='x',dir=+1,canCorrect=.false.,locator=xp_locator)
+         ! Slip on the sides
+         call b%fs%add_bcond(name='bc_yp',type=slip,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
+         call b%fs%add_bcond(name='bc_ym',type=slip,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         call b%fs%add_bcond(name='bc_zp',type=slip,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
+         call b%fs%add_bcond(name='bc_zm',type=slip,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
 			b%ps=hypre_str(cfg=b%cfg,name='Pressure',method=pcg_pfmg,nst=7)
          call param_read('Pressure iteration',b%ps%maxit)
@@ -468,6 +546,23 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
+      ! Remove VOF at edge of domain
+      remove_vof: block
+         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+         use parallel, only: MPI_REAL_WP
+         integer :: n,i,j,k,ierr
+         real(WP) :: my_vof_removed
+         my_vof_removed=0.0_WP
+         do n=1,b%vof_removal_layer%no_
+            i=b%vof_removal_layer%map(1,n)
+            j=b%vof_removal_layer%map(2,n)
+            k=b%vof_removal_layer%map(3,n)
+            my_vof_removed=my_vof_removed+b%cfg%vol(i,j,k)*b%vf%VF(i,j,k)
+            b%vf%VF(i,j,k)=0.0_WP
+         end do
+         call MPI_ALLREDUCE(my_vof_removed,b%vof_removed,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+      end block remove_vof
+
       ! Output to ensight
       if (b%ens_evt%occurs()) then 
          ! Update surfmesh object
@@ -500,22 +595,7 @@ contains
       call b%vf%get_max()
       call b%mfile%write()
       call b%cflfile%write()
-         
-      ! After we're done clip all VOF at the exit area and along the sides - hopefully nothing's left
-      clip_vof: block
-         integer :: i,j,k
-         do k=b%fs%cfg%kmino_,b%fs%cfg%kmaxo_
-            do j=b%fs%cfg%jmino_,b%fs%cfg%jmaxo_
-               do i=b%fs%cfg%imino_,b%fs%cfg%imaxo_
-                  if (i.ge.b%vf%cfg%imax-5) b%vf%VF(i,j,k)=0.0_WP
-                  if (j.ge.b%vf%cfg%jmax-5) b%vf%VF(i,j,k)=0.0_WP
-                  if (j.le.b%vf%cfg%jmin+5) b%vf%VF(i,j,k)=0.0_WP
-                  if (k.ge.b%vf%cfg%kmax-5) b%vf%VF(i,j,k)=0.0_WP
-                  if (k.le.b%vf%cfg%kmin+5) b%vf%VF(i,j,k)=0.0_WP
-               end do
-            end do
-         end do
-      end block clip_vof
+
       
    end subroutine step
 
