@@ -3,6 +3,7 @@ module simulation
 	use precision,         only: WP
 	use geometry,          only: cfg
 	use hypre_str_class,   only: hypre_str
+   use ddadi_class,       only: ddadi
 	use tpns_class,        only: tpns
 	use vfs_class,         only: vfs
 	use fene_class,        only: fene
@@ -16,7 +17,7 @@ module simulation
 	
 	!> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
 	type(hypre_str),   public :: ps
-	type(hypre_str),   public :: vs
+	type(ddadi),       public :: vs
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
 	type(fene),        public :: fm
@@ -109,11 +110,11 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
 			! Create a VOF solver
-			vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
-			! Initialize to a droplet and a pool
-			center=[0.0_WP,0.05_WP,0.0_WP]
-			radius=0.01_WP
-			depth =0.02_WP
+		   vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
+		   ! Initialize to a droplet and a pool
+		   center=[0.0_WP,0.01_WP,0.0_WP]
+		   radius=0.002_WP
+		   depth =0.02_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
 					do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -176,56 +177,28 @@ contains
 		   call param_read('Gravity',fs%gravity)
 			! Configure pressure solver
 			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         ps%maxlevel=10
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
-         vs=hypre_str(cfg=cfg,name='Velocity',method=pcg_pfmg,nst=7)
-         call param_read('Implicit iteration',vs%maxit)
-         call param_read('Implicit tolerance',vs%rcvg)
-			! Setup the solver
-			call fs%setup(pressure_solver=ps,implicit_solver=vs)
-			! Zero initial field
-			fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-			! Calculate cell-centered velocities and divergence
-			call fs%interp_vel(Ui,Vi,Wi)
-			call fs%get_div()
-		end block create_and_initialize_flow_solver
+         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
+         ! Setup the solver
+		   call fs%setup(pressure_solver=ps,implicit_solver=vs)
+		   ! Zero initial field
+		   fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
+		   ! Calculate cell-centered velocities and divergence
+		   call fs%interp_vel(Ui,Vi,Wi)
+		   call fs%get_div()
+	   end block create_and_initialize_flow_solver
+	   
 
-		! Create a FENE model 
-		create_fene: block
-			use ils_class,  only: gmres
-			use multiscalar_class, only: bquick
-			! Create FENE model solver
-			fm=fene(cfg=cfg,scheme=bquick,name='FENE model')
-			! Assign aritifical stress diffusivisty
-			call param_read('Stress diffusivisty',stress_diff)
-			fm%diff=stress_diff
-			! Assign constant density
-			fm%rho=1.00_WP
-			! Maximum extensibility of polymer chain
-			call param_read('Maximum extension of polymer chain',Lmax)
-			! Relaxation time for polymer
-			call param_read('Polymer Relaxation Time',lambda)
-			! Solvent/polymer viscosity ratio
-			call param_read('Beta',Beta)
-			! Polymer viscosity
-			visc_p=visc_s*((1.00_WP-Beta)/Beta)
-			! Configure implicit scalar solver
-			fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
-			! Setup the solver
-			call fm%setup(implicit_ils=gmres) 
-			! Intalize conformation tensor to identity matrix
-			fm%SC(:,:,:,1)=1.00_WP !Cxx
-			fm%SC(:,:,:,2)=0.00_WP !Cyx
-			fm%SC(:,:,:,3)=0.00_WP !Czx
-			fm%SC(:,:,:,4)=1.00_WP !Cyy
-			fm%SC(:,:,:,5)=0.00_WP !Czy
-			fm%SC(:,:,:,6)=1.00_WP !Czz
-			! Initalize stress tensor
-			call fm%get_stressTensor(lambda,Lmax,visc_p)
-	 	end block create_fene
-	   
-	   
+	   ! Create surfmesh object for interface polygon output
+      create_smesh: block
+         smesh=surfmesh(nvar=0,name='plic')
+         call vf%update_surfmesh(smesh)
+      end block create_smesh
+
+
 	   ! Add Ensight output
 	   create_ensight: block
 		   ! Create Ensight output from cfg
