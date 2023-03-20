@@ -73,77 +73,8 @@ contains
 		real(WP), intent(in) :: t
 		real(WP) :: G
 		! Create the bubble
-		G=sqrt(sum((xyz-center)**2))-radius
+	   G=-radius+sqrt(sum((xyz-center)**2))
 	end function levelset_rising_bubble
-
-	!> Function that localizes the top (x+) of the domain
-	function xp_locator(pg,i,j,k) result(isIn)
-		use pgrid_class, only: pgrid
-		class(pgrid), intent(in) :: pg
-		integer, intent(in) :: i,j,k
-		logical :: isIn
-		isIn=.false.
-		if (i.eq.pg%imax+1) isIn=.true.
-	 end function xp_locator
-	 
-  
-	!> Function that localizes the bottom (x-) of the domain boundary
-	function xm_locator(pg,i,j,k) result(isIn)
-		use pgrid_class, only: pgrid
-		class(pgrid), intent(in) :: pg
-		integer, intent(in) :: i,j,k
-		logical :: isIn
-		isIn=.false.
-		if (i.le.pg%imin) isIn=.true.
-	end function xm_locator
-  
-	!> Function that localizes the top (y+) of the domain
-	function yp_locator(pg,i,j,k) result(isIn)
-		use pgrid_class, only: pgrid
-		implicit none
-		class(pgrid), intent(in) :: pg
-		integer, intent(in) :: i,j,k
-		logical :: isIn
-		isIn=.false.
-		if (j.eq.pg%jmax+1) isIn=.true.
-	end function yp_locator
-	 
-	 
-	 !> Function that localizes the bottom (y-) of the domain
-	 function ym_locator(pg,i,j,k) result(isIn)
-		use pgrid_class, only: pgrid
-		implicit none
-		class(pgrid), intent(in) :: pg
-		integer, intent(in) :: i,j,k
-		logical :: isIn
-		isIn=.false.
-		if (j.eq.pg%jmin) isIn=.true.
-	 end function ym_locator
-	 
-	 
-	 !> Function that localizes the top (z+) of the domain
-	 function zp_locator(pg,i,j,k) result(isIn)
-		use pgrid_class, only: pgrid
-		implicit none
-		class(pgrid), intent(in) :: pg
-		integer, intent(in) :: i,j,k
-		logical :: isIn
-		isIn=.false.
-		if (k.eq.pg%kmax+1) isIn=.true.
-	 end function zp_locator
-	 
-	 
-	 !> Function that localizes the bottom (z-) of the domain
-	 function zm_locator(pg,i,j,k) result(isIn)
-		use pgrid_class, only: pgrid
-		implicit none
-		class(pgrid), intent(in) :: pg
-		integer, intent(in) :: i,j,k
-		logical :: isIn
-		isIn=.false.
-		if (k.eq.pg%kmin) isIn=.true.
-	 end function zm_locator
-  
 	
 	
 	!> Initialization of problem solver
