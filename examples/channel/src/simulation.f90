@@ -35,8 +35,10 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),   allocatable :: SR,resSC,SC_
-   real(WP), dimension(:,:,:,:,:), allocatable :: gradu
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_
+   real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
+   real(WP), dimension(:,:,:,:,:), allocatable :: gradu      
 
    
    !> Fluid viscosity (solvent,polymer,total)
@@ -268,8 +270,10 @@ contains
          allocate(SR   (6,  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradu(3,3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          ! Scalar solver
-         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
-         allocate(SC_  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
+         allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
+         allocate(SC_   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
+         allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
+         allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
       end block allocate_work_arrays
       
 
@@ -331,13 +335,14 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
-
+         
       ! Create a FENE model 
       create_fene: block 
-         use hypre_uns_class,  only: gmres
+         use hypre_uns_class,   only: gmres
          use multiscalar_class, only: bquick
+         use fene_class,        only: FENEP
          ! Create FENE model solver
-         fm=fene(cfg=cfg,scheme=bquick,name='FENE')
+         fm=fene(cfg=cfg,model=FENEP,scheme=bquick,name='FENE')
          ! Assign aritifical stress diffusivisty
          call param_read('Stress diffusivisty',stress_diff)
          fm%diff=stress_diff
@@ -364,8 +369,10 @@ contains
          fm%SC(:,:,:,4)=1.00_WP !Cyy
          fm%SC(:,:,:,5)=0.00_WP !Czy
          fm%SC(:,:,:,6)=1.00_WP !Czz
-         ! Initalize stress tensor
-         call fm%get_stressTensor(lambda,Lmax,visc_p)
+         ! Calculate the relaxation function
+         call fm%get_relaxationFunction(fR,Lmax)
+         ! Build stress tensor
+         fm%T=(visc_p/lambda)*fR   
       end block create_fene
 
       ! Pressure gradient to drive periodic flow
@@ -391,6 +398,7 @@ contains
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('viscosity',fs%visc)
          call ens_out%add_scalar('visc_t',sgs%visc)
+         call ens_out%add_scalar('trC',fm%trC)
          call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
          call ens_out%add_scalar('Cxy',fm%SC(:,:,:,2))
          call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
@@ -625,11 +633,11 @@ contains
             ! Add FENE source terms
             fene: block
                ! Calculate CgradU terms
-               call fm%get_CgradU(gradu)    
-               ! Calculate T terms
-               call fm%get_stressTensor(lambda,Lmax,visc_p)     
+               call fm%get_CgradU(gradu,CgradU)    
+               ! Calculate the relaxation function
+               call fm%get_relaxationFunction(fR,Lmax)     
                ! Add source terms to calculated residual
-               resSC=resSC+(fm%CgradU-(1.00_WP/visc_p)*fm%T)*time%dt
+               resSC=resSC+(CgradU-(fR/lambda))*time%dt
             end block fene
 
             ! Form implicit residual
@@ -685,8 +693,10 @@ contains
 
             ! Add in polymer stress
             polymer: block
-               ! Calculate updated elastic tensor terms
-               call fm%get_stressTensor(lambda,Lmax,visc_p)
+               ! Calculate the relaxation function
+               call fm%get_relaxationFunction(fR,Lmax)
+               ! Build stress tensor
+               fm%T=(visc_p/lambda)*fR   
                ! Get its divergence 
                call fm%get_divT(fs) 
                ! Add divT to momentum equation 
@@ -762,7 +772,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC,SC_)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC,SC_,CgradU,fR)
       
    end subroutine simulation_final
    

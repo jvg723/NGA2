@@ -94,8 +94,8 @@ module multiscalar_class
       procedure :: apply_bcond                            !< Apply all boundary conditions
       procedure :: init_metrics                           !< Initialize metrics
       procedure :: adjust_metrics                         !< Adjust metrics
-	  procedure :: metric_reset                           !< Reset adaptive metrics like bquick
-	  procedure :: metric_modification                    !< Modify adaptive metrics like bquick
+      procedure :: metric_reset                           !< Reset adaptive metrics like bquick
+      procedure :: metric_modification                    !< Modify adaptive metrics like bquick
       procedure :: get_drhoSCdt                           !< Calculate drhoSC/dt
       procedure :: get_max                                !< Calculate maximum field values
       procedure :: get_int                                !< Calculate integral field values

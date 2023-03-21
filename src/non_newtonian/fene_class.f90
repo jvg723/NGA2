@@ -9,21 +9,26 @@ module fene_class
    
    ! Expose type/constructor/methods
    public :: fene
+
+   ! List of available FENE models
+   integer, parameter, public :: FENEP =0            !< FENE-P model
+   integer, parameter, public :: FENECR=1            !< FENE-CR model
    
    !> Constant density fene solver object definition
    type, extends(multiscalar) :: fene
 
       ! Source term arrays
-      real(WP), dimension(:,:,:,:), allocatable :: CgradU  !< Sum of distortion terms (CdotU and (CdotU)T)
       real(WP), dimension(:,:,:,:), allocatable :: T       !< Stress tensor
       real(WP), dimension(:,:,:,:), allocatable :: divT    !< Stress tensor divergence
+      real(WP), dimension(:,:,:),   allocatable :: trC     !< Trace of conformation tensor
 
-      ! CFL numbers
+      ! Metrics
+      integer :: model                                     !< Closure model of FENE
       real(WP) :: CFLp_x,CFLp_y,CFLp_z                     !< Polymer CFL numbers
 
    contains
       procedure :: get_CgradU                             !< Calculate product and transpose of C_dot_gradU
-      procedure :: get_stressTensor                       !< Calculate the stress tensor
+      procedure :: get_relaxationFunction                 !< Calculate FENE relxation term
       procedure :: get_divT                               !< Calculate stress tensor divergence
       procedure :: get_cfl                                !< Calculate maximum CFL
    end type fene
@@ -37,84 +42,97 @@ contains
    
    
    !> FENE model constructor from multiscalar
-   function construct_fene_from_args(cfg,scheme,name) result(self)
+   function construct_fene_from_args(cfg,model,scheme,name) result(self)
       implicit none
       type(fene) :: self                        !< FENE model
       class(config), target, intent(in) :: cfg
+      integer, intent(in) :: model
       integer, intent(in) :: scheme
       character(len=*), optional :: name
 
       ! Create a six-scalar solver
       self%multiscalar=multiscalar(cfg=cfg,scheme=scheme,nscalar=6,name=name)
 
+      ! Assign closure model for FENE
+      self%model=model
+
       ! Allocate variables
-      allocate(self%CgradU(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%CgradU=0.0_WP
       allocate(self%T     (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%T     =0.0_WP
       allocate(self%divT  (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,3           )); self%divT  =0.0_WP
+      allocate(self%trC   (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_             )); self%trC   =0.0_WP
    
    end function construct_fene_from_args
 
    !> Calculate components of tensor (c*graduT)+(C*gradu)^T
-   subroutine get_CgradU(this,gradu)
+   subroutine get_CgradU(this,gradu,CgradU)
       implicit none
       class(fene), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradu
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: CgradU
       integer :: i,j,k
       ! xx tensor component
-      this%CgradU(:,:,:,1)=2.00_WP*(this%SC(:,:,:,1)*gradu(1,1,:,:,:)+this%SC(:,:,:,2)*gradu(2,1,:,:,:)+this%SC(:,:,:,3)*gradu(3,1,:,:,:))
+      CgradU(:,:,:,1)=2.00_WP*(this%SC(:,:,:,1)*gradu(1,1,:,:,:)+this%SC(:,:,:,2)*gradu(2,1,:,:,:)+this%SC(:,:,:,3)*gradu(3,1,:,:,:))
       ! yx/xy tensor component
-      this%CgradU(:,:,:,2)=(this%SC(:,:,:,2)*gradu(1,1,:,:,:)+this%SC(:,:,:,4)*gradu(2,1,:,:,:)+this%SC(:,:,:,5)*gradu(3,1,:,:,:))+&
-      &                    (this%SC(:,:,:,1)*gradu(1,2,:,:,:)+this%SC(:,:,:,2)*gradu(2,2,:,:,:)+this%SC(:,:,:,3)*gradu(3,2,:,:,:))
+      CgradU(:,:,:,2)=(this%SC(:,:,:,2)*gradu(1,1,:,:,:)+this%SC(:,:,:,4)*gradu(2,1,:,:,:)+this%SC(:,:,:,5)*gradu(3,1,:,:,:))+&
+      &               (this%SC(:,:,:,1)*gradu(1,2,:,:,:)+this%SC(:,:,:,2)*gradu(2,2,:,:,:)+this%SC(:,:,:,3)*gradu(3,2,:,:,:))
       ! zx/xz tensor component
-      this%CgradU(:,:,:,3)=(this%SC(:,:,:,3)*gradu(1,1,:,:,:)+this%SC(:,:,:,5)*gradu(2,1,:,:,:)+this%SC(:,:,:,6)*gradu(3,1,:,:,:))+&
-      &                    (this%SC(:,:,:,1)*gradu(1,3,:,:,:)+this%SC(:,:,:,2)*gradu(2,3,:,:,:)+this%SC(:,:,:,3)*gradu(3,3,:,:,:))
+      CgradU(:,:,:,3)=(this%SC(:,:,:,3)*gradu(1,1,:,:,:)+this%SC(:,:,:,5)*gradu(2,1,:,:,:)+this%SC(:,:,:,6)*gradu(3,1,:,:,:))+&
+      &               (this%SC(:,:,:,1)*gradu(1,3,:,:,:)+this%SC(:,:,:,2)*gradu(2,3,:,:,:)+this%SC(:,:,:,3)*gradu(3,3,:,:,:))
       ! yy tensor component
-      this%CgradU(:,:,:,4)=2.00_WP*(this%SC(:,:,:,2)*gradu(1,2,:,:,:)+this%SC(:,:,:,4)*gradu(2,2,:,:,:)+this%SC(:,:,:,5)*gradu(3,2,:,:,:))
+      CgradU(:,:,:,4)=2.00_WP*(this%SC(:,:,:,2)*gradu(1,2,:,:,:)+this%SC(:,:,:,4)*gradu(2,2,:,:,:)+this%SC(:,:,:,5)*gradu(3,2,:,:,:))
       ! zy/yz tensor component
-      this%CgradU(:,:,:,5)=(this%SC(:,:,:,2)*gradu(1,3,:,:,:)+this%SC(:,:,:,4)*gradu(2,3,:,:,:)+this%SC(:,:,:,5)*gradu(3,3,:,:,:))+&
-      &                    (this%SC(:,:,:,3)*gradu(1,2,:,:,:)+this%SC(:,:,:,5)*gradu(2,2,:,:,:)+this%SC(:,:,:,6)*gradu(3,2,:,:,:))
+      CgradU(:,:,:,5)=(this%SC(:,:,:,2)*gradu(1,3,:,:,:)+this%SC(:,:,:,4)*gradu(2,3,:,:,:)+this%SC(:,:,:,5)*gradu(3,3,:,:,:))+&
+      &               (this%SC(:,:,:,3)*gradu(1,2,:,:,:)+this%SC(:,:,:,5)*gradu(2,2,:,:,:)+this%SC(:,:,:,6)*gradu(3,2,:,:,:))
       ! zz tensor component
-      this%CgradU(:,:,:,6)=2.00_WP*(this%SC(:,:,:,3)*gradu(1,3,:,:,:)+this%SC(:,:,:,5)*gradu(2,3,:,:,:)+this%SC(:,:,:,6)*gradu(3,3,:,:,:))
+      CgradU(:,:,:,6)=2.00_WP*(this%SC(:,:,:,3)*gradu(1,3,:,:,:)+this%SC(:,:,:,5)*gradu(2,3,:,:,:)+this%SC(:,:,:,6)*gradu(3,3,:,:,:))
    end subroutine get_CgradU
 
-   !> Calculate the viscoelastic stress tensor
-   subroutine get_stressTensor(this,lambda,Lmax,visc_p)
+   !> Calculate the relaxation function for the FENE model
+   subroutine get_relaxationFunction(this,fR,Lmax)
+      use messager, only: die
       implicit none
       class(fene), intent(inout) :: this
-      real(WP), intent(in)       :: Lmax,lambda,visc_p
-      real(WP), dimension(:,:,:), allocatable :: trC,f_r        
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: fR
+      real(WP), intent(in)       :: Lmax
+      real(WP), dimension(:,:,:), allocatable :: f_C        
       integer  :: i,j,k
 
       ! Allocate scalar arrays 
-	   allocate(trC(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); trC=0.0_WP
-      allocate(f_r(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); f_r=0.0_WP
-      
-      ! Scalars used in calculating stress
-      trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6)   !< trace of C
-      f_r=(Lmax**2-3.00_WP)/(Lmax**2-trC)          !< Peterlin Function
-      
-      ! Build stress tensor
-      this%T(:,:,:,1)=(visc_p/lambda)*(f_r*this%SC(:,:,:,1)-1.00_WP) !> xx tensor component
-      this%T(:,:,:,2)=(visc_p/lambda)*(f_r*this%SC(:,:,:,2)-0.00_WP) !> yx/xy tensor component
-      this%T(:,:,:,3)=(visc_p/lambda)*(f_r*this%SC(:,:,:,3)-0.00_WP) !> zx/xz tensor component
-      this%T(:,:,:,4)=(visc_p/lambda)*(f_r*this%SC(:,:,:,4)-1.00_WP) !> yy tensor component
-      this%T(:,:,:,5)=(visc_p/lambda)*(f_r*this%SC(:,:,:,5)-0.00_WP) !> zy/yz tensor component
-      this%T(:,:,:,6)=(visc_p/lambda)*(f_r*this%SC(:,:,:,6)-1.00_WP) !> zz tensor component
+      allocate(f_C(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); f_C=0.0_WP
 
-      ! Deallocate trace(C) array
-	   deallocate(trC,f_r)
+      ! Trace of conformation tensor 
+      this%trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6) 
 
-   end subroutine get_stressTensor
+      select case (this%model)
+         case (FENEP)
+            ! Peterlin Function
+            f_C=(Lmax**2-3.00_WP)/(Lmax**2-this%trC)          
+            ! Build relaxation terms for FENE-P (f(r)*C-I)
+            fR(:,:,:,1)=f_C*this%SC(:,:,:,1)-1.00_WP !> xx tensor component
+            fR(:,:,:,2)=f_C*this%SC(:,:,:,2)-0.00_WP !> yx/xy tensor component
+            fR(:,:,:,3)=f_C*this%SC(:,:,:,3)-0.00_WP !> zx/xz tensor component
+            fR(:,:,:,4)=f_C*this%SC(:,:,:,4)-1.00_WP !> yy tensor component
+            fR(:,:,:,5)=f_C*this%SC(:,:,:,5)-0.00_WP !> zy/yz tensor component
+            fR(:,:,:,6)=f_C*this%SC(:,:,:,6)-1.00_WP !> zz tensor component
+         case (FENECR)
+         case default
+            call die('[FENE relaxation function] Unknown FENE model selected')
+      end select
+
+      ! Deallocate array for tr(C) function
+	   deallocate(f_C)
+
+   end subroutine get_relaxationFunction
    
 
    !> Calculate the viscoelastic tensor divergence
    subroutine get_divT(this,fs)
-      !  use incomp_class, only: incomp
-      use tpns_class, only: tpns
+      use incomp_class, only: incomp
+      ! use tpns_class, only: tpns
       implicit none
       class(fene), intent(inout) :: this
-      ! class(incomp), intent(in)  :: fs
-      class(tpns), intent(in)  :: fs
+      class(incomp), intent(in)  :: fs
+      ! class(tpns), intent(in)  :: fs
       integer :: i,j,k
       real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
 
