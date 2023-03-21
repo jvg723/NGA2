@@ -36,6 +36,10 @@ Pressure iteration : 100
 Implicit tolerance : 1e-6
 Implicit iteration : 100
 
+# Scalar solver
+Scalar tolerance : 1e-6
+Scalar iteration : 100
+
 # Ensight output
 Ensight output period :  1e-1
 Postproc output period : 10

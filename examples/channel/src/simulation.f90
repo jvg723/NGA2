@@ -3,6 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use hypre_str_class,   only: hypre_str
+   use hypre_uns_class,   only: hypre_uns
    use incomp_class,      only: incomp
    use fene_class,        only: fene
    use sgsmodel_class,    only: sgsmodel
@@ -20,6 +21,7 @@ module simulation
    type(sgsmodel),    public :: sgs         
    type(hypre_str),   public :: ps
    type(hypre_str),   public :: vs
+   type(hypre_uns),   public :: sc
    
    !> Ensight postprocessing
    type(ensight) :: ens_out
@@ -330,13 +332,12 @@ contains
          call fs%get_div()
       end block create_and_initialize_flow_solver
 
-      
       ! Create a FENE model 
-      create_fene: block
-         use ils_class,  only: gmres
+      create_fene: block 
+         use hypre_uns_class,  only: gmres
          use multiscalar_class, only: bquick
          ! Create FENE model solver
-         fm=fene(cfg=cfg,scheme=bquick,name='FENE model')
+         fm=fene(cfg=cfg,scheme=bquick,name='FENE')
          ! Assign aritifical stress diffusivisty
          call param_read('Stress diffusivisty',stress_diff)
          fm%diff=stress_diff
@@ -350,10 +351,12 @@ contains
          call param_read('Beta',Beta)
          ! Polymer viscosity
          visc_p=visc_s*((1.00_WP-Beta)/Beta)
-         ! Configure implicit scalar solver
-         fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
+         ! Configure the scalar solver
+         sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=3)
+			call param_read('Scalar iteration',sc%maxit)
+			call param_read('Scalar tolerance',sc%rcvg)
          ! Setup the solver
-         call fm%setup(implicit_ils=gmres) 
+         call fm%setup(implicit_solver=sc)
          ! Intalize conformation tensor to identity matrix
          fm%SC(:,:,:,1)=1.00_WP !Cxx
          fm%SC(:,:,:,2)=0.00_WP !Cyx
@@ -364,7 +367,6 @@ contains
          ! Initalize stress tensor
          call fm%get_stressTensor(lambda,Lmax,visc_p)
       end block create_fene
-
 
       ! Pressure gradient to drive periodic flow
       pressure_grad: block
@@ -377,7 +379,6 @@ contains
          ! Contant pressure gradient
          px=-12.00_WP*(visc_0/H**3)*Q 
       end block pressure_grad
-
       
       ! Add Ensight output
       create_ensight: block
