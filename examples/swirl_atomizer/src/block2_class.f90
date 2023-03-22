@@ -5,6 +5,7 @@ module block2_class
    use config_class,      only: config
    use iterator_class,    only: iterator
    use hypre_str_class,   only: hypre_str
+   use hypre_uns_class,   only: hypre_uns
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use ccl_class,         only: ccl
@@ -21,8 +22,9 @@ module block2_class
    !> block 2 object
    type :: block2
       class(config), pointer :: cfg             !< Pointer to config
-      type(hypre_str)        :: ps              !< Structured hypre pressure solver
-	   type(hypre_str)        :: vs              !< Structured hypre implicit solver
+      ! type(hypre_str)        :: ps              !< Structured hypre pressure solver
+	   type(hypre_uns)        :: ps              !< Unstructured hypre pressure solver
+      type(hypre_str)        :: vs              !< Structured hypre implicit solver
       type(tpns)             :: fs              !< Two phase incompressible flow solver
       type(vfs)              :: vf              !< VF solver
       type(ccl)              :: cc              !< Connected component labeling class
@@ -256,6 +258,7 @@ contains
       create_and_initialize_flow_solver: block
          use tpns_class, only: dirichlet,clipped_neumann,slip
          use hypre_str_class,  only: pcg_pfmg
+         use hypre_uns_class,  only: gmres_amg
          integer :: i,j,k
          real(WP) :: visc_l,visc_g
          ! Create flow solver
@@ -278,7 +281,8 @@ contains
          call b%fs%add_bcond(name='bc_zp',type=slip,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
          call b%fs%add_bcond(name='bc_zm',type=slip,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
-			b%ps=hypre_str(cfg=b%cfg,name='Pressure',method=pcg_pfmg,nst=7)
+			! b%ps=hypre_str(cfg=b%cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         b%ps=hypre_uns(cfg=b%cfg,name='Pressure',method=gmres_amg,nst=7)
          call param_read('Pressure iteration',b%ps%maxit)
          call param_read('Pressure tolerance',b%ps%rcvg)
          ! Configure implicit velocity solver
