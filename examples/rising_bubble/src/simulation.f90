@@ -7,7 +7,7 @@ module simulation
 	use ddadi_class,       only: ddadi
 	use tpns_class,        only: tpns
 	use vfs_class,         only: vfs
-	! use fene_class,        only: fene
+	use fene_class,        only: fene
 	use timetracker_class, only: timetracker
 	use ensight_class,     only: ensight
    	use surfmesh_class,    only: surfmesh
@@ -17,13 +17,14 @@ module simulation
 	private
 	
 	!> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
-	type(hypre_uns),   public :: ps
-	! type(hypre_str),   public :: ps
+	! type(hypre_uns),   public :: ps
+	type(hypre_str),   public :: ps
 	! type(hypre_str),   public :: vs
 	type(ddadi),       public :: vs
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
-	! type(fene),        public :: fm
+	type(fene),        public :: fm
+	type(hypre_uns),   public :: sc
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
@@ -39,17 +40,19 @@ module simulation
 	!> Private work arrays
 	real(WP), dimension(:,:,:), 	allocatable :: resU,resV,resW
 	real(WP), dimension(:,:,:), 	allocatable :: Ui,Vi,Wi
-	real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_
+	real(WP), dimension(:,:,:,:),   allocatable :: resSC
     real(WP), dimension(:,:,:,:,:), allocatable :: gradu
+	real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
 	real(WP), dimension(:,:,:),   	allocatable :: SRmag
+	real(WP), dimension(:,:,:),   	allocatable :: visc_p
    	real(WP), dimension(:,:,:,:), 	allocatable :: SR
 	
 	!> Problem definition
 	real(WP), dimension(3) :: center
 	real(WP) :: radius
 	
-	!> Fluid viscosity (solvent,polymer,total)
-	real(WP) :: visc_s,visc_l,visc_p,visc_g
+	!> Fluid viscosity (solvent,polymer inital,liquid total,gas)
+	real(WP) :: visc_s,visc_p0,visc_l,visc_g
 
 	!> Shear thinning parameters
 	real(WP) :: n,alpha,visc_0,visc_inf
@@ -161,8 +164,11 @@ contains
 			allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
         	allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			! Scalar solver
-			allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
-			allocate(SC_  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
+			allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
+			allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
+            allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
+			! Rate depdent polymer viscosity
+			allocate(visc_p(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 		end block allocate_work_arrays
 		
 		
@@ -241,13 +247,13 @@ contains
 		! Create a two-phase flow solver without bconds
 	   	create_and_initialize_flow_solver: block
 	   		use tpns_class, only: clipped_neumann,slip,dirichlet
-		   	use hypre_str_class, only: pcg_pfmg
+		   	use hypre_str_class, only: pcg_pfmg,gmres_pfmg
 			use hypre_uns_class, only: gmres_amg
 			! Create flow solver
 			fs=tpns(cfg=cfg,name='Two-phase NS')
 			! Assign constant viscosity to each phase
-			call param_read('Liquid dynamic viscosity',visc_l); fs%visc_l=visc_l
-			call param_read('Gas dynamic viscosity',   visc_g); fs%visc_g=visc_g
+			call param_read('Solvent dynamic viscosity',visc_s); fs%visc_l=visc_s
+			call param_read('Gas dynamic viscosity',    visc_g); fs%visc_g=visc_g
 			! Assign constant density to each phase
 		   	call param_read('Liquid density',fs%rho_l)
 			call param_read('Gas density',fs%rho_g)
@@ -255,10 +261,13 @@ contains
 			call param_read('Gravity',fs%gravity)
 			! Read in surface tension coefficient
 			call param_read('Surface tension coefficient',fs%sigma)
+			! ! Clipped neuman on the top and bottom
+			! call fs%add_bcond(name='bc_yp',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
+			! call fs%add_bcond(name='bc_ym',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
 			! Configure pressure solver
-			! ps=hypre_str(cfg=cfg,name='Pressure',method=gmres_pfmg,nst=7)
-			! ps%maxlevel=10
-			ps=hypre_uns(cfg=cfg,name='Pressure',method=gmres_amg,nst=7)
+			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
+			ps%maxlevel=10
+			! ps=hypre_uns(cfg=cfg,name='Pressure',method=gmres_amg,nst=7)
 			call param_read('Pressure iteration',ps%maxit)
 			call param_read('Pressure tolerance',ps%rcvg)
 			! Configure implicit velocity solver
@@ -275,49 +284,78 @@ contains
 			call fs%get_div()
 		end block create_and_initialize_flow_solver
 
-		shear_thinning: block
+		! Set inital viscosity of liquid phase
+		solvent_viscosity: block
 			! Carreau model parameters	
 			call param_read('Power law constant',n)
-			call param_read('Zero shear rate viscosity',visc_0)
-			call param_read('Infinite shear rate viscosity',visc_inf)
 			call param_read('Shear rate parameter',alpha)
-		end block shear_thinning 
+			!> Carreau model
+			! ! No polymer viscosity
+			! visc_p=0.0_WP
+			! ! No infintie shear rate viscosity
+			! visc_inf=0.0_WP
+			! ! Zero shear rate viscosity
+			! visc_0=visc_s; fs%visc_l=visc_0
+			!> Hyribd model
+			! Zero shear rate viscosity
+			call param_read('Zero shear rate viscosity',visc_0)
+			! Inital Polymer viscosity
+			visc_p0=visc_0-visc_s
+			! Initial polymer viscosity at rest
+			visc_p=visc_p0
+			! Initial liquid phase viscosity
+			fs%visc_l=visc_s+visc_p0
+	 	end block solvent_viscosity 
 
-		! ! Create a FENE model 
-		! create_fene: block
-		! 	use ils_class,  only: gmres
-		! 	use multiscalar_class, only: bquick
-		! 	! Create FENE model solver
-		! 	fm=fene(cfg=cfg,scheme=bquick,name='FENE model')
-		! 	! Assign aritifical stress diffusivisty
-		! 	call param_read('Stress diffusivisty',stress_diff)
-		! 	fm%diff=stress_diff
-		! 	! Assign constant density
-		! 	fm%rho=1.00_WP
-		! 	! Maximum extensibility of polymer chain
-		! 	call param_read('Maximum extension of polymer chain',Lmax)
-		! 	! Relaxation time for polymer
-		! 	call param_read('Polymer Relaxation Time',lambda)
-		! 	! Solvent/polymer viscosity ratio
-		! 	call param_read('Beta',Beta)
-		! 	! Polymer viscosity
-		! 	visc_p=visc_s*((1.00_WP-Beta)/Beta)
-		! 	! Configure implicit scalar solver
-		! 	fm%implicit%maxit=fs%implicit%maxit; fm%implicit%rcvg=fs%implicit%rcvg
-		! 	! Setup the solver
-		! 	call fm%setup(implicit_ils=gmres) 
-		! 	! Intalize conformation tensor to identity matrix
-		! 	fm%SC(:,:,:,1)=1.00_WP !Cxx
-		! 	fm%SC(:,:,:,2)=0.00_WP !Cyx
-		! 	fm%SC(:,:,:,3)=0.00_WP !Czx
-		! 	fm%SC(:,:,:,4)=1.00_WP !Cyy
-		! 	fm%SC(:,:,:,5)=0.00_WP !Czy
-		! 	fm%SC(:,:,:,6)=1.00_WP !Czz
-		! 	! Initalize stress tensor
-		! 	call fm%get_stressTensor(lambda,Lmax,visc_p)
-	 	! end block create_fene
-	   
-	   
+
+		! Create a FENE model 
+		create_fene: block 
+			use hypre_uns_class,   only: gmres
+			use multiscalar_class, only: quick
+			use fene_class,        only: FENECR
+			integer :: i,j,k
+			! Create FENE model solver
+			fm=fene(cfg=cfg,model=FENECR,scheme=quick,name='FENE')
+			! Assign aritifical stress diffusivisty
+			call param_read('Stress diffusivisty',stress_diff)
+			fm%diff=stress_diff
+			! Assign density value of 1
+			fm%rho=1.00_WP
+			! Maximum extensibility of polymer chain
+			call param_read('Maximum extension of polymer chain',Lmax)
+			! Relaxation time for polymer
+			call param_read('Polymer Relaxation Time',lambda)
+			! Configure the scalar solver
+			sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=3)
+			call param_read('Scalar iteration',sc%maxit)
+			call param_read('Scalar tolerance',sc%rcvg)
+			! Setup the solver
+			call fm%setup(implicit_solver=sc)
+			! Intalize conformation tensor to identity matrix
+			fm%SC(:,:,:,1)=1.00_WP !Cxx
+			fm%SC(:,:,:,2)=0.00_WP !Cyx
+			fm%SC(:,:,:,3)=0.00_WP !Czx
+			fm%SC(:,:,:,4)=1.00_WP !Cyy
+			fm%SC(:,:,:,5)=0.00_WP !Czy
+			fm%SC(:,:,:,6)=1.00_WP !Czz
+			! Calculate the relaxation function
+			call fm%get_relaxationFunction(fR,Lmax)
+			! Build stress tensor
+			do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+				do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+				   do i=fs%cfg%imino_,fs%cfg%imaxo_
+						fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
+						fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
+						fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
+						fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
+						fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
+						fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
+				   end do
+				end do
+			 end do 
+	 	end block create_fene
+
+
 	   ! Add Ensight output
 	   create_ensight: block
 		   ! Create Ensight output from cfg
@@ -332,6 +370,19 @@ contains
 		   call ens_out%add_scalar('curvature',vf%curv)
 		   call ens_out%add_scalar('SRmag',SRmag)
            call ens_out%add_scalar('visc_l',fs%visc_l)
+		   call ens_out%add_scalar('trC',fm%trC)
+		   call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
+		   call ens_out%add_scalar('Cxy',fm%SC(:,:,:,2))
+		   call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
+		   call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
+		   call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
+		   call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
+		   call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
+		   call ens_out%add_scalar('Txy',fm%T (:,:,:,2))
+		   call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
+		   call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
+		   call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
+		   call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 		end block create_ensight
@@ -374,7 +425,7 @@ contains
 		   call cflfile%write()
 		end block create_monitor
 	   
-	   
+
 	end subroutine simulation_init
 	
 	
@@ -399,14 +450,21 @@ contains
 			   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
 				  do j=fs%cfg%jmino_,fs%cfg%jmaxo_
 					 do i=fs%cfg%imino_,fs%cfg%imaxo_
-						! Carreau Model
+						! Strain rate magnitude
 						SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-						fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						! ! Carreau Model
+						! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						! Hybird model
+						visc_p(i,j,k)=visc_p0*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						fs%visc_l(i,j,k)=visc_s+visc_p(i,j,k)
 					 end do
 				  end do
 			   end do
 			   call fs%cfg%sync(fs%visc_l)
 			end block update_viscosity
+			
+			! Remember old scalars
+			fm%SCold=fm%SC
 			
 			! Remember old VOF
 			vf%VFold=vf%VF
@@ -433,56 +491,38 @@ contains
 				fs%V=0.5_WP*(fs%V+fs%Vold)
 				fs%W=0.5_WP*(fs%W+fs%Wold)
 
-				! ! Build mid-time scalar
-				! fm%SC=0.5_WP*(fm%SC+fm%SCold)
+				! Build mid-time scalar
+				fm%SC=0.5_WP*(fm%SC+fm%SCold)
 
 				! Form velocity gradient
 				call fs%get_gradu(gradu)
 
-				! ! ============= SCALAR SOLVER =======================  
-            	! ! Reset interpolation metrics to QUICK scheme
-				! call fm%metric_reset()
+				! ============= SCALAR SOLVER =======================  
+				! Explicit calculation of resSC from advection equation equation
+				call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
 
-				! ! Calculate explicit SC prior to checking bounds
-				! pre_check: block
-				!    ! Explicit calculation of resSC from scalar equation
-				!    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-				!    ! Assemble explicit residual
-				!    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-				!    ! Apply this residual
-				!    SC_=2.0_WP*fm%SC-fm%SCold+resSC
-				! end block pre_check
+				! Assemble explicit residual
+				resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
 				
-				! ! Check boundedess of explicit SC calculation
-				! call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+				! Add FENE source terms
+				fene: block
+					! Calculate CgradU terms
+					call fm%get_CgradU(gradu,CgradU)    
+					! Calculate the relaxation function
+					call fm%get_relaxationFunction(fR,Lmax)     
+					! Add source terms to calculated residual
+					resSC=resSC+(CgradU-(fR/lambda))*time%dt
+			 	end block fene
 	
-				! ! Calculate explicit SC post checking bounds
-				! post_check: block
-				!    ! Explicit calculation of resSC from scalar equation
-				!    call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
-				!    ! Assemble explicit residual
-				!    resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
-				! end block post_check
-				
-				! ! Add FENE source terms
-				! fene: block
-				!    ! Calculate CgradU terms
-				!    call fm%get_CgradU(gradu)    
-				!    ! Calculate T terms
-				!    call fm%get_stressTensor(lambda,Lmax,visc_p)     
-				!    ! Add source terms to calculated residual
-				!    resSC=resSC+(fm%CgradU-(1.00_WP/visc_p)*fm%T)*time%dt
-				! end block fene
+				! Form implicit residual
+				call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 	
-				! ! Form implicit residual
-				! call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
+				! Apply this residual
+				fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
 	
-				! ! Apply this residual
-				! fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
-	
-				! ! Apply other boundary conditions on the resulting field
-				! call fm%apply_bcond(time%t,time%dt)
-				! ! ===================================================
+				! Apply other boundary conditions on the resulting field
+				call fm%apply_bcond(time%t,time%dt)
+				! ===================================================
 				
 				! ============= VELOCITY SOLVER ======================
 				! Preliminary mass and momentum transport step at the interface
@@ -501,26 +541,35 @@ contains
 
 				! ! Add in polymer stress
 				! polymer: block
+				! 	use vfs_class, only: VFlo
 				! 	integer :: i,j,k
-				! 	real (WP) :: H
-				! 	! Calculate updated elastic tensor terms
-				! 	call fm%get_stressTensor(lambda,Lmax,visc_p)
+				! 	! Calculate the relaxation function
+				! 	call fm%get_relaxationFunction(fR,Lmax)
+				! 	! Build stress tensor
+				! 	do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+				! 		do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+				! 		    do i=fs%cfg%imino_,fs%cfg%imaxo_
+				! 				fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
+				! 				fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
+				! 				fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
+				! 				fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
+				! 				fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
+				! 				fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
+				! 		    end do
+				! 		end do
+				! 	 end do    
 				! 	! Get its divergence 
 				! 	call fm%get_divT(fs) 
-				! 	! Add divT to momentum equation for G.ge.0
-				! 	H=0.0_WP
+				! 	! Add divT to momentum equation for VF.ge.VFlo
 				! 	do k=fs%cfg%kmin_,fs%cfg%kmax_
                 !   		do j=fs%cfg%jmin_,fs%cfg%jmax_
                 !     		do i=fs%cfg%imin_,fs%cfg%imax_
-				! 				! Use level set array to set Heavside value
-				! 				if (vf%G(i,j,k).ge.0.0_WP) then
-				! 					H=1.0_WP
-				! 				else
-				! 					H=0.0_WP
+				! 				! Use volume fraction to apply divergence of polymer stress
+				! 				if (vf%VF(i,j,k).ge.VFlo) then
+				! 					if (fs%umask(i,j,k).eq.0) resU=resU+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
+				! 					if (fs%vmask(i,j,k).eq.0) resV=resV+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
+				! 					if (fs%wmask(i,j,k).eq.0) resW=resW+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
 				! 				end  if 
-				! 				if (fs%umask(i,j,k).eq.0) resU=resU+H*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
-				! 				if (fs%vmask(i,j,k).eq.0) resV=resV+H*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
-				! 				if (fs%wmask(i,j,k).eq.0) resW=resW+H*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
 				! 			end do
 				! 		end do
 				! 	end do
@@ -565,7 +614,7 @@ contains
 			call fs%get_div()
 			
 			! Output to ensight
-		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
+		   	if (ens_evt%occurs()) call ens_out%write_data(time%t)
 			
 			! Perform and output monitoring
 		   	call fs%get_max()
@@ -589,7 +638,7 @@ contains
 		! timetracker
 	   
 	   ! Deallocate work arrays
-	   deallocate(resU,resV,resW,Ui,Vi,Wi)
+	   deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC,visc_p,fR,CgradU)
 	   
 	end subroutine simulation_final
 	
