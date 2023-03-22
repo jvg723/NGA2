@@ -31,12 +31,17 @@ Gas dynamic viscosity       : 1e-5
 Gas density                 : 1e-3
 Surface tension coefficient : 1e-3
 
+# Shear thinning properties
+Power law constant        : 0.5
+Shear rate parameter      : 1
+Zero shear rate viscosity : 1
+
 # Time integration
 1 Max timestep size : 0.01
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
 Max time            : 30
-Transistion         : 10
+Transistion         : 50
 
 # Pressure solver
 Pressure tolerance : 1e-5

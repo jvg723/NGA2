@@ -50,6 +50,12 @@ module block2_class
    !> Eccentricity threshold
    real(WP) :: max_eccentricity=5.0e-1_WP
 
+   !> Fluid viscosity (solvent,polymer inital,liquid total,gas)
+	real(WP) :: visc_s,visc_g
+
+   !> Shear thinning parameters
+	real(WP) :: n,alpha,visc_0,visc_inf
+
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
 
@@ -260,11 +266,10 @@ contains
          use hypre_str_class,  only: pcg_pfmg
          use hypre_uns_class,  only: gmres_amg
          integer :: i,j,k
-         real(WP) :: visc_l,visc_g
          ! Create flow solver
          b%fs=tpns(cfg=b%cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
-         call param_read('Liquid dynamic viscosity',visc_l); b%fs%visc_l=visc_l
+         call param_read('Liquid dynamic viscosity',visc_s)
          call param_read('Gas dynamic viscosity'   ,visc_g); b%fs%visc_g=visc_g
          ! Assign constant density to each phase
          call param_read('Liquid density',b%fs%rho_l)
@@ -292,6 +297,18 @@ contains
 			! Setup the solver
 			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
+
+      ! Set inital viscosity of liquid phase 
+		solvent_viscosity: block
+         ! Carreau model parameters	
+         call param_read('Power law constant',n)
+         call param_read('Shear rate parameter',alpha)
+         !> Carreau model
+         ! No infintie shear rate viscosity
+         visc_inf=0.0_WP
+         ! Zero shear rate viscosity
+         visc_0=visc_s; b%fs%visc_l=visc_0
+    end block solvent_viscosity 
       
 
       ! Initialize our velocity field 
@@ -364,6 +381,8 @@ contains
          call b%ens_out%add_scalar('Pressure',b%fs%P)
          call b%ens_out%add_scalar('curvature',b%vf%curv)
          call b%ens_out%add_surface('vofplic',b%smesh)
+         call b%ens_out%add_scalar('SRmag',b%SRmag)
+         call b%ens_out%add_scalar('visc_l',b%fs%visc_l)
          ! Output to ensight
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
@@ -449,30 +468,21 @@ contains
          end do
       end block reapply_dirichlet
 
-      ! Calculate SR
-      ! call fs%get_strainrate(Ui=Ui,Vi=Vi,Wi=Wi,SR=SR)
-
-      ! ! Model shear thinning fluid
-      ! nonewt: block
-      !    integer :: i,j,k
-      !    real(WP), parameter :: C=1.137e-3_WP
-      !    real(WP), parameter :: n=0.3_WP
-      !    ! Update viscosity
-      !    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-      !       do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-      !          do i=fs%cfg%imino_,fs%cfg%imaxo_
-      !             ! Power law model 
-      !             SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-      !             SRmag(i,j,k)=max(SRmag(i,j,k),1000.0_WP**(1.0_WP/(n-1.0_WP)))
-      !             fs%visc_l(i,j,k)=C*SRmag(i,j,k)**(n-1.0_WP)
-      !             ! Carreau Model
-      !             ! SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-      !             ! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(lambda*SRmag(i,j,k))**2.00_WP)**((n-1.00_WP)/2.00_WP)
-      !          end do
-      !       end do
-      !    end do
-      !    ! call fs%cfg%sync(fs%visc_l)
-      ! end block nonewt
+      ! Model shear thinning viscosity
+		update_viscosity: block
+         integer :: i,j,k
+         do k=b%fs%cfg%kmino_,b%fs%cfg%kmaxo_
+           do j=b%fs%cfg%jmino_,b%fs%cfg%jmaxo_
+             do i=b%fs%cfg%imino_,b%fs%cfg%imaxo_
+               ! Strain rate magnitude
+               b%SRmag(i,j,k)=sqrt(2.00_WP*b%SR(1,i,j,k)**2+b%SR(2,i,j,k)**2+b%SR(3,i,j,k)**2+2.0_WP*(b%SR(4,i,j,k)**2+b%SR(5,i,j,k)**2+b%SR(6,i,j,k)**2))
+               ! Carreau Model
+               b%fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*b%SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+             end do
+           end do
+         end do
+         call b%fs%cfg%sync(b%fs%visc_l)
+      end block update_viscosity
          
       ! Remember old VOF
       b%vf%VFold=b%vf%VF
