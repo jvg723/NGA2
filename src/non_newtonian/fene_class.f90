@@ -115,6 +115,15 @@ contains
             fR(:,:,:,5)=f_C*this%SC(:,:,:,5)-0.00_WP !> zy/yz tensor component
             fR(:,:,:,6)=f_C*this%SC(:,:,:,6)-1.00_WP !> zz tensor component
          case (FENECR)
+            ! Spring force law
+            f_C=Lmax**2/(Lmax**2-this%trC)          
+            ! Build relaxation terms for FENE-P (f(r)*(C-I))
+            fR(:,:,:,1)=f_C*(this%SC(:,:,:,1)-1.00_WP) !> xx tensor component
+            fR(:,:,:,2)=f_C*(this%SC(:,:,:,2)-0.00_WP) !> yx/xy tensor component
+            fR(:,:,:,3)=f_C*(this%SC(:,:,:,3)-0.00_WP) !> zx/xz tensor component
+            fR(:,:,:,4)=f_C*(this%SC(:,:,:,4)-1.00_WP) !> yy tensor component
+            fR(:,:,:,5)=f_C*(this%SC(:,:,:,5)-0.00_WP) !> zy/yz tensor component
+            fR(:,:,:,6)=f_C*(this%SC(:,:,:,6)-1.00_WP) !> zz tensor component
          case default
             call die('[FENE relaxation function] Unknown FENE model selected')
       end select
@@ -127,12 +136,12 @@ contains
 
    !> Calculate the viscoelastic tensor divergence
    subroutine get_divT(this,fs)
-      use incomp_class, only: incomp
-      ! use tpns_class, only: tpns
+      ! use incomp_class, only: incomp
+      use tpns_class, only: tpns
       implicit none
       class(fene), intent(inout) :: this
-      class(incomp), intent(in)  :: fs
-      ! class(tpns), intent(in)  :: fs
+      ! class(incomp), intent(in)  :: fs
+      class(tpns), intent(in)  :: fs
       integer :: i,j,k
       real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
 
