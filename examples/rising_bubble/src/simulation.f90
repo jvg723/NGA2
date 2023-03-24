@@ -61,7 +61,7 @@ module simulation
 	real(WP) :: stress_diff
 
 	!> FENE-P model parameters
-	real(WP) :: Lmax,lambda,Beta
+	real(WP) :: Lmax,lambda
 
 contains
 
@@ -197,7 +197,7 @@ contains
 			vf=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF')
 			! Initialize to a bubble
 			call param_read('Diameter',diam)
-			center=[0.0_WP,0.004_WP,0.0_WP]
+			center=[0.0_WP,0.015_WP,0.0_WP]
 			radius=diam/2.0_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
@@ -298,13 +298,13 @@ contains
 			! visc_0=visc_s; fs%visc_l=visc_0
 			!> Hyribd model
 			! Zero shear rate viscosity
-			call param_read('Zero shear rate viscosity',visc_0)
-			! Inital Polymer viscosity
-			visc_p0=visc_0-visc_s
-			! Initial polymer viscosity at rest
-			visc_p=visc_p0
-			! Initial liquid phase viscosity
-			fs%visc_l=visc_s+visc_p0
+			! call param_read('Zero shear rate viscosity',visc_0)
+			! ! Inital Polymer viscosity
+			! visc_p0=visc_0-visc_s
+			! ! Initial polymer viscosity at rest
+			! visc_p=visc_p0
+			! ! Initial liquid phase viscosity
+			! fs%visc_l=visc_s+visc_p0
 	 	end block solvent_viscosity 
 
 
@@ -444,24 +444,24 @@ contains
 			! Calculate SR
 			call fs%get_strainrate(SR=SR)
 
-			! Model shear thinning viscosity
-			update_viscosity: block
-			   integer :: i,j,k
-			   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-				  do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-					 do i=fs%cfg%imino_,fs%cfg%imaxo_
-						! Strain rate magnitude
-						SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-						! ! Carreau Model
-						! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
-						! Hybird model
-						visc_p(i,j,k)=visc_p0*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
-						fs%visc_l(i,j,k)=visc_s+visc_p(i,j,k)
-					 end do
-				  end do
-			   end do
-			   call fs%cfg%sync(fs%visc_l)
-			end block update_viscosity
+			! ! Model shear thinning viscosity
+			! update_viscosity: block
+			!    integer :: i,j,k
+			!    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+			! 	  do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+			! 		 do i=fs%cfg%imino_,fs%cfg%imaxo_
+			! 			! Strain rate magnitude
+			! 			SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+			! 			! ! Carreau Model
+			! 			! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+			! 			! Hybird model
+			! 			visc_p(i,j,k)=visc_p0*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+			! 			fs%visc_l(i,j,k)=visc_s+visc_p(i,j,k)
+			! 		 end do
+			! 	  end do
+			!    end do
+			!    call fs%cfg%sync(fs%visc_l)
+			! end block update_viscosity
 			
 			! Remember old scalars
 			fm%SCold=fm%SC
@@ -497,32 +497,32 @@ contains
 				! Form velocity gradient
 				call fs%get_gradu(gradu)
 
-				! ============= SCALAR SOLVER =======================  
-				! Explicit calculation of resSC from advection equation equation
-				call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+				! ! ============= SCALAR SOLVER =======================  
+				! ! Explicit calculation of resSC from advection equation equation
+				! call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
 
-				! Assemble explicit residual
-				resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+				! ! Assemble explicit residual
+				! resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
 				
-				! Add FENE source terms
-				fene: block
-					! Calculate CgradU terms
-					call fm%get_CgradU(gradu,CgradU)    
-					! Calculate the relaxation function
-					call fm%get_relaxationFunction(fR,Lmax)     
-					! Add source terms to calculated residual
-					resSC=resSC+(CgradU-(fR/lambda))*time%dt
-			 	end block fene
+				! ! Add FENE source terms
+				! fene: block
+				! 	! Calculate CgradU terms
+				! 	call fm%get_CgradU(gradu,CgradU)    
+				! 	! Calculate the relaxation function
+				! 	call fm%get_relaxationFunction(fR,Lmax)     
+				! 	! Add source terms to calculated residual
+				! 	resSC=resSC+(CgradU-(fR/lambda))*time%dt
+			 	! end block fene
 	
-				! Form implicit residual
-				call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
+				! ! Form implicit residual
+				! call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 	
-				! Apply this residual
-				fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
+				! ! Apply this residual
+				! fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
 	
-				! Apply other boundary conditions on the resulting field
-				call fm%apply_bcond(time%t,time%dt)
-				! ===================================================
+				! ! Apply other boundary conditions on the resulting field
+				! call fm%apply_bcond(time%t,time%dt)
+				! ! ===================================================
 				
 				! ============= VELOCITY SOLVER ======================
 				! Preliminary mass and momentum transport step at the interface
