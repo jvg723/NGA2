@@ -33,6 +33,7 @@ module block2_class
       type(ensight)          :: ens_out         !< Ensight output
       type(event)            :: ens_evt         !< Ensight event
       type(monitor)          :: mfile,cflfile   !< Monitor files
+      type(event)            :: ppevt           !< Event for post-processing
       !> Private work arrays
       real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
@@ -48,7 +49,7 @@ module block2_class
    end type block2
 
    !> Eccentricity threshold
-   real(WP) :: max_eccentricity=5.0e-1_WP
+   real(WP) :: max_eccentricity=2.0_WP
 
    !> Fluid viscosity (solvent,polymer inital,liquid total,gas)
 	real(WP) :: visc_s,visc_g
@@ -58,6 +59,12 @@ module block2_class
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
+
+   !> Structure post processing 
+   ! real(WP) :: tbin        !< binning time frequency for liquid structures
+   real(WP) :: x_over_xL   !< Parameter to set location of collection along x-axis
+   real(WP) :: volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3,eccent
+   real(WP), dimension(:,:), allocatable :: mother_dropsize,satellite_dropsize,wave_number !< Arrays for K&M 2020 breakup model
 
 contains
    
@@ -426,16 +433,60 @@ contains
          call b%cflfile%write()
       end block create_monitor
       
-      ! ! Create a specialized post-processing file
-      ! create_postproc: block
-      !    ! Create event for data postprocessing
-      !    ppevt=event(time=time,name='Postproc output')
-      !    call param_read('Postproc output period',ppevt%tper)
-      !    ! Create directory to write to
-      !    if (cfg%amRoot) call execute_command_line('mkdir -p structure_stats')
-      !    ! Perform the output
-      !    ! if (ppevt%occurs()) call postproc_vel()
-      ! end block create_postproc
+      ! Read in the curves for predicting unstable wave number and mother/satalie drop size ratio
+      read_curves: block
+         use mpi_f08,  only: MPI_BCAST
+         use parallel, only: comm,amRoot,MPI_REAL_WP 
+         integer :: i,j,iunit,ierr
+         
+         ! Allocate arrays
+         allocate(mother_dropsize   (2,190)); mother_dropsize   =0.0_WP
+         allocate(satellite_dropsize(2,201)); satellite_dropsize=0.0_WP
+         allocate(wave_number       (2,151)); wave_number       =0.0_WP
+         
+         ! Only the global root process reads the mother_dropsize
+         if (b%cfg%amRoot) then
+            open(newunit=iunit,file='./curves/mother_drop_size.csv',form='formatted',status='old',access='stream',iostat=ierr)  
+            read(iunit,'(es12.5)')((mother_dropsize(i,j),j=1,190),i=1,190)   
+            close(iunit)
+         end if
+         ! Then the root broadcasts
+         call MPI_BCAST(mother_dropsize,190,MPI_REAL_WP,0,comm,ierr)
+
+         ! Only the global root process reads the satellite_dropsize
+         if (b%cfg%amRoot) then
+            open(newunit=iunit,file='./curves/satellite_dropsize.csv',form='formatted',status='old',access='stream',iostat=ierr)  
+            read(iunit,'(es12.5)')((satellite_dropsize(i,j),j=1,201),i=1,201)   
+            close(iunit)
+         end if
+         ! Then the root broadcasts
+         call MPI_BCAST(satellite_dropsize,201,MPI_REAL_WP,0,comm,ierr)
+
+         ! Only the global root process reads the wave_number
+         if (b%cfg%amRoot) then
+            open(newunit=iunit,file='./curves/wave_number.csv',form='formatted',status='old',access='stream',iostat=ierr)  
+            read(iunit,'(es12.5)')((satellite_dropsize(i,j),j=1,151),i=1,151)   
+            close(iunit)
+         end if
+         ! Then the root broadcasts
+         call MPI_BCAST(satellite_dropsize,151,MPI_REAL_WP,0,comm,ierr)
+
+
+
+      end block read_curves
+
+      ! Create a specialized post-processing file
+      structure_postproc: block
+         ! Plane to set binning domain
+         call param_read('Analysis plane',x_over_xL)
+         ! Create directory to write stats to
+         if (b%cfg%amRoot) call execute_command_line('mkdir -p stats')
+         ! Create event for data postprocessing
+         b%ppevt=event(time=b%time,name='Postproc output')
+         call param_read('Postproc output period',b%ppevt%tper)
+         ! Perform the output
+         if (b%ppevt%occurs()) call structure_identification(b)
+      end block structure_postproc
       
    end subroutine init
    
@@ -610,80 +661,142 @@ contains
       call b%mfile%write()
       call b%cflfile%write()
 
+      ! Specialized post-processing
+      if (b%ppevt%occurs()) call structure_identification(b)
+
       
    end subroutine step
 
-   ! !> Collect information about liquid structures
-   ! subroutine structure_identification(b)
-   !    implicit none
-   !    class(block2), intent(inout) :: b
-   !    real(WP) :: x_over_xL=0.9_WP !< Parameter to set location of collection along x-axis
-
-   !    ! Perform detailed CCL pass to identify structures
-   !    b%cc%max_interface_planes=2
-   !    call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
-   !    call b%cc%get_min_thickness()
-   !    call b%cc%sort_by_thickness()
+   !> Collect information about liquid structures
+   subroutine structure_identification(b)
+      implicit none
+      class(block2), intent(inout) :: b
       
-   !    ! Loop through identified detached structs and sort by ligaments and particles
-   !    sort_structures: block
-   !       use mathtools, only: pi
-   !       integer :: m,n,i,j,k
-   !       real(WP) :: lmin,lmax,eccent,diam
-         
-   !       ! Loops over film segments contained locally
-   !       do m=1,b%cc%n_meta_struct
+      ! Perform detailed CCL pass to identify structures
+      b%cc%max_interface_planes=2
+      call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+      call b%cc%get_min_thickness()
+      call b%cc%sort_by_thickness()
+      
+      ! Loop through identified detached structs and sort by ligaments and particles
+      sort_structures: block
+         use mathtools, only: pi
+         integer :: m,n,i,j,k
+         real(WP) :: lmin,lmax,eccent,diam
+         real(WP) :: delta_x
+         real(WP) :: Dc,Lcyl,R0,K_param,J_param
+
+         ! Loops over film segments contained locally
+         do m=1,b%cc%n_meta_struct
             
-   !          ! Check if structure x_cg .lt. x plane location
-   !          if (b%cc%meta_structures_list(m)%x.lt.x_over_xL*b%cfg%xL) cycle
+            ! Check if structure x_cg .ge. x plane location
+            if (b%cc%meta_structures_list(m)%x.ge.x_over_xL*b%cfg%xL) then
+               
+               ! Approximate structures previous xcg at previous binning
+               delta_x=b%cc%meta_structures_list(m)%u*b%ppevt%tper
+               
+               ! Skip structures that were counted in previous binning
+               if (b%cc%meta_structures_list(m)%x-delta_x.ge.x_over_xL*b%cfg%xL) cycle
+
+               ! Diameter of a sphere with the corresponding volume
+               Dc=(6.0_WP*b%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
+
+               ! Length of the structure (approximated as a cylinder, should K&M 2020 definition be used?)
+               Lcyl=b%cc%meta_structures_list(m)%lengths(1)
+
+               ! Structures eccentricity
+               eccent=Lcyl/Dc
+               
+               ! Structure volume
+               volume=b%cc%meta_structures_list(m)%vol
+               
+               ! Structure x/y/z center of gravity
+               x_cg=b%cc%meta_structures_list(m)%x  
+               y_cg=b%cc%meta_structures_list(m)%y  
+               z_cg=b%cc%meta_structures_list(m)%z
+               
+               ! Structure u/v/w velocity  
+               U_vel=b%cc%meta_structures_list(m)%u  
+               V_vel=b%cc%meta_structures_list(m)%v  
+               W_vel=b%cc%meta_structures_list(m)%w
+               
+               ! Structure characteristic lengths
+               length_1=b%cc%meta_structures_list(m)%lengths(1)
+               length_2=b%cc%meta_structures_list(m)%lengths(2)
+               length_3=b%cc%meta_structures_list(m)%lengths(3)
+               
+               ! Call writting subroutine to output structure stats
+               call stats_writer(b) 
             
-   !          ! Test sphericity of structure to sort into ligaments and particles
-   !          lmin=b%cc%meta_structures_list(m)%lengths(3)
-   !          if (lmin.eq.0.0_WP) lmin=b%cc%meta_structures_list(m)%lengths(2) ! Handle 2D case
-   !          lmax=b%cc%meta_structures_list(m)%lengths(1)
-   !          eccent=sqrt(1.0_WP-lmin**2/lmax**2)
-   !          if (eccent.gt.max_eccentricity) then !> Structure is a ligament
+                  ! Test sphericity of structure to sort into ligaments and particles
+               if (eccent.lt.max_eccentricity) then !> Structure is a particle
+                  
+                  ! Calculate particle diameter
+                  diam=(6.0_WP*b%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
 
-   !          else                                 !> Structure is a particle
-   !             ! Calculate particle diameter
-   !             diam=(6.0_WP*b%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
+                  ! Store particle diameter and volume in appended arrray for PDF
+                  
+               
+               else                                 !> Structure is a ligament
 
-   !          end if 
+                  ! Initial radius for a circular column (fVl=pi*R0^2*LC)
+                  R0=sqrt(b%cc%meta_structures_list(m)%vol/(pi*Lcyl))
+                  
+                  ! J parameter to determine most unstable wave number
+                  J_param=(fs%sigma*R0)/(fs%rho_l*(visc_s/fs%rho_l)**2) !< should visc_s be position dependent?
+                  
+                  ! Interpolation to get ligament most unstable wave number,K
+                  
+                  ! Number of particles formed for each ligament
+                  !> Number of mother drops
+                  !> Number of satalie drops
 
+                  ! Particle diameters
+                  !> Diameter of mother drops
+                  !> Diameter of satatlie drops
 
-   !          ! Structure id
-   !          particle_list(m)%id=b%cc%meta_structures_list(m)%id 
-   !          ! Structure volume
-   !          particle_list(m)%vol=b%cc%meta_structures_list(m)%vol
-   !          ! Structure x/y/z center of gravity
-   !          particle_list(m)%x=b%cc%meta_structures_list(m)%x  
-   !          particle_list(m)%y=b%cc%meta_structures_list(m)%y  
-   !          particle_list(m)%z=b%cc%meta_structures_list(m)%z
-   !          ! Structure u/v/w velocity  
-   !          particle_list(m)%u=b%cc%meta_structures_list(m)%u  
-   !          particle_list(m)%v=b%cc%meta_structures_list(m)%v  
-   !          particle_list(m)%w=b%cc%meta_structures_list(m)%w
+                  ! Store particle(s) diameter and volume in appended arrray for PDF
 
-   !          ! Structure characteristic lengths
-   !          particle_list(m)%lengths(1)=b%cc%meta_structures_list(m)%lengths(1)
-   !          particle_list(m)%lengths(2)=b%cc%meta_structures_list(m)%lengths(2)
-   !          particle_list(m)%lengths(3)=b%cc%meta_structures_list(m)%lengths(3) 
-   !          ! time step, time step number
+               end if
+            
 
+            end if
 
-                
-   !       end do
+            ! Allocate array(s) for particle diameters (mother and small)
+            ! number of particles
+            
+
+         end do
          
-   !    end block sort_structures
+      end block sort_structures
       
-   !    ! Clean up CCL
-   !    call b%cc%deallocate_lists()
+      ! Clean up CCL
+      call b%cc%deallocate_lists()
 
-   !    ! Deallocate arrays for printing
-   !    deallocate(ligament_list,particle_list)
       
-   ! end subroutine structure_identification
-      
+   end subroutine structure_identification
+   
+   !> Specialized subroutine to print our stats of liquid structures
+   subroutine stats_writer(b)
+      use string,      only: str_medium
+      implicit none
+      class(block2), intent(inout) :: b
+      integer :: iunit,ierr
+      logical :: exist
+      ! Print stats from root processor
+      if (b%fs%cfg%amRoot) then
+         inquire(file='./stats/structure_stats',exist=exist)
+         if (exist) then
+            open(newunit=iunit,file='./stats/structure_stats',form='formatted',status='old',position='append',access='stream',iostat=ierr)
+         else
+            open(newunit=iunit,file='./stats/structure_stats',form='formatted',status='new',access='stream',iostat=ierr)
+            write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'time','volume','x_cg','y_cg','z_cg','U','V','W','length_1','length_2','length_3','eccentricity'
+         end if
+         ! Write Data
+         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5)') b%time%t,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3,eccent
+         close(iunit)
+      end if
+   end subroutine stats_writer
    
    !> Finalize b2 simulation
    subroutine final(b)

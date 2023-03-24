@@ -29,10 +29,10 @@ Liquid dynamic viscosity    : 2e-4
 Liquid density              : 1
 Gas dynamic viscosity       : 1e-5
 Gas density                 : 1e-3
-Surface tension coefficient : 1e-3
+Surface tension coefficient : 0.002
 
 # Shear thinning properties
-Power law constant        : 0.5
+Power law constant        : 1
 Shear rate parameter      : 1
 Zero shear rate viscosity : 1
 
@@ -41,7 +41,7 @@ Zero shear rate viscosity : 1
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
 Max time            : 30
-Transistion         : 50
+Transistion         : 1
 
 # Pressure solver
 Pressure tolerance : 1e-5
@@ -52,4 +52,9 @@ Implicit tolerance : 1e-5
 Implicit iteration : 100
 
 # Ensight output
-Ensight output period : 1e-1
+Ensight output period : 1e-2
+
+# Post processing
+Postproc output period : 1e-2
+! Binning time period : 1e-1 ! Time to collect information about liquid structures in analysis region
+Analysis plane      : 0.9  ! Location along x-axis to collect structure data

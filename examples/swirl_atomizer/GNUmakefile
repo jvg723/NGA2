@@ -25,7 +25,6 @@ INCLUDE_LOCATIONS += $(Ulocs)
 VPATH_LOCATIONS   += $(Ulocs)
 
 # Define external libraries - this can also be in .profile
-IRL_DIR=/home/fs01/od57/Repositories/IRL
 
 # NGA compilation definitions
 include $(NGA_HOME)/tools/GNUMake/Make.defs
