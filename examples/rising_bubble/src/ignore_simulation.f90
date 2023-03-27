@@ -178,12 +178,12 @@ contains
 		! Create a two-phase flow solver without bconds
 	   	create_and_initialize_flow_solver: block
 	   		use tpns_class, only: clipped_neumann,slip,dirichlet
-		   	use hypre_str_class, only: pcg_pfmg,gmres_pfmg
-			use hypre_uns_class, only: gmres_amg
+		   	use hypre_str_class, only: pcg_pfmg,pcg_smg
+			! use hypre_uns_class, only: gmres_amg
 			! Create flow solver
 			fs=tpns(cfg=cfg,name='Two-phase NS')
 			! Assign constant viscosity to each phase
-			call param_read('Solvent dynamic viscosity',visc_s); fs%visc_l=visc_s
+			call param_read('Solvent dynamic viscosity',visc_s) !; fs%visc_l=visc_s
 			call param_read('Gas dynamic viscosity',    visc_g); fs%visc_g=visc_g
 			! Assign constant density to each phase
 		   	call param_read('Liquid density',fs%rho_l)
@@ -192,11 +192,8 @@ contains
 			call param_read('Gravity',fs%gravity)
 			! Read in surface tension coefficient
 			call param_read('Surface tension coefficient',fs%sigma)
-			! ! Clipped neuman on the top and bottom
-			! call fs%add_bcond(name='bc_yp',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
-			! call fs%add_bcond(name='bc_ym',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
 			! Configure pressure solver
-			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
+			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_smg,nst=7)
 			ps%maxlevel=10
 			! ps=hypre_uns(cfg=cfg,name='Pressure',method=gmres_amg,nst=7)
 			call param_read('Pressure iteration',ps%maxit)
@@ -229,13 +226,13 @@ contains
 			! visc_0=visc_s; fs%visc_l=visc_0
 			!> Hyribd model
 			! Zero shear rate viscosity
-			! call param_read('Zero shear rate viscosity',visc_0)
-			! ! Inital Polymer viscosity
-			! visc_p0=visc_0-visc_s
-			! ! Initial polymer viscosity at rest
-			! visc_p=visc_p0
-			! ! Initial liquid phase viscosity
-			! fs%visc_l=visc_s+visc_p0
+			call param_read('Zero shear rate viscosity',visc_0)
+			! Inital Polymer viscosity
+			visc_p0=visc_0-visc_s
+			! Initial polymer viscosity at rest
+			visc_p=visc_p0
+			! Initial liquid phase viscosity
+			fs%visc_l=visc_s+visc_p0
 	 	end block solvent_viscosity 
 
 
@@ -375,24 +372,24 @@ contains
 			! Calculate SR
 			call fs%get_strainrate(SR=SR)
 
-			! ! Model shear thinning viscosity
-			! update_viscosity: block
-			!    integer :: i,j,k
-			!    do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-			! 	  do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-			! 		 do i=fs%cfg%imino_,fs%cfg%imaxo_
-			! 			! Strain rate magnitude
-			! 			SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-			! 			! ! Carreau Model
-			! 			! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
-			! 			! Hybird model
-			! 			visc_p(i,j,k)=visc_p0*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
-			! 			fs%visc_l(i,j,k)=visc_s+visc_p(i,j,k)
-			! 		 end do
-			! 	  end do
-			!    end do
-			!    call fs%cfg%sync(fs%visc_l)
-			! end block update_viscosity
+			! Model shear thinning viscosity
+			update_viscosity: block
+			   integer :: i,j,k
+			   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+				  do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+					 do i=fs%cfg%imino_,fs%cfg%imaxo_
+						! Strain rate magnitude
+						SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+						! ! Carreau Model
+						! fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						! Hybird model
+						visc_p(i,j,k)=visc_p0*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						fs%visc_l(i,j,k)=visc_s+visc_p(i,j,k)
+					 end do
+				  end do
+			   end do
+			   call fs%cfg%sync(fs%visc_l)
+			end block update_viscosity
 			
 			! Remember old scalars
 			fm%SCold=fm%SC
@@ -428,32 +425,32 @@ contains
 				! Form velocity gradient
 				call fs%get_gradu(gradu)
 
-				! ! ============= SCALAR SOLVER =======================  
-				! ! Explicit calculation of resSC from advection equation equation
-				! call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+				! ============= SCALAR SOLVER =======================  
+				! Explicit calculation of resSC from advection equation equation
+				call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
 
-				! ! Assemble explicit residual
-				! resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+				! Assemble explicit residual
+				resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
 				
-				! ! Add FENE source terms
-				! fene: block
-				! 	! Calculate CgradU terms
-				! 	call fm%get_CgradU(gradu,CgradU)    
-				! 	! Calculate the relaxation function
-				! 	call fm%get_relaxationFunction(fR,Lmax)     
-				! 	! Add source terms to calculated residual
-				! 	resSC=resSC+(CgradU-(fR/lambda))*time%dt
-			 	! end block fene
+				! Add FENE source terms
+				fene: block
+					! Calculate CgradU terms
+					call fm%get_CgradU(gradu,CgradU)    
+					! Calculate the relaxation function
+					call fm%get_relaxationFunction(fR,Lmax)     
+					! Add source terms to calculated residual
+					resSC=resSC+(CgradU-(fR/lambda))*time%dt
+			 	end block fene
 	
-				! ! Form implicit residual
-				! call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
+				! Form implicit residual
+				call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 	
-				! ! Apply this residual
-				! fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
+				! Apply this residual
+				fm%SC=2.0_WP*fm%SC-fm%SCold+resSC
 	
-				! ! Apply other boundary conditions on the resulting field
-				! call fm%apply_bcond(time%t,time%dt)
-				! ! ===================================================
+				! Apply other boundary conditions on the resulting field
+				call fm%apply_bcond(time%t,time%dt)
+				! ===================================================
 				
 				! ============= VELOCITY SOLVER ======================
 				! Preliminary mass and momentum transport step at the interface
@@ -470,41 +467,41 @@ contains
 				resV=-2.0_WP*fs%rho_V*fs%V+(fs%rho_Vold+fs%rho_V)*fs%Vold+time%dt*resV
 				resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
 
-				! ! Add in polymer stress
-				! polymer: block
-				! 	use vfs_class, only: VFlo
-				! 	integer :: i,j,k
-				! 	! Calculate the relaxation function
-				! 	call fm%get_relaxationFunction(fR,Lmax)
-				! 	! Build stress tensor
-				! 	do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-				! 		do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-				! 		    do i=fs%cfg%imino_,fs%cfg%imaxo_
-				! 				fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
-				! 				fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
-				! 				fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
-				! 				fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
-				! 				fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
-				! 				fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
-				! 		    end do
-				! 		end do
-				! 	 end do    
-				! 	! Get its divergence 
-				! 	call fm%get_divT(fs) 
-				! 	! Add divT to momentum equation for VF.ge.VFlo
-				! 	do k=fs%cfg%kmin_,fs%cfg%kmax_
-                !   		do j=fs%cfg%jmin_,fs%cfg%jmax_
-                !     		do i=fs%cfg%imin_,fs%cfg%imax_
-				! 				! Use volume fraction to apply divergence of polymer stress
-				! 				if (vf%VF(i,j,k).ge.VFlo) then
-				! 					if (fs%umask(i,j,k).eq.0) resU=resU+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
-				! 					if (fs%vmask(i,j,k).eq.0) resV=resV+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
-				! 					if (fs%wmask(i,j,k).eq.0) resW=resW+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
-				! 				end  if 
-				! 			end do
-				! 		end do
-				! 	end do
-			 	! end block polymer
+				! Add in polymer stress
+				polymer: block
+					use vfs_class, only: VFlo
+					integer :: i,j,k
+					! Calculate the relaxation function
+					call fm%get_relaxationFunction(fR,Lmax)
+					! Build stress tensor
+					do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+						do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+						    do i=fs%cfg%imino_,fs%cfg%imaxo_
+								fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
+								fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
+								fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
+								fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
+								fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
+								fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
+						    end do
+						end do
+					 end do    
+					! Get its divergence 
+					call fm%get_divT(fs) 
+					! Add divT to momentum equation for VF.ge.VFlo
+					do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  		do j=fs%cfg%jmin_,fs%cfg%jmax_
+                    		do i=fs%cfg%imin_,fs%cfg%imax_
+								! Use volume fraction to apply divergence of polymer stress
+								if (vf%VF(i,j,k).ge.VFlo) then
+									if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
+									if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
+									if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
+								end  if 
+							end do
+						end do
+					end do
+			 	end block polymer
 				
 				! Form implicit residuals
 			   	call fs%solve_implicit(time%dt,resU,resV,resW)
