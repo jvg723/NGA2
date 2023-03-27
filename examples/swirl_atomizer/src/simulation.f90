@@ -131,7 +131,8 @@ contains
             
             ! Advance block 2
             if (isInGrp2) call b2%step(U1on2,V1on2,W1on2)
-
+            ! Broadcast current B2 done case
+            ! Share time from B2 to B1
             ! Advance block 1 until we've caught up
             if (isInGrp1) then
                
