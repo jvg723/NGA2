@@ -3,13 +3,13 @@ module simulation
 	use precision,         only: WP
 	use geometry,          only: cfg
 	!use hypre_str_class,   only: hypre_str
-   use hypre_uns_class,   only: hypre_uns
-   use ddadi_class,       only: ddadi
+	use hypre_uns_class,   only: hypre_uns
+	use ddadi_class,       only: ddadi
 	use tpns_class,        only: tpns
 	use vfs_class,         only: vfs
 	use timetracker_class, only: timetracker
 	use ensight_class,     only: ensight
-   use surfmesh_class,    only: surfmesh
+   	use surfmesh_class,    only: surfmesh
 	use event_class,       only: event
 	use monitor_class,     only: monitor
 	implicit none
@@ -17,14 +17,14 @@ module simulation
 	
 	!> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
 	!type(hypre_str),   public :: ps
-   type(hypre_uns),   public :: ps
+   	type(hypre_uns),   public :: ps
 	type(ddadi),       public :: vs
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
-   type(surfmesh) :: smesh
+   	type(surfmesh) :: smesh
 	type(ensight)  :: ens_out
 	type(event)    :: ens_evt
 	
@@ -34,12 +34,24 @@ module simulation
 	public :: simulation_init,simulation_run,simulation_final
 	
 	!> Private work arrays
-	real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-	real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
+	real(WP), dimension(:,:,:), 	allocatable :: resU,resV,resW
+	real(WP), dimension(:,:,:), 	allocatable :: Ui,Vi,Wi
+	real(WP), dimension(:,:,:,:),   allocatable :: resSC
+    real(WP), dimension(:,:,:,:,:), allocatable :: gradu
+	real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
+	real(WP), dimension(:,:,:),   	allocatable :: SRmag
+	real(WP), dimension(:,:,:),   	allocatable :: visc_p,visc_norm
+   	real(WP), dimension(:,:,:,:), 	allocatable :: SR
 	
 	!> Problem definition
 	real(WP), dimension(3) :: center
 	real(WP) :: radius
+
+	!> Fluid viscosity (solvent,polymer inital,liquid total,gas)
+	real(WP) :: visc_s,visc_p0,visc_l,visc_g
+
+	!> Shear thinning parameters
+	real(WP) :: n,alpha,visc_0,visc_inf
 	
 contains
 
@@ -51,7 +63,7 @@ contains
 		real(WP), intent(in) :: t
 		real(WP) :: G
 		! Create the bubble
-	   G=-radius+sqrt(sum((xyz-center)**2))
+	   	G=-radius+sqrt(sum((xyz-center)**2))
 	end function levelset_rising_bubble
 	
 	
@@ -62,19 +74,30 @@ contains
 		
 		
 		! Allocate work arrays
-	   allocate_work_arrays: block
-		   allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+	   	allocate_work_arrays: block
+			allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(resV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(resW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(gradu(3,3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+        	allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			! Scalar solver
+			allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
+			allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
+            allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
+			! Rate depdent polymer viscosity
+			allocate(visc_p(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			! Array for normalized viscosity
+			allocate(visc_norm(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 		end block allocate_work_arrays
 		
 		
 		! Initialize time tracker with 2 subiterations
-	   initialize_timetracker: block
-		   time=timetracker(amRoot=cfg%amRoot)
+	   	initialize_timetracker: block
+		   	time=timetracker(amRoot=cfg%amRoot)
 			call param_read('Max timestep size',time%dtmax)
 			call param_read('Max cfl number',time%cflmax)
 			call param_read('Max time',time%tmax)
@@ -84,24 +107,24 @@ contains
 		
 		
 		! Initialize our VOF solver and field
-	   create_and_initialize_vof: block
-		   use mms_geom, only: cube_refine_vol
-		   use vfs_class, only: elvira,VFhi,VFlo
+	   	create_and_initialize_vof: block
+			use mms_geom, only: cube_refine_vol
+			use vfs_class, only: elvira,VFhi,VFlo
 			integer :: i,j,k,n,si,sj,sk
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
 			! Create a VOF solver
-		   vf=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF')
-		   ! Initialize a bubble
-		   center=[0.0_WP,0.01_WP,0.0_WP]
-		   radius=0.005_WP
+			vf=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF')
+			! Initialize a bubble
+			center=[0.0_WP,0.01_WP,0.0_WP]
+			radius=0.005_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
 					do i=vf%cfg%imino_,vf%cfg%imaxo_
-						! Set cube vertices
-				      n=0
+					! Set cube vertices
+				    	n=0
 						do sk=0,1
 							do sj=0,1
 								do si=0,1
@@ -110,7 +133,7 @@ contains
 							end do
 						end do
 						! Call adaptive refinement code to get volume and barycenters recursively
-				      vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
+				     	 vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
 						call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_rising_bubble,0.0_WP,amr_ref_lvl)
 						vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
 						if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
@@ -124,67 +147,91 @@ contains
 				end do
 			end do
 			! Update the band
-		   call vf%update_band()
+		   	call vf%update_band()
 			! Perform interface reconstruction from VOF field
-		   call vf%build_interface()
+		   	call vf%build_interface()
 			! Set interface planes at the boundaries
-         call vf%set_full_bcond()
+         	call vf%set_full_bcond()
 			! Create discontinuous polygon mesh from IRL interface
-		   call vf%polygonalize_interface()
+		   	call vf%polygonalize_interface()
 			! Calculate distance from polygons
-		   call vf%distance_from_polygon()
+		   	call vf%distance_from_polygon()
 			! Calculate subcell phasic volumes
-		   call vf%subcell_vol()
+		   	call vf%subcell_vol()
 			! Calculate curvature
-		   call vf%get_curvature()
+		   	call vf%get_curvature()
 			! Reset moments to guarantee compatibility with interface reconstruction
-		   call vf%reset_volume_moments()
+		   	call vf%reset_volume_moments()
 		end block create_and_initialize_vof
 		
 		
 		! Create a two-phase flow solver without bconds
-	   create_and_initialize_flow_solver: block
-		   !use hypre_str_class, only: pcg_pfmg,pcg_smg
-         use hypre_uns_class, only: gmres_amg,pcg_amg
-         ! Create flow solver
-		   fs=tpns(cfg=cfg,name='Two-phase NS')
-		   ! Assign constant viscosity to each phase
-		   call param_read('Liquid dynamic viscosity',fs%visc_l)
-			call param_read('Gas dynamic viscosity',fs%visc_g)
+	   	create_and_initialize_flow_solver: block
+		   	!use hypre_str_class, only: pcg_pfmg,pcg_smg
+        	use hypre_uns_class, only: gmres_amg,pcg_amg
+         	! Create flow solver
+			fs=tpns(cfg=cfg,name='Two-phase NS')
+			! Assign constant viscosity to each phase
+			call param_read('Solvent dynamic viscosity',visc_s) !; fs%visc_l=visc_l
+			call param_read('Gas dynamic viscosity',visc_g); fs%visc_g=visc_g
 			! Assign constant density to each phase
-		   call param_read('Liquid density',fs%rho_l)
+		   	call param_read('Liquid density',fs%rho_l)
 			call param_read('Gas density',fs%rho_g)
 			! Read in surface tension coefficient
-		   call param_read('Surface tension coefficient',fs%sigma)
-		   ! Assign acceleration of gravity
-		   call param_read('Gravity',fs%gravity)
+			call param_read('Surface tension coefficient',fs%sigma)
+			! Assign acceleration of gravity
+		   	call param_read('Gravity',fs%gravity)
 			! Configure pressure solver
 			!ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_smg,nst=7)
-         !ps%maxlevel=16
-         ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
-         call param_read('Pressure iteration',ps%maxit)
-         call param_read('Pressure tolerance',ps%rcvg)
-         ! Configure implicit velocity solver
-         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
-         ! Setup the solver
-		   call fs%setup(pressure_solver=ps,implicit_solver=vs)
-		   ! Zero initial field
-		   fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-		   ! Calculate cell-centered velocities and divergence
-		   call fs%interp_vel(Ui,Vi,Wi)
-		   call fs%get_div()
-	   end block create_and_initialize_flow_solver
+			!ps%maxlevel=16
+			ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+			call param_read('Pressure iteration',ps%maxit)
+			call param_read('Pressure tolerance',ps%rcvg)
+			! Configure implicit velocity solver
+			vs=ddadi(cfg=cfg,name='Velocity',nst=7)
+			! Setup the solver
+			call fs%setup(pressure_solver=ps,implicit_solver=vs)
+			! Zero initial field
+			fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
+			! Calculate cell-centered velocities and divergence
+			call fs%interp_vel(Ui,Vi,Wi)
+			call fs%get_div()
+	   	end block create_and_initialize_flow_solver
+
+	   	! Set inital viscosity of liquid phase
+		solvent_viscosity: block
+			! Carreau model parameters	
+			call param_read('Power law constant',n)
+			call param_read('Shear rate parameter',alpha)
+			!> Carreau model
+			! No polymer viscosity
+			visc_p=0.0_WP
+			! No infintie shear rate viscosity
+			visc_inf=0.0_WP
+			! Zero shear rate viscosity
+			visc_0=visc_s; fs%visc_l=visc_0
+			visc_norm=fs%visc_l/visc_0
+			!> Hyribd model
+			! ! Zero shear rate viscosity
+			! call param_read('Zero shear rate viscosity',visc_0)
+			! ! Inital Polymer viscosity
+			! visc_p0=visc_0-visc_s
+			! ! Initial polymer viscosity at rest
+			! visc_p=visc_p0
+			! ! Initial liquid phase viscosity
+			! fs%visc_l=visc_s+visc_p0
+	 	end block solvent_viscosity 
 	   
 
 	   ! Create surfmesh object for interface polygon output
-      create_smesh: block
-         smesh=surfmesh(nvar=0,name='plic')
-         call vf%update_surfmesh(smesh)
-      end block create_smesh
+      	create_smesh: block
+			smesh=surfmesh(nvar=0,name='plic')
+			call vf%update_surfmesh(smesh)
+      	end block create_smesh
 
 
-	   ! Add Ensight output
-	   create_ensight: block
+	   	! Add Ensight output
+	   	create_ensight: block
 		   ! Create Ensight output from cfg
 		   ens_out=ensight(cfg=cfg,name='RisingBubble')
 			! Create event for Ensight output
@@ -195,14 +242,16 @@ contains
 		   call ens_out%add_scalar('VOF',vf%VF)
 		   call ens_out%add_scalar('pressure',fs%P)
 		   call ens_out%add_scalar('curvature',vf%curv)
-         call ens_out%add_surface('plic',smesh)
+           call ens_out%add_surface('plic',smesh)
+		   call ens_out%add_scalar('SRmag',SRmag)
+           call ens_out%add_scalar('normvisc_l',visc_norm)
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
-	   end block create_ensight
+	   	end block create_ensight
 	   
 	   
-	   ! Create a monitor file
-	   create_monitor: block
+	   	! Create a monitor file
+	   	create_monitor: block
 		   ! Prepare some info about fields
 		   call fs%get_cfl(time%dt,time%cfl)
 		   call fs%get_max()
@@ -236,7 +285,7 @@ contains
 		   call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
 		   call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
 		   call cflfile%write()
-	   end block create_monitor
+	   	end block create_monitor
 	   
 	   
 	end subroutine simulation_init
@@ -247,68 +296,88 @@ contains
 		implicit none
 		
 		! Perform time integration
-	   do while (.not.time%done())
+	   	do while (.not.time%done())
 			
 			! Increment time
-		   call fs%get_cfl(time%dt,time%cfl)
-		   call time%adjust_dt()
+		   	call fs%get_cfl(time%dt,time%cfl)
+		   	call time%adjust_dt()
 			call time%increment()
+
+			! Calculate SR
+			call fs%get_strainrate(SR=SR)
+
+			! Model shear thinning viscosity
+			update_viscosity: block
+			   integer :: i,j,k
+			   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+				  do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+					 do i=fs%cfg%imino_,fs%cfg%imaxo_
+						! Strain rate magnitude
+						SRmag(i,j,k)=sqrt(2.00_WP*SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+						! Carreau Model
+						fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						visc_norm(i,j,k)=fs%visc_l(i,j,k)/visc_0
+						! ! Hybird model
+						! visc_p(i,j,k)=visc_p0*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+						! fs%visc_l(i,j,k)=visc_s+visc_p(i,j,k)
+					 end do
+				  end do
+			   end do
+			   call fs%cfg%sync(fs%visc_l)
+			end block update_viscosity
 			
 			! Remember old VOF
-		   vf%VFold=vf%VF
+		   	vf%VFold=vf%VF
 			
 			! Remember old velocity
-		   fs%Uold=fs%U
+		   	fs%Uold=fs%U
 			fs%Vold=fs%V
 			fs%Wold=fs%W
-			
-			! Apply time-varying Dirichlet conditions
-		   ! This is where time-dpt Dirichlet would be enforced
 		   
-		   ! Prepare old staggered density (at n)
-		   call fs%get_olddensity(vf=vf)
+		   	! Prepare old staggered density (at n)
+		   	call fs%get_olddensity(vf=vf)
 			
 			! VOF solver step
-		   call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+		   	call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 			
 			! Prepare new staggered viscosity (at n+1)
-		   call fs%get_viscosity(vf=vf)
+		   	call fs%get_viscosity(vf=vf)
 			
-		   ! Perform sub-iterations
-		   do while (time%it.le.time%itmax)
+		   	! Perform sub-iterations
+		   	do while (time%it.le.time%itmax)
 				
 				! Build mid-time velocity
-			   fs%U=0.5_WP*(fs%U+fs%Uold)
+			   	fs%U=0.5_WP*(fs%U+fs%Uold)
 				fs%V=0.5_WP*(fs%V+fs%Vold)
 				fs%W=0.5_WP*(fs%W+fs%Wold)
 				
 				! Preliminary mass and momentum transport step at the interface
-			   call fs%prepare_advection_upwind(dt=time%dt)
+			   	call fs%prepare_advection_upwind(dt=time%dt)
 				
 				! Explicit calculation of drho*u/dt from NS
-			   call fs%get_dmomdt(resU,resV,resW)
+			   	call fs%get_dmomdt(resU,resV,resW)
 				
 				! Add momentum source terms
-			   call fs%addsrc_gravity(resU,resV,resW)
+			   	call fs%addsrc_gravity(resU,resV,resW)
 				
 				! Assemble explicit residual
-			   resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
+			   	resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
 				resV=-2.0_WP*fs%rho_V*fs%V+(fs%rho_Vold+fs%rho_V)*fs%Vold+time%dt*resV
 				resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
 				
 				! Form implicit residuals
-			   call fs%solve_implicit(time%dt,resU,resV,resW)
+			   	call fs%solve_implicit(time%dt,resU,resV,resW)
 				
 				! Apply these residuals
-			   fs%U=2.0_WP*fs%U-fs%Uold+resU
+			   	fs%U=2.0_WP*fs%U-fs%Uold+resU
 				fs%V=2.0_WP*fs%V-fs%Vold+resV
 				fs%W=2.0_WP*fs%W-fs%Wold+resW
 				
 				! Apply other boundary conditions
-			   call fs%apply_bcond(time%t,time%dt)
+			   	call fs%apply_bcond(time%t,time%dt)
 				
 				! Solve Poisson equation
-			   call fs%update_laplacian()
+			   	call fs%update_laplacian()
 				call fs%correct_mfr()
 				call fs%get_div()
 				call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
@@ -318,29 +387,29 @@ contains
 				call fs%shift_p(fs%psolv%sol)
 				
 				! Correct velocity
-			   call fs%get_pgrad(fs%psolv%sol,resU,resV,resW)
+			   	call fs%get_pgrad(fs%psolv%sol,resU,resV,resW)
 				fs%P=fs%P+fs%psolv%sol
 				fs%U=fs%U-time%dt*resU/fs%rho_U
 				fs%V=fs%V-time%dt*resV/fs%rho_V
 				fs%W=fs%W-time%dt*resW/fs%rho_W
 				
 				! Increment sub-iteration counter
-			   time%it=time%it+1
+			   	time%it=time%it+1
 				
 			end do
 			
 			! Recompute interpolated velocity and divergence
-		   call fs%interp_vel(Ui,Vi,Wi)
+		   	call fs%interp_vel(Ui,Vi,Wi)
 			call fs%get_div()
 			
 			! Output to ensight
-		   if (ens_evt%occurs()) then
-            call vf%update_surfmesh(smesh)
-            call ens_out%write_data(time%t)
-         end if
+		   	if (ens_evt%occurs()) then
+				call vf%update_surfmesh(smesh)
+				call ens_out%write_data(time%t)
+         	end if
 			
 			! Perform and output monitoring
-		   call fs%get_max()
+		   	call fs%get_max()
 			call vf%get_max()
 			call mfile%write()
 			call cflfile%write()
@@ -355,13 +424,13 @@ contains
 		implicit none
 		
 		! Get rid of all objects - need destructors
-	   ! monitor
-	   ! ensight
-	   ! bcond
-	   ! timetracker
+		! monitor
+		! ensight
+		! bcond
+		! timetracker
 	   
-	   ! Deallocate work arrays
-	   deallocate(resU,resV,resW,Ui,Vi,Wi)
+		! Deallocate work arrays
+		deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradu,resSC,visc_p,fR,CgradU)
 	   
 	end subroutine simulation_final
 	
