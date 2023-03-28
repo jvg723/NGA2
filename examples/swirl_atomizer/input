@@ -40,8 +40,8 @@ Zero shear rate viscosity : 1
 1 Max timestep size : 0.01
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
-Max time            : 30
-Transistion         : 1
+Max time            : 2
+Transistion         : 0.5
 
 # Pressure solver
 Pressure tolerance : 1e-5
