@@ -77,7 +77,7 @@ module multiscalar_class
       real(WP), dimension(:,:,:,:), allocatable :: itp_x ,itp_y ,itp_z    !< Second order interpolation for SC diffusivity
       
       ! Bquick requires additional storage
-	  real(WP), dimension(:,:,:,:), allocatable :: bitp_xp,bitp_yp,bitp_zp  !< Plus interpolation for SC  - backup
+	   real(WP), dimension(:,:,:,:), allocatable :: bitp_xp,bitp_yp,bitp_zp  !< Plus interpolation for SC  - backup
       real(WP), dimension(:,:,:,:), allocatable :: bitp_xm,bitp_ym,bitp_zm  !< Minus interpolation for SC - backup
 
       ! Masking info for metric modification
@@ -425,8 +425,9 @@ contains
            count=count+1; this%implicit%stc(count,:)=[0,-st,0]
            count=count+1; this%implicit%stc(count,:)=[0,0,+st]
            count=count+1; this%implicit%stc(count,:)=[0,0,-st]
+           ! Reset count
+           count=1
         end do
-        
         ! Set the diagonal to 1 to make sure all cells participate in solver
         this%implicit%opr(1,:,:,:)=1.0_WP
         

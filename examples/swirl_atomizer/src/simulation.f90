@@ -86,7 +86,6 @@ contains
    !> Perform an NGA2 simulation 
    subroutine simulation_run
       implicit none
-      integer :: i,j,k
 
       ! Advance block 1 until annular pipe is turbulent
       if (isInGrp1) then 
@@ -105,7 +104,7 @@ contains
       ! Perform time integration - block 2 is the main driver here
       if (isInGrp1.or.isInGrp2) then
          
-         do while (.not.b2%time%done())
+         do while (.not.b2%time%done()) 
             
             ! Exchange velocity field using cpl12x/y/z couplers
             coupling_step: block
@@ -131,8 +130,18 @@ contains
             
             ! Advance block 2
             if (isInGrp2) call b2%step(U1on2,V1on2,W1on2)
-            ! Broadcast current B2 done case
-            ! Share time from B2 to B1
+            
+            ! Broadcast current B2 time and done condition
+            b2_broadcast: block
+               use mpi_f08,  only: MPI_BCAST,MPI_LOGICAL
+               use parallel, only: comm,amRoot,MPI_REAL_WP
+               integer :: ierr
+               ! Broadcast B2 time to all processors
+               call MPI_BCAST(b2%time%t,1,MPI_REAL_WP,0,comm,ierr)
+               ! Broadcast B2 done condition
+               call MPI_BCAST(b2%time%done(),1,MPI_LOGICAL,0,comm,ierr)
+            end block b2_broadcast
+
             ! Advance block 1 until we've caught up
             if (isInGrp1) then
                
