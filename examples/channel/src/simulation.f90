@@ -357,7 +357,7 @@ contains
          ! Polymer viscosity
          visc_p=visc_s*((1.00_WP-Beta)/Beta)
          ! Configure the scalar solver
-         sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=3)
+         sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=7)
 			call param_read('Scalar iteration',sc%maxit)
 			call param_read('Scalar tolerance',sc%rcvg)
          ! Setup the solver
