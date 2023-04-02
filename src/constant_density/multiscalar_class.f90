@@ -425,8 +425,6 @@ contains
            count=count+1; this%implicit%stc(count,:)=[0,-st,0]
            count=count+1; this%implicit%stc(count,:)=[0,0,+st]
            count=count+1; this%implicit%stc(count,:)=[0,0,-st]
-           ! Reset count
-           count=1
         end do
         ! Set the diagonal to 1 to make sure all cells participate in solver
         this%implicit%opr(1,:,:,:)=1.0_WP
