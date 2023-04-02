@@ -108,7 +108,7 @@ contains
       
       ! Create an incompressible flow solver without bconds
       create_flow_solver: block
-         use hypre_str_class, only: pcg_pfmg
+         use hypre_str_class, only: pcg_pfmg,gmres_pfmg
          ! Create flow solver
          b%fs=incomp(cfg=b%cfg,name='Incompressible NS')
          ! Set the flow properties
@@ -121,7 +121,7 @@ contains
          !call param_read('Pressure iteration',ps%maxit)
          !call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
-         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=pcg_pfmg,nst=7)
+         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=gmres_pfmg,nst=7)
          call param_read('Implicit iteration',b%vs%maxit)
          call param_read('Implicit tolerance',b%vs%rcvg)
          ! Setup the solver
