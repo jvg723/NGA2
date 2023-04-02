@@ -276,7 +276,7 @@ contains
          ! Create flow solver
          b%fs=tpns(cfg=b%cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
-         call param_read('Liquid dynamic viscosity',visc_s)
+         call param_read('Liquid dynamic viscosity',visc_s); b%fs%visc_l=visc_s
          call param_read('Gas dynamic viscosity'   ,visc_g); b%fs%visc_g=visc_g
          ! Assign constant density to each phase
          call param_read('Liquid density',b%fs%rho_l)
@@ -305,17 +305,17 @@ contains
 			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
 
-      ! Set inital viscosity of liquid phase 
-		solvent_viscosity: block
-         ! Carreau model parameters	
-         call param_read('Power law constant',n)
-         call param_read('Shear rate parameter',alpha)
-         !> Carreau model
-         ! No infintie shear rate viscosity
-         visc_inf=0.0_WP
-         ! Zero shear rate viscosity
-         visc_0=visc_s; b%fs%visc_l=visc_0
-    end block solvent_viscosity 
+   !    ! Set inital viscosity of liquid phase 
+	! 	solvent_viscosity: block
+   !       ! Carreau model parameters	
+   !       call param_read('Power law constant',n)
+   !       call param_read('Shear rate parameter',alpha)
+   !       !> Carreau model
+   !       ! No infintie shear rate viscosity
+   !       visc_inf=0.0_WP
+   !       ! Zero shear rate viscosity
+   !       visc_0=visc_s; b%fs%visc_l=visc_0
+   !  end block solvent_viscosity 
       
 
       ! Initialize our velocity field 
@@ -475,18 +475,18 @@ contains
 
       ! end block read_curves
 
-      ! Create a specialized post-processing file
-      structure_postproc: block
-         ! Plane to set binning domain
-         call param_read('Analysis plane',x_over_xL)
-         ! Create directory to write stats to
-         if (b%cfg%amRoot) call execute_command_line('mkdir -p stats')
-         ! Create event for data postprocessing
-         b%ppevt=event(time=b%time,name='Postproc output')
-         call param_read('Postproc output period',b%ppevt%tper)
-         ! ! Perform the output
-         ! if (b%ppevt%occurs()) call structure_identification(b)
-      end block structure_postproc
+      ! ! Create a specialized post-processing file
+      ! structure_postproc: block
+      !    ! Plane to set binning domain
+      !    call param_read('Analysis plane',x_over_xL)
+      !    ! Create directory to write stats to
+      !    if (b%cfg%amRoot) call execute_command_line('mkdir -p stats')
+      !    ! Create event for data postprocessing
+      !    b%ppevt=event(time=b%time,name='Postproc output')
+      !    call param_read('Postproc output period',b%ppevt%tper)
+      !    ! ! Perform the output
+      !    ! if (b%ppevt%occurs()) call structure_identification(b)
+      ! end block structure_postproc
       
    end subroutine init
    
@@ -519,21 +519,21 @@ contains
          end do
       end block reapply_dirichlet
 
-      ! Model shear thinning viscosity
-		update_viscosity: block
-         integer :: i,j,k
-         do k=b%fs%cfg%kmino_,b%fs%cfg%kmaxo_
-           do j=b%fs%cfg%jmino_,b%fs%cfg%jmaxo_
-             do i=b%fs%cfg%imino_,b%fs%cfg%imaxo_
-               ! Strain rate magnitude
-               b%SRmag(i,j,k)=sqrt(2.00_WP*b%SR(1,i,j,k)**2+b%SR(2,i,j,k)**2+b%SR(3,i,j,k)**2+2.0_WP*(b%SR(4,i,j,k)**2+b%SR(5,i,j,k)**2+b%SR(6,i,j,k)**2))
-               ! Carreau Model
-               b%fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*b%SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
-             end do
-           end do
-         end do
-         call b%fs%cfg%sync(b%fs%visc_l)
-      end block update_viscosity
+      ! ! Model shear thinning viscosity
+		! update_viscosity: block
+      !    integer :: i,j,k
+      !    do k=b%fs%cfg%kmino_,b%fs%cfg%kmaxo_
+      !      do j=b%fs%cfg%jmino_,b%fs%cfg%jmaxo_
+      !        do i=b%fs%cfg%imino_,b%fs%cfg%imaxo_
+      !          ! Strain rate magnitude
+      !          b%SRmag(i,j,k)=sqrt(2.00_WP*b%SR(1,i,j,k)**2+b%SR(2,i,j,k)**2+b%SR(3,i,j,k)**2+2.0_WP*(b%SR(4,i,j,k)**2+b%SR(5,i,j,k)**2+b%SR(6,i,j,k)**2))
+      !          ! Carreau Model
+      !          b%fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*b%SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+      !        end do
+      !      end do
+      !    end do
+      !    call b%fs%cfg%sync(b%fs%visc_l)
+      ! end block update_viscosity
          
       ! Remember old VOF
       b%vf%VFold=b%vf%VF

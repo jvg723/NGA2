@@ -1,6 +1,6 @@
 # Parallelization
-1 Partition : 6 1 1
-2 Partition : 1 8 1
+1 Partition : 32 2 1
+2 Partition : 48 2 1
 
 # Annular pipe domain definition
 1 Outer Pipe diameter : 1.2
