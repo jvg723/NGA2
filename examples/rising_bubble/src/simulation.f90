@@ -494,16 +494,14 @@ contains
 					 end do    
 					! Get its divergence 
 					call fm%get_divT(fs) 
-					! Add divT to momentum equation for VF.ge.VFlo
+					! Add divT to momentum equation 
 					do k=fs%cfg%kmin_,fs%cfg%kmax_
                   		do j=fs%cfg%jmin_,fs%cfg%jmax_
                     		do i=fs%cfg%imin_,fs%cfg%imax_
 								! Use volume fraction to apply divergence of polymer stress
-								if (vf%VF(i,j,k).ge.VFlo) then
 									if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
 									if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
 									if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
-								end  if 
 							end do
 						end do
 					end do
