@@ -23,29 +23,29 @@ module lss_class
    
 
    !> Maximum number of bonds per particle
-   integer, parameter, public :: max_bond=500  !< Assumes something like a 7x7x7 stencil in 3D
+   integer, parameter, public :: max_bond=200  !< Assumes something like a 7x7x7 stencil in 3D
+   
 
    !> Bonded solide particle definition
    type :: part
       !> MPI_DOUBLE_PRECISION data
-      real(WP) :: dV                         !< Element volume
       real(WP) :: mw                         !< Weighted volume
       real(WP) :: dil                        !< Element dilatation
       real(WP), dimension(max_bond) :: dbond !< Length of initial bonds
       real(WP), dimension(3) :: pos          !< Particle center coordinates
       real(WP), dimension(3) :: vel          !< Velocity of particle
       real(WP), dimension(3) :: Abond        !< Bond acceleration for particle
-      real(WP) :: dt                         !< Time step size for the particle
       !> MPI_INTEGER data
       integer :: id                          !< ID the object is associated with
       integer :: i                           !< Unique index of particle (assumed >0)
+      integer :: nbond                           !< Number of initial bonds
       integer, dimension(max_bond) :: ibond  !< Indices of initially bonded particles (0 values ignored)
       integer , dimension(3) :: ind          !< Index of cell containing particle center
       integer :: flag                        !< Control parameter (0=normal, 1=done->will be removed)
    end type part
    !> Number of blocks, block length, and block types in a particle
    integer, parameter                         :: part_nblock=2
-   integer           , dimension(part_nblock) :: part_lblock=[13+max_bond,6+max_bond]
+   integer           , dimension(part_nblock) :: part_lblock=[11+max_bond,7+max_bond]
    type(MPI_Datatype), dimension(part_nblock) :: part_tblock=[MPI_DOUBLE_PRECISION,MPI_INTEGER]
    !> MPI_PART derived datatype and size
    type(MPI_Datatype) :: MPI_PART
@@ -65,6 +65,8 @@ module lss_class
       real(WP) :: elastic_modulus                         !< Elastic modulus of the material
       real(WP) :: poisson_ratio                           !< Poisson's ratio of the material
       real(WP) :: rho                                     !< Density of the material
+      real(WP) :: crit_energy                             !< Critical energy release
+      real(WP) :: dV                                      !< Element volume
 
       ! Bonding parameters
       real(WP) :: delta                                   !< Bonding horizon (distance)
@@ -146,6 +148,10 @@ contains
       ! Point to pgrid object
       self%cfg=>cfg
       
+      ! Set default bonding horizon based on underlying mesh
+      self%delta=self%cfg%min_meshsize
+      self%nb=1
+      
       ! Allocate variables
       allocate(self%np_proc(1:self%cfg%nproc)); self%np_proc=0
       self%np_=0; self%np=0
@@ -181,7 +187,7 @@ contains
       
       ! Communicate particles in ghost cells
       call this%share()
-
+      
       ! We can now assemble particle-in-cell information
       pic_prep: block
          use mpi_f08
@@ -212,7 +218,7 @@ contains
          do i=1,this%np_
             ip=this%p(i)%ind(1); jp=this%p(i)%ind(2); kp=this%p(i)%ind(3)
             npic(ip,jp,kp)=npic(ip,jp,kp)+1
-            ipic(npic(ip,jp,kp),ip,jp,kp)=i
+            ipic(npic(ip,jp,kp),ip,jp,kp)=+i
          end do
          do i=1,this%ng_
             ip=this%g(i)%ind(1); jp=this%g(i)%ind(2); kp=this%g(i)%ind(3)
@@ -228,7 +234,6 @@ contains
          type(part) :: p1,p2
          real(WP), dimension(3) :: rpos
          real(WP) :: dist
-         integer :: nbond
 
          ! Loop over particles
          do n1=1,this%np_
@@ -236,21 +241,21 @@ contains
             p1=this%p(n1)
             ! Zero out weighted volume
             p1%mw=0.0_WP
-            ! Initialize number of bonds
-            nbond=0
+            ! Zero out bonds
+            p1%ibond=0
+            p1%nbond=0
             ! Loop over neighbor cells
-            do k=p1%ind(3)-2,p1%ind(3)+2
-               do j=p1%ind(2)-2,p1%ind(2)+2
-                  do i=p1%ind(1)-2,p1%ind(1)+2
+            do k=p1%ind(3)-this%nb,p1%ind(3)+this%nb
+               do j=p1%ind(2)-this%nb,p1%ind(2)+this%nb
+                  do i=p1%ind(1)-this%nb,p1%ind(1)+this%nb
                      ! Loop over particles in that cell
                      do nn=1,npic(i,j,k)
                         ! Create copy of our neighbor
                         n2=ipic(nn,i,j,k)
                         if (n2.gt.0) then
-                           p2=this%p(n2)
+                           p2=this%p(+n2)
                         else if (n2.lt.0) then
-                           n2=-n2
-                           p2=this%g(n2)
+                           p2=this%g(-n2)
                         end if
                         ! Check interparticle distance
                         rpos=p2%pos-p1%pos
@@ -258,13 +263,15 @@ contains
                         if (dist.lt.this%delta) then
                            ! Cannot self-bond
                            if (p1%i.eq.p2%i) cycle
+                           ! Cannot bond with different id except <=0 (<=0 bonds with everyone)
+                           if (p1%id.ne.p2%id.and.p1%id.ge.0.and.p2%id.ge.0) cycle
                            ! This particle is in horizon, create a bond
-                           nbond=nbond+1
-                           if (nbond.gt.max_bond) call die('[lss_class bond_init] Number of detected bonds is larger than max allowed')
-                           p1%ibond(nbond)=p2%i
-                           p1%dbond(nbond)=dist
+                           p1%nbond=p1%nbond+1
+                           if (p1%nbond.gt.max_bond) call die('[lss_class bond_init] Number of detected bonds is larger than max allowed')
+                           p1%ibond(p1%nbond)=p2%i
+                           p1%dbond(p1%nbond)=dist
                            ! Increment weighted volume
-                           p1%mw=p1%mw+wgauss(dist,this%delta)*dist**2*p2%dV
+                           p1%mw=p1%mw+wgauss(dist,this%delta)*dist**2*this%dV
                         end if
                      end do
                   end do
@@ -320,7 +327,7 @@ contains
          do i=1,this%np_
             ip=this%p(i)%ind(1); jp=this%p(i)%ind(2); kp=this%p(i)%ind(3)
             npic(ip,jp,kp)=npic(ip,jp,kp)+1
-            ipic(npic(ip,jp,kp),ip,jp,kp)=i
+            ipic(npic(ip,jp,kp),ip,jp,kp)=+i
          end do
          do i=1,this%ng_
             ip=this%g(i)%ind(1); jp=this%g(i)%ind(2); kp=this%g(i)%ind(3)
@@ -346,29 +353,28 @@ contains
             p1%mw=0.0_WP
             p1%dil=0.0_WP
             ! Loop over neighbor cells
-            do k=p1%ind(3)-2,p1%ind(3)+2
-               do j=p1%ind(2)-2,p1%ind(2)+2
-                  do i=p1%ind(1)-2,p1%ind(1)+2
+            do k=p1%ind(3)-this%nb,p1%ind(3)+this%nb
+               do j=p1%ind(2)-this%nb,p1%ind(2)+this%nb
+                  do i=p1%ind(1)-this%nb,p1%ind(1)+this%nb
                      ! Loop over particles in that cell
                      do nn=1,npic(i,j,k)
                         ! Create copy of our neighbor
                         n2=ipic(nn,i,j,k)
                         if (n2.gt.0) then
-                           p2=this%p(n2)
+                           p2=this%p(+n2)
                         else if (n2.lt.0) then
-                           n2=-n2
-                           p2=this%g(n2)
+                           p2=this%g(-n2)
                         end if
                         ! Check if a bond exists
                         do nb=1,max_bond
                            if (p1%ibond(nb).eq.p2%i) then
                               ! Increment weighted volume
-                              p1%mw=p1%mw+wgauss(p1%dbond(nb),this%delta)*p1%dbond(nb)**2*p2%dV
+                              p1%mw=p1%mw+wgauss(p1%dbond(nb),this%delta)*p1%dbond(nb)**2*this%dV
                               ! Get current distance
                               rpos=p2%pos-p1%pos
                               dist=sqrt(dot_product(rpos,rpos))
                               ! Increment dilatation
-                              p1%dil=p1%dil+wgauss(p1%dbond(nb),this%delta)*p1%dbond(nb)*(dist-p1%dbond(nb))*p2%dV
+                              p1%dil=p1%dil+wgauss(p1%dbond(nb),this%delta)*p1%dbond(nb)*(dist-p1%dbond(nb))*this%dV
                            end if
                         end do
                      end do
@@ -385,60 +391,89 @@ contains
       ! Re-communicate particles in ghost cells to update dil and mw
       call this%share()
       
-      ! Update bond force
+      ! Update bond force, including collision force
       update_bond_force: block
+         use mathtools, only: Pi
          integer :: i,j,k,n1,nn,n2
          type(part) :: p1,p2
          real(WP), dimension(3) :: rpos,t12,t21
          real(WP) :: dist,beta,alpha,ed
+         real(WP) :: stretch,max_stretch,mu,kk
+         real(WP) :: nc,rc,kc
          integer :: nb,nbond
-
+         logical :: found_bond
+         
+         ! Recompute a few physical parameters
+         mu=this%elastic_modulus/(2.0_WP+2.0_WP*this%poisson_ratio)
+         kk=this%elastic_modulus/(3.0_WP-6.0_WP*this%poisson_ratio)
+         max_stretch=sqrt(this%crit_energy/((3.0_WP*mu+(kk-5.0_WP*mu/3.0_WP)*0.75_WP**4)*this%delta))
+         rc=this%dV**(1.0_WP/3.0_WP)
+         nc=1.0_WP
+         kc=15.0_WP*12.0_WP*this%elastic_modulus/(Pi*this%delta**4)
+         
          ! Loop over particles
          do n1=1,this%np_
+            ! Particles marked 0 do not update their forces
+            if (this%p(n1)%id.eq.0) cycle
             ! Create copy of our particle
             p1=this%p(n1)
             ! Zero out bond force
             p1%Abond=0.0_WP
             ! Loop over neighbor cells
-            do k=p1%ind(3)-2,p1%ind(3)+2
-               do j=p1%ind(2)-2,p1%ind(2)+2
-                  do i=p1%ind(1)-2,p1%ind(1)+2
+            do k=p1%ind(3)-this%nb,p1%ind(3)+this%nb
+               do j=p1%ind(2)-this%nb,p1%ind(2)+this%nb
+                  do i=p1%ind(1)-this%nb,p1%ind(1)+this%nb
                      ! Loop over particles in that cell
                      do nn=1,npic(i,j,k)
                         ! Create copy of our neighbor
                         n2=ipic(nn,i,j,k)
                         if (n2.gt.0) then
-                           p2=this%p(n2)
+                           p2=this%p(+n2)
                         else if (n2.lt.0) then
-                           n2=-n2
-                           p2=this%g(n2)
+                           p2=this%g(-n2)
                         end if
+                        ! Current distance
+                        rpos=p2%pos-p1%pos
+                        dist=sqrt(dot_product(rpos,rpos))
                         ! Check if a bond exists
+                        found_bond=.false.
                         do nb=1,max_bond
                            if (p1%ibond(nb).eq.p2%i) then
-                              ! Current distance
-                              rpos=p2%pos-p1%pos
-                              dist=sqrt(dot_product(rpos,rpos))
+                              ! Check for breakage first
+                              stretch=(dist-p1%dbond(nb))/p1%dbond(nb)
+                              if (stretch.gt.max_stretch) then
+                                 ! Remove the bond
+                                 p1%ibond(nb)=0
+                                 p1%dbond(nb)=0.0_WP
+                                 cycle
+                              end if
                               ! Beta1
-                              beta=(this%elastic_modulus/(1.0_WP-2.0_WP*this%poisson_ratio))*p1%dil
+                              beta=3.0_WP*kk*p1%dil
                               ! Alpha1
-                              alpha=7.5_WP*(this%elastic_modulus/(1.0_WP+this%poisson_ratio))/p1%mw
+                              alpha=15.0_WP*mu/p1%mw
                               ! Extension1
                               ed=dist-p1%dbond(nb)*(1.0_WP+p1%dil/3.0_WP)
                               ! Force density 1->2
                               t12=+wgauss(p1%dbond(nb),this%delta)*(beta/p1%mw*p1%dbond(nb)+alpha*ed)*rpos/dist
                               ! Beta2
-                              beta=(this%elastic_modulus/(1.0_WP-2.0_WP*this%poisson_ratio))*p2%dil
+                              beta=3.0_WP*kk*p2%dil
                               ! Alpha2
-                              alpha=7.5_WP*(this%elastic_modulus/(1.0_WP+this%poisson_ratio))/p2%mw
+                              alpha=15.0_WP*mu/p2%mw
                               ! Extension2
                               ed=dist-p1%dbond(nb)*(1.0_WP+p2%dil/3.0_WP)
                               ! Force density 2->1
                               t21=-wgauss(p1%dbond(nb),this%delta)*(beta/p2%mw*p1%dbond(nb)+alpha*ed)*rpos/dist
                               ! Increment bond force
-                              p1%Abond=p1%Abond+(t12-t21)*p2%dV/this%rho
+                              p1%Abond=p1%Abond+(t12-t21)*this%dV/this%rho
+                              ! If still here, we have an active bond
+                              found_bond=.true.
+                              cycle
                            end if
                         end do
+                        ! Add collision force now
+                        if (.not.found_bond.and.p1%i.ne.p2%i.and.dist.lt.rc) then
+                           p1%Abond=p1%Abond-kc*((rc/dist)**nc-1.0_WP)*(rpos/dist)*this%dV/this%rho
+                        end if
                      end do
                   end do
                end do
@@ -453,70 +488,56 @@ contains
 
    
    !> Advance the particle equations by a specified time step dt
-   !> p%id=0 => no coll, no solve
-   !> p%id=-1=> no coll, no move
+   !> p%id=-2 => do not solve for position nor velocity
+   !> p%id=-1 => do not solve for velocity
+   !> p%id= 0 => do not update force
    subroutine advance(this,dt)
       use mpi_f08, only : MPI_SUM,MPI_INTEGER
       use mathtools, only: Pi
       implicit none
       class(lss), intent(inout) :: this
       real(WP), intent(inout) :: dt  !< Timestep size over which to advance
-      integer :: i,j,k,ierr
-      real(WP) :: mydt,dt_done
-      real(WP), dimension(3) :: acc,torque,dmom
+      integer :: n,ierr
       type(part) :: myp,pold
       
       ! Zero out number of particles removed
       this%np_out=0
       
-      ! Calculate bond force
-      call this%get_bond_force()
-      
-      ! Advance the equations
-      do i=1,this%np_
-         ! Avoid particles with id=0
-         if (this%p(i)%id.eq.0) cycle
-         ! Create local copy of particle
-         myp=this%p(i)
-         ! Time-integrate until dt_done=dt
-         dt_done=0.0_WP
-         do while (dt_done.lt.dt)
-            ! Decide the timestep size
-            mydt=min(myp%dt,dt-dt_done)
-            ! Remember the particle
-            pold=myp
-            ! Advance with Euler prediction
-            myp%pos=pold%pos+0.5_WP*mydt*myp%vel
-            myp%vel=pold%vel+0.5_WP*mydt*(this%gravity+myp%Abond)
-            ! Correct with midpoint rule
-            myp%pos=pold%pos+mydt*myp%vel
-            myp%vel=pold%vel+mydt*(this%gravity+myp%Abond)
-            ! Relocalize
-            myp%ind=this%cfg%get_ijk_global(myp%pos,myp%ind)
-            ! Increment
-            dt_done=dt_done+mydt
-         end do
+      ! Advance velocity based on old force and position based on mid-velocity
+      do n=1,this%np_
+         ! Advance with Verlet scheme
+         if (this%p(n)%id.gt.-1) this%p(n)%vel=this%p(n)%vel+0.5_WP*dt*(this%gravity+this%p(n)%Abond)
+         if (this%p(n)%id.gt.-2) this%p(n)%pos=this%p(n)%pos+dt*this%p(n)%vel
+         ! Relocalize
+         this%p(n)%ind=this%cfg%get_ijk_global(this%p(n)%pos,this%p(n)%ind)
          ! Correct the position to take into account periodicity
-         if (this%cfg%xper) myp%pos(1)=this%cfg%x(this%cfg%imin)+modulo(myp%pos(1)-this%cfg%x(this%cfg%imin),this%cfg%xL)
-         if (this%cfg%yper) myp%pos(2)=this%cfg%y(this%cfg%jmin)+modulo(myp%pos(2)-this%cfg%y(this%cfg%jmin),this%cfg%yL)
-         if (this%cfg%zper) myp%pos(3)=this%cfg%z(this%cfg%kmin)+modulo(myp%pos(3)-this%cfg%z(this%cfg%kmin),this%cfg%zL)
+         if (this%cfg%xper) this%p(n)%pos(1)=this%cfg%x(this%cfg%imin)+modulo(this%p(n)%pos(1)-this%cfg%x(this%cfg%imin),this%cfg%xL)
+         if (this%cfg%yper) this%p(n)%pos(2)=this%cfg%y(this%cfg%jmin)+modulo(this%p(n)%pos(2)-this%cfg%y(this%cfg%jmin),this%cfg%yL)
+         if (this%cfg%zper) this%p(n)%pos(3)=this%cfg%z(this%cfg%kmin)+modulo(this%p(n)%pos(3)-this%cfg%z(this%cfg%kmin),this%cfg%zL)
          ! Handle particles that have left the domain
-         if (myp%pos(1).lt.this%cfg%x(this%cfg%imin).or.myp%pos(1).gt.this%cfg%x(this%cfg%imax+1)) myp%flag=1
-         if (myp%pos(2).lt.this%cfg%y(this%cfg%jmin).or.myp%pos(2).gt.this%cfg%y(this%cfg%jmax+1)) myp%flag=1
-         if (myp%pos(3).lt.this%cfg%z(this%cfg%kmin).or.myp%pos(3).gt.this%cfg%z(this%cfg%kmax+1)) myp%flag=1
+         if (this%p(n)%pos(1).lt.this%cfg%x(this%cfg%imin).or.this%p(n)%pos(1).gt.this%cfg%x(this%cfg%imax+1)) this%p(n)%flag=1
+         if (this%p(n)%pos(2).lt.this%cfg%y(this%cfg%jmin).or.this%p(n)%pos(2).gt.this%cfg%y(this%cfg%jmax+1)) this%p(n)%flag=1
+         if (this%p(n)%pos(3).lt.this%cfg%z(this%cfg%kmin).or.this%p(n)%pos(3).gt.this%cfg%z(this%cfg%kmax+1)) this%p(n)%flag=1
          ! Relocalize the particle
-         myp%ind=this%cfg%get_ijk_global(myp%pos,myp%ind)
+         this%p(n)%ind=this%cfg%get_ijk_global(this%p(n)%pos,this%p(n)%ind)
          ! Count number of particles removed
-         if (myp%flag.eq.1) this%np_out=this%np_out+1
-         ! Copy back to particle
-         if (myp%id.ne.-1) this%p(i)=myp
+         if (this%p(n)%flag.eq.1) this%np_out=this%np_out+1
       end do
       
       ! Communicate particles
       call this%sync()
       
       ! Sum up particles removed
-      call MPI_ALLREDUCE(this%np_out,i,1,MPI_INTEGER,MPI_SUM,this%cfg%comm,ierr); this%np_out=i
+      call MPI_ALLREDUCE(this%np_out,n,1,MPI_INTEGER,MPI_SUM,this%cfg%comm,ierr); this%np_out=n
+      
+      ! Calculate bond force
+      call this%get_bond_force()
+      
+      ! Advance velocity only based on new force
+      do n=1,this%np_
+         ! Advance with Verlet scheme
+         if (this%p(n)%id.gt.-1) this%p(n)%vel=this%p(n)%vel+0.5_WP*dt*(this%gravity+this%p(n)%Abond)
+      end do
       
       ! Log/screen output
       logging: block
@@ -676,7 +697,7 @@ contains
       ! Clean up ghost array
       call this%resize_ghost(n=0); this%ng_=0
       
-      ! Share ghost particles to the left in x
+      ! Share ghost particles in -x (no ghosts are sent here)
       nsend=0
       do n=1,this%np_
          if (this%p(n)%ind(1).lt.this%cfg%imin_+no) nsend=nsend+1
@@ -704,7 +725,7 @@ contains
       if (allocated(tosend)) deallocate(tosend)
       if (allocated(torecv)) deallocate(torecv)
       
-      ! Share ghost particles to the right in x
+      ! Share ghost particles in +x (no ghosts are sent here)
       nsend=0
       do n=1,this%np_
          if (this%p(n)%ind(1).gt.this%cfg%imax_-no) nsend=nsend+1
@@ -732,10 +753,13 @@ contains
       if (allocated(tosend)) deallocate(tosend)
       if (allocated(torecv)) deallocate(torecv)
       
-      ! Share ghost particles to the left in y
+      ! Share ghost particles in -y (ghosts need to be sent now)
       nsend=0
       do n=1,this%np_
          if (this%p(n)%ind(2).lt.this%cfg%jmin_+no) nsend=nsend+1
+      end do
+      do n=1,this%ng_
+         if (this%g(n)%ind(2).lt.this%cfg%jmin_+no) nsend=nsend+1
       end do
       allocate(tosend(nsend))
       nsend=0
@@ -743,6 +767,16 @@ contains
          if (this%p(n)%ind(2).lt.this%cfg%jmin_+no) then
             nsend=nsend+1
             tosend(nsend)=this%p(n)
+            if (this%cfg%yper.and.tosend(nsend)%ind(2).lt.this%cfg%jmin+no) then
+               tosend(nsend)%pos(2)=tosend(nsend)%pos(2)+this%cfg%yL
+               tosend(nsend)%ind(2)=tosend(nsend)%ind(2)+this%cfg%ny
+            end if
+         end if
+      end do
+      do n=1,this%ng_
+         if (this%g(n)%ind(2).lt.this%cfg%jmin_+no) then
+            nsend=nsend+1
+            tosend(nsend)=this%g(n)
             if (this%cfg%yper.and.tosend(nsend)%ind(2).lt.this%cfg%jmin+no) then
                tosend(nsend)%pos(2)=tosend(nsend)%pos(2)+this%cfg%yL
                tosend(nsend)%ind(2)=tosend(nsend)%ind(2)+this%cfg%ny
@@ -760,10 +794,13 @@ contains
       if (allocated(tosend)) deallocate(tosend)
       if (allocated(torecv)) deallocate(torecv)
       
-      ! Share ghost particles to the right in y
+      ! Share ghost particles in +y (ghosts need to be sent now - but not newly received ghosts!)
       nsend=0
       do n=1,this%np_
          if (this%p(n)%ind(2).gt.this%cfg%jmax_-no) nsend=nsend+1
+      end do
+      do n=1,this%ng_-nrecv
+         if (this%g(n)%ind(2).gt.this%cfg%jmax_-no) nsend=nsend+1
       end do
       allocate(tosend(nsend))
       nsend=0
@@ -771,6 +808,16 @@ contains
          if (this%p(n)%ind(2).gt.this%cfg%jmax_-no) then
             nsend=nsend+1
             tosend(nsend)=this%p(n)
+            if (this%cfg%yper.and.tosend(nsend)%ind(2).gt.this%cfg%jmax-no) then
+               tosend(nsend)%pos(2)=tosend(nsend)%pos(2)-this%cfg%yL
+               tosend(nsend)%ind(2)=tosend(nsend)%ind(2)-this%cfg%ny
+            end if
+         end if
+      end do
+      do n=1,this%ng_-nrecv
+         if (this%g(n)%ind(2).gt.this%cfg%jmax_-no) then
+            nsend=nsend+1
+            tosend(nsend)=this%g(n)
             if (this%cfg%yper.and.tosend(nsend)%ind(2).gt.this%cfg%jmax-no) then
                tosend(nsend)%pos(2)=tosend(nsend)%pos(2)-this%cfg%yL
                tosend(nsend)%ind(2)=tosend(nsend)%ind(2)-this%cfg%ny
@@ -788,10 +835,13 @@ contains
       if (allocated(tosend)) deallocate(tosend)
       if (allocated(torecv)) deallocate(torecv)
       
-      ! Share ghost particles to the left in z
+      ! Share ghost particles in -z (ghosts need to be sent now)
       nsend=0
       do n=1,this%np_
          if (this%p(n)%ind(3).lt.this%cfg%kmin_+no) nsend=nsend+1
+      end do
+      do n=1,this%ng_
+         if (this%g(n)%ind(3).lt.this%cfg%kmin_+no) nsend=nsend+1
       end do
       allocate(tosend(nsend))
       nsend=0
@@ -799,6 +849,16 @@ contains
          if (this%p(n)%ind(3).lt.this%cfg%kmin_+no) then
             nsend=nsend+1
             tosend(nsend)=this%p(n)
+            if (this%cfg%zper.and.tosend(nsend)%ind(3).lt.this%cfg%kmin+no) then
+               tosend(nsend)%pos(3)=tosend(nsend)%pos(3)+this%cfg%zL
+               tosend(nsend)%ind(3)=tosend(nsend)%ind(3)+this%cfg%nz
+            end if
+         end if
+      end do
+      do n=1,this%ng_
+         if (this%g(n)%ind(3).lt.this%cfg%kmin_+no) then
+            nsend=nsend+1
+            tosend(nsend)=this%g(n)
             if (this%cfg%zper.and.tosend(nsend)%ind(3).lt.this%cfg%kmin+no) then
                tosend(nsend)%pos(3)=tosend(nsend)%pos(3)+this%cfg%zL
                tosend(nsend)%ind(3)=tosend(nsend)%ind(3)+this%cfg%nz
@@ -816,10 +876,13 @@ contains
       if (allocated(tosend)) deallocate(tosend)
       if (allocated(torecv)) deallocate(torecv)
       
-      ! Share ghost particles to the right in z
+      ! Share ghost particles in +z (ghosts need to be sent now - but not newly received ghosts!)
       nsend=0
       do n=1,this%np_
          if (this%p(n)%ind(3).gt.this%cfg%kmax_-no) nsend=nsend+1
+      end do
+      do n=1,this%ng_-nrecv
+         if (this%g(n)%ind(3).gt.this%cfg%kmax_-no) nsend=nsend+1
       end do
       allocate(tosend(nsend))
       nsend=0
@@ -827,6 +890,16 @@ contains
          if (this%p(n)%ind(3).gt.this%cfg%kmax_-no) then
             nsend=nsend+1
             tosend(nsend)=this%p(n)
+            if (this%cfg%zper.and.tosend(nsend)%ind(3).gt.this%cfg%kmax-no) then
+               tosend(nsend)%pos(3)=tosend(nsend)%pos(3)-this%cfg%zL
+               tosend(nsend)%ind(3)=tosend(nsend)%ind(3)-this%cfg%nz
+            end if
+         end if
+      end do
+      do n=1,this%ng_-nrecv
+         if (this%g(n)%ind(3).gt.this%cfg%kmax_-no) then
+            nsend=nsend+1
+            tosend(nsend)=this%g(n)
             if (this%cfg%zper.and.tosend(nsend)%ind(3).gt.this%cfg%kmax-no) then
                tosend(nsend)%pos(3)=tosend(nsend)%pos(3)-this%cfg%zL
                tosend(nsend)%ind(3)=tosend(nsend)%ind(3)-this%cfg%nz
@@ -843,7 +916,7 @@ contains
       this%ng_=this%ng_+nrecv
       if (allocated(tosend)) deallocate(tosend)
       if (allocated(torecv)) deallocate(torecv)
-      
+
    end subroutine share
    
    
