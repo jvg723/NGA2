@@ -19,11 +19,10 @@ module simulation
 	!> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
 	!type(hypre_str),   public :: ps
    	type(hypre_uns),   public :: ps
-	type(ddadi),       public :: vs
+	type(ddadi),       public :: vs,ss
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
 	type(fene),        public :: fm
-	type(hypre_uns),   public :: sc
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
@@ -250,11 +249,10 @@ contains
 			! Relaxation time for polymer
 			call param_read('Polymer Relaxation Time',lambda)
 			! Configure the scalar solver
-			sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=7)
-			call param_read('Scalar iteration',sc%maxit)
-			call param_read('Scalar tolerance',sc%rcvg)
+			! Configure the scalar solver
+			ss=ddadi(cfg=cfg,name='Scalar',nst=13)
 			! Setup the solver
-			call fm%setup(implicit_solver=sc)
+			call fm%setup(implicit_solver=ss)
 			! Intalize conformation tensor to identity matrix
 			fm%SC(:,:,:,1)=1.00_WP !Cxx
 			fm%SC(:,:,:,2)=0.00_WP !Cyx
