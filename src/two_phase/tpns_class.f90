@@ -2670,12 +2670,12 @@ contains
                   tot_vol=gas_vol+liq_vol
                   this%visc_xy(i,j,k)=0.0_WP
                   if (tot_vol.gt.0.0_WP) this%visc_xy(i,j,k)=this%visc_g(i,j,k)*this%visc_l(i,j,k)/(this%visc_l(i,j,k)*gas_vol/tot_vol+this%visc_g(i,j,k)*liq_vol/tot_vol+epsilon(1.0_WP))
-                  if (this%cfg%x(i).eq.0.0_WP.and.this%cfg%y(j).eq.2.0_WP) then
-                     print*,'wall visc half-way:',this%visc_xy(i,j,k),'vols:',sum(vf%Lvol(:,:,:,i-1,j,k)),sum(vf%Lvol(:,:,:,i,j,k))
-                  end if
-                  if (this%cfg%x(i).eq.0.0_WP.and.this%cfg%y(j).eq.-1.0_WP) then
-                     print*,'wall visc at bottom:',this%visc_xy(i,j,k),'vols:',sum(vf%Lvol(:,:,:,i-1,j,k)),sum(vf%Lvol(:,:,:,i,j,k))
-                  end if
+                  ! if (this%cfg%x(i).eq.0.0_WP.and.this%cfg%y(j).eq.2.0_WP) then
+                  !    print*,'wall visc half-way:',this%visc_xy(i,j,k),'vols:',sum(vf%Lvol(:,:,:,i-1,j,k)),sum(vf%Lvol(:,:,:,i,j,k))
+                  ! end if
+                  ! if (this%cfg%x(i).eq.0.0_WP.and.this%cfg%y(j).eq.-1.0_WP) then
+                  !    print*,'wall visc at bottom:',this%visc_xy(i,j,k),'vols:',sum(vf%Lvol(:,:,:,i-1,j,k)),sum(vf%Lvol(:,:,:,i,j,k))
+                  ! end if
                   ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
                   liq_vol=sum(vf%Lvol(:,0,0,i,j,k))+sum(vf%Lvol(:,1,0,i,j-1,k))+sum(vf%Lvol(:,0,1,i,j,k-1))+sum(vf%Lvol(:,1,1,i,j-1,k-1))
                   gas_vol=sum(vf%Gvol(:,0,0,i,j,k))+sum(vf%Gvol(:,1,0,i,j-1,k))+sum(vf%Gvol(:,0,1,i,j,k-1))+sum(vf%Gvol(:,1,1,i,j-1,k-1))
@@ -2701,25 +2701,25 @@ contains
                   gas_vol=sum(vf%Gvol(:,:,:,i,j,k))
                   tot_vol=gas_vol+liq_vol
                   this%visc(i,j,k)=0.0_WP
-                  if (tot_vol.gt.0.0_WP) this%visc(i,j,k)=(this%visc_l*liq_vol+this%visc_g*gas_vol)/tot_vol
+                  if (tot_vol.gt.0.0_WP) this%visc(i,j,k)=(this%visc_l(i,j,k)*liq_vol+this%visc_g(i,j,k)*gas_vol)/tot_vol
                   ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
                   liq_vol=sum(vf%Lvol(0,0,:,i,j,k))+sum(vf%Lvol(1,0,:,i-1,j,k))+sum(vf%Lvol(0,1,:,i,j-1,k))+sum(vf%Lvol(1,1,:,i-1,j-1,k))
                   gas_vol=sum(vf%Gvol(0,0,:,i,j,k))+sum(vf%Gvol(1,0,:,i-1,j,k))+sum(vf%Gvol(0,1,:,i,j-1,k))+sum(vf%Gvol(1,1,:,i-1,j-1,k))
                   tot_vol=gas_vol+liq_vol
                   this%visc_xy(i,j,k)=0.0_WP
-                  if (tot_vol.gt.0.0_WP) this%visc_xy(i,j,k)=(this%visc_l*liq_vol+this%visc_g*gas_vol)/tot_vol
+                  if (tot_vol.gt.0.0_WP) this%visc_xy(i,j,k)=(this%visc_l(i,j,k)*liq_vol+this%visc_g(i,j,k)*gas_vol)/tot_vol
                   ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
                   liq_vol=sum(vf%Lvol(:,0,0,i,j,k))+sum(vf%Lvol(:,1,0,i,j-1,k))+sum(vf%Lvol(:,0,1,i,j,k-1))+sum(vf%Lvol(:,1,1,i,j-1,k-1))
                   gas_vol=sum(vf%Gvol(:,0,0,i,j,k))+sum(vf%Gvol(:,1,0,i,j-1,k))+sum(vf%Gvol(:,0,1,i,j,k-1))+sum(vf%Gvol(:,1,1,i,j-1,k-1))
                   tot_vol=gas_vol+liq_vol
                   this%visc_yz(i,j,k)=0.0_WP
-                  if (tot_vol.gt.0.0_WP) this%visc_yz(i,j,k)=(this%visc_l*liq_vol+this%visc_g*gas_vol)/tot_vol
+                  if (tot_vol.gt.0.0_WP) this%visc_yz(i,j,k)=(this%visc_l(i,j,k)*liq_vol+this%visc_g(i,j,k)*gas_vol)/tot_vol
                   ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
                   liq_vol=sum(vf%Lvol(0,:,0,i,j,k))+sum(vf%Lvol(0,:,1,i,j,k-1))+sum(vf%Lvol(1,:,0,i-1,j,k))+sum(vf%Lvol(1,:,1,i-1,j,k-1))
                   gas_vol=sum(vf%Gvol(0,:,0,i,j,k))+sum(vf%Gvol(0,:,1,i,j,k-1))+sum(vf%Gvol(1,:,0,i-1,j,k))+sum(vf%Gvol(1,:,1,i-1,j,k-1))
                   tot_vol=gas_vol+liq_vol
                   this%visc_zx(i,j,k)=0.0_WP
-                  if (tot_vol.gt.0.0_WP) this%visc_zx(i,j,k)=(this%visc_l*liq_vol+this%visc_g*gas_vol)/tot_vol
+                  if (tot_vol.gt.0.0_WP) this%visc_zx(i,j,k)=(this%visc_l(i,j,k)*liq_vol+this%visc_g(i,j,k)*gas_vol)/tot_vol
                end do
             end do
          end do
