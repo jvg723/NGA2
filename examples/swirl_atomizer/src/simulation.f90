@@ -134,12 +134,12 @@ contains
             ! Broadcast current B2 time and done condition
             b2_broadcast: block
                use mpi_f08,  only: MPI_BCAST,MPI_LOGICAL
-               use parallel, only: comm,amRoot,MPI_REAL_WP
+               use parallel, only: comm,nproc,MPI_REAL_WP
                integer :: ierr
                ! Broadcast B2 time to all processors
-               call MPI_BCAST(b2%time%t,1,MPI_REAL_WP,0,comm,ierr)
+               call MPI_BCAST(b2%time%t,1,MPI_REAL_WP,nproc-1,comm,ierr)
                ! Broadcast B2 done condition
-               call MPI_BCAST(b2%time%done(),1,MPI_LOGICAL,0,comm,ierr)
+               call MPI_BCAST(b2%time%done(),1,MPI_LOGICAL,nproc-1,comm,ierr)
             end block b2_broadcast
 
             ! Advance block 1 until we've caught up
