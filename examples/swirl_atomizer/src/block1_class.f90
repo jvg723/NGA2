@@ -4,7 +4,7 @@ module block1_class
    use geometry,          only: Dout
    use ibconfig_class,    only: ibconfig
    use hypre_str_class,   only: hypre_str
-   use fourier3d_class,   only: fourier3d
+   use fftxyz_class,      only: fftxyz
    use incomp_class,      only: incomp
    use sgsmodel_class,    only: sgsmodel
    use timetracker_class, only: timetracker
@@ -21,7 +21,7 @@ module block1_class
       class(ibconfig),   pointer :: cfg           !< Pointer to config
       type(incomp)               :: fs            !< Single phase incompressible flow solver
       !type(hypre_str)           :: ps
-      type(fourier3d)            :: ps            !< Fourier pressure solver
+      type(fftxyz)               :: ps            !< Fourier pressure solver
       type(hypre_str)            :: vs            !< Structured hypre implicit solver
       type(sgsmodel)             :: sgs           !< SGS model
       type(timetracker)          :: time          !< Time tracker
@@ -115,7 +115,7 @@ contains
          call param_read('Liquid density',b%fs%rho)
          call param_read('Liquid dynamic viscosity',visc); b%fs%visc=visc
          ! Configure pressure solver
-         b%ps=fourier3d(cfg=b%cfg,name='Pressure',nst=7)
+         b%ps=fftxyz(cfg=b%cfg,name='Pressure',nst=7)
          !ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
          !ps%maxlevel=14
          !call param_read('Pressure iteration',ps%maxit)
