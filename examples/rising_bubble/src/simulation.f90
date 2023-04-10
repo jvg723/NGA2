@@ -19,11 +19,10 @@ module simulation
 	!> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
 	!type(hypre_str),   public :: ps
    	type(hypre_uns),   public :: ps
-	type(ddadi),       public :: vs
+	type(ddadi),       public :: vs,ss
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
 	type(fene),        public :: fm
-	type(hypre_uns),   public :: sc
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
@@ -250,11 +249,10 @@ contains
 			! Relaxation time for polymer
 			call param_read('Polymer Relaxation Time',lambda)
 			! Configure the scalar solver
-			sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=7)
-			call param_read('Scalar iteration',sc%maxit)
-			call param_read('Scalar tolerance',sc%rcvg)
+			! Configure the scalar solver
+			ss=ddadi(cfg=cfg,name='Scalar',nst=13)
 			! Setup the solver
-			call fm%setup(implicit_solver=sc)
+			call fm%setup(implicit_solver=ss)
 			! Intalize conformation tensor to identity matrix
 			fm%SC(:,:,:,1)=1.00_WP !Cxx
 			fm%SC(:,:,:,2)=0.00_WP !Cyx
@@ -494,16 +492,14 @@ contains
 					 end do    
 					! Get its divergence 
 					call fm%get_divT(fs) 
-					! Add divT to momentum equation for VF.ge.VFlo
+					! Add divT to momentum equation 
 					do k=fs%cfg%kmin_,fs%cfg%kmax_
                   		do j=fs%cfg%jmin_,fs%cfg%jmax_
                     		do i=fs%cfg%imin_,fs%cfg%imax_
 								! Use volume fraction to apply divergence of polymer stress
-								if (vf%VF(i,j,k).ge.VFlo) then
 									if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
 									if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
 									if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
-								end  if 
 							end do
 						end do
 					end do

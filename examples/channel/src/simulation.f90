@@ -3,7 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use hypre_str_class,   only: hypre_str
-   use hypre_uns_class,   only: hypre_uns
+   use ddadi_class,       only: ddadi
    use incomp_class,      only: incomp
    use fene_class,        only: fene
    use sgsmodel_class,    only: sgsmodel
@@ -20,9 +20,9 @@ module simulation
    type(timetracker), public :: time
    type(sgsmodel),    public :: sgs         
    type(hypre_str),   public :: ps
-   type(hypre_str),   public :: vs
-   type(hypre_uns),   public :: sc
-   
+   type(ddadi),       public :: vs,ss
+
+
    !> Ensight postprocessing
    type(ensight) :: ens_out
    type(event)   :: ens_evt
@@ -305,9 +305,7 @@ contains
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
-         vs=hypre_str(cfg=cfg,name='Velocity',method=gmres_pfmg,nst=7)
-         call param_read('Implicit iteration',vs%maxit)
-         call param_read('Implicit tolerance',vs%rcvg)
+         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
          ! Setup the solver
          call fs%setup(pressure_solver=ps,implicit_solver=vs)     
          ! Initialize velocity based on specified bulk
@@ -338,7 +336,6 @@ contains
          
       ! Create a FENE model 
       create_fene: block 
-         use hypre_uns_class,   only: gmres
          use multiscalar_class, only: bquick
          use fene_class,        only: FENEP
          ! Create FENE model solver
@@ -357,11 +354,9 @@ contains
          ! Polymer viscosity
          visc_p=visc_s*((1.00_WP-Beta)/Beta)
          ! Configure the scalar solver
-         sc=hypre_uns(cfg=cfg,name='scalar',method=gmres,nst=7)
-			call param_read('Scalar iteration',sc%maxit)
-			call param_read('Scalar tolerance',sc%rcvg)
+         ss=ddadi(cfg=cfg,name='Scalar',nst=13)
          ! Setup the solver
-         call fm%setup(implicit_solver=sc)
+         call fm%setup(implicit_solver=ss)
          ! Intalize conformation tensor to identity matrix
          fm%SC(:,:,:,1)=1.00_WP !Cxx
          fm%SC(:,:,:,2)=0.00_WP !Cyx

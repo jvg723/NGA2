@@ -1,6 +1,6 @@
 # Parallelization
-1 Partition : 32 2 1
-2 Partition : 48 2 1
+1 Partition : 8 1 1
+2 Partition : 8 1 1
 
 # Annular pipe domain definition
 1 Outer Pipe diameter : 1.2
@@ -32,7 +32,7 @@ Gas density                 : 1e-3
 Surface tension coefficient : 0.002
 
 # Shear thinning properties
-Power law constant        : 1
+Power law constant        : 0.5
 Shear rate parameter      : 1
 Zero shear rate viscosity : 1
 
@@ -41,7 +41,7 @@ Zero shear rate viscosity : 1
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
 Max time            : 2
-Transistion         : 0.5
+Transistion         : 1
 
 # Pressure solver
 Pressure tolerance : 1e-5
