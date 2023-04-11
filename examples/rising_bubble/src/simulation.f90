@@ -128,7 +128,7 @@ contains
 			! Create a VOF solver
 			vf=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF')
 			! Initialize a bubble
-			center=[0.0_WP,0.01_WP,0.0_WP]
+			center=[0.0_WP,0.02_WP,0.0_WP]
 			radius=0.005_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
