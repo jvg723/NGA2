@@ -100,8 +100,17 @@ contains
       ! Allocate scalar arrays 
       allocate(f_C(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); f_C=0.0_WP
 
-      ! Trace of conformation tensor 
-      this%trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6) 
+      ! Trace of conformation tensor and ensure trC<Lmax^2
+      ! this%trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6)
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               this%trC(i,j,k)=this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6)
+               this%trC(i,j,k)=min(this%trC(i,j,k),(Lmax**2)-1.00_WP)
+               ! if (this%trC(i,j,k).ge.Lmax**2) this%trC(i,j,k)=(Lmax**2)-epsilon(Lmax)
+            end do
+         end do
+      end do 
 
       select case (this%model)
          case (FENEP)
