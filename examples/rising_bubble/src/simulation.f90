@@ -38,7 +38,7 @@ module simulation
 	!> Private work arrays
 	real(WP), dimension(:,:,:), 	allocatable :: resU,resV,resW
 	real(WP), dimension(:,:,:), 	allocatable :: Ui,Vi,Wi
-	real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_
+	real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_,trSC_
     real(WP), dimension(:,:,:,:,:), allocatable :: gradu
 	real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
 	real(WP), dimension(:,:,:),   	allocatable :: SRmag
@@ -95,6 +95,7 @@ contains
 			! Scalar solver
 			allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
 			allocate(SC_   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
+			allocate(trSC_ (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1)) !< Temp trSC array for checking bquick bound
 			allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
             allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
 			! Rate depdent polymer viscosity
@@ -235,7 +236,7 @@ contains
 		! Create a FENE model 
 		create_fene: block 
 			use hypre_uns_class,   only: gmres
-			use multiscalar_class, only: bquick
+			use multiscalar_class, only: quick,bquick
 			use fene_class,        only: FENECR
 			integer :: i,j,k
 			! Create FENE model solver
@@ -358,8 +359,8 @@ contains
 		   call cflfile%write()
 	   	end block create_monitor
 	   
-		print *, 'epsilon',epsilon(0.0_WP)
-		print *, '0.1+epsilon',0.1_WP+epsilon(0.0_WP)
+		! print *, 'epsilon',epsilon(0.0_WP)
+		! print *, '0.1+epsilon',0.1_WP+epsilon(0.0_WP)
 	   
 	end subroutine simulation_init
 	
@@ -446,10 +447,12 @@ contains
 				   resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
 				   ! Apply this residual
 				   SC_=2.0_WP*fm%SC-fm%SCold+resSC
+				   ! Temp trSC array for Bquick  
+				   trSC_(:,:,:,1)=SC_(:,:,:,1)+SC_(:,:,:,2)+SC_(:,:,:,3)
 				end block pre_check
 				
 				! Check boundedess of explicit SC calculation
-				call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+				call fm%metric_modification(SC=trSC_,SCmin=3.0_WP,SCmax=100.0_WP)
 	
 				! Calculate explicit SC post checking bounds
 				post_check: block
