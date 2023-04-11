@@ -39,6 +39,7 @@ module block2_class
       real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
       real(WP), dimension(:,:,:),   allocatable :: SRmag
       real(WP), dimension(:,:,:,:), allocatable :: SR
+      real(WP), dimension(:,:,:),   allocatable :: visc_norm
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
       real(WP) :: vof_removed              !< Integral of VOF removed
@@ -180,6 +181,8 @@ contains
          allocate(b%Wi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%SRmag(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%SR (6,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         ! Array for normalized viscosity
+			allocate(b%visc_norm(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -270,13 +273,13 @@ contains
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use tpns_class, only: dirichlet,clipped_neumann,slip
-         use hypre_str_class,  only: pcg_pfmg
+         use hypre_str_class, only: pcg_pfmg,gmres_pfmg
          use hypre_uns_class,  only: gmres_amg
          integer :: i,j,k
          ! Create flow solver
          b%fs=tpns(cfg=b%cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
-         call param_read('Liquid dynamic viscosity',visc_s); b%fs%visc_l=visc_s
+         call param_read('Liquid dynamic viscosity',visc_s) !; b%fs%visc_l=visc_s
          call param_read('Gas dynamic viscosity'   ,visc_g); b%fs%visc_g=visc_g
          ! Assign constant density to each phase
          call param_read('Liquid density',b%fs%rho_l)
@@ -298,7 +301,7 @@ contains
          call param_read('Pressure iteration',b%ps%maxit)
          call param_read('Pressure tolerance',b%ps%rcvg)
          ! Configure implicit velocity solver
-         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=pcg_pfmg,nst=7)
+         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=gmres_pfmg,nst=7)
          call param_read('Implicit iteration',b%vs%maxit)
          call param_read('Implicit tolerance',b%vs%rcvg)
 			! Setup the solver
@@ -315,6 +318,7 @@ contains
          visc_inf=0.0_WP
          ! Zero shear rate viscosity
          visc_0=visc_s; b%fs%visc_l=visc_0
+         b%visc_norm=b%fs%visc_l/visc_0
     end block solvent_viscosity 
       
 
@@ -407,6 +411,7 @@ contains
          call b%ens_out%add_surface('vofplic',b%smesh)
          call b%ens_out%add_scalar('SRmag',b%SRmag)
          call b%ens_out%add_scalar('visc_l',b%fs%visc_l)
+         call b%ens_out%add_scalar('normvisc_l',b%visc_norm)
          ! Output to ensight
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
@@ -549,6 +554,7 @@ contains
                b%SRmag(i,j,k)=sqrt(2.00_WP*b%SR(1,i,j,k)**2+b%SR(2,i,j,k)**2+b%SR(3,i,j,k)**2+2.0_WP*(b%SR(4,i,j,k)**2+b%SR(5,i,j,k)**2+b%SR(6,i,j,k)**2))
                ! Carreau Model
                b%fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*b%SRmag(i,j,k))**2)**((n-1.00_WP)/2.00_WP)
+               b%visc_norm(i,j,k)=b%fs%visc_l(i,j,k)/visc_0
              end do
            end do
          end do
