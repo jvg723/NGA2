@@ -6,6 +6,7 @@ module block2_class
    use iterator_class,    only: iterator
    use hypre_str_class,   only: hypre_str
    use hypre_uns_class,   only: hypre_uns
+   use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use ccl_class,         only: ccl
@@ -22,9 +23,9 @@ module block2_class
    !> block 2 object
    type :: block2
       class(config), pointer :: cfg             !< Pointer to config
-      ! type(hypre_str)        :: ps              !< Structured hypre pressure solver
-	   type(hypre_uns)        :: ps              !< Unstructured hypre pressure solver
-      type(hypre_str)        :: vs              !< Structured hypre implicit solver
+      type(hypre_str)        :: ps              !< Structured hypre pressure solver
+	   ! type(hypre_uns)        :: ps              !< Unstructured hypre pressure solver
+      type(ddadi)            :: vs              !< DDAI implicit solver
       type(tpns)             :: fs              !< Two phase incompressible flow solver
       type(vfs)              :: vf              !< VF solver
       type(ccl)              :: cc              !< Connected component labeling class
@@ -62,7 +63,6 @@ module block2_class
    integer, parameter :: nlayer=4
 
    !> Structure post processing 
-   ! real(WP) :: tbin        !< binning time frequency for liquid structures
    real(WP) :: x_over_xL   !< Parameter to set location of collection along x-axis
    real(WP) :: volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3,eccent
    real(WP), dimension(:,:), allocatable :: mother_dropsize,satellite_dropsize,wave_number !< Arrays for K&M 2020 breakup model
@@ -274,7 +274,7 @@ contains
       create_and_initialize_flow_solver: block
          use tpns_class, only: dirichlet,clipped_neumann,slip
          use hypre_str_class, only: pcg_pfmg,gmres_pfmg
-         use hypre_uns_class,  only: gmres_amg
+         ! use hypre_uns_class,  only: gmres_amg
          integer :: i,j,k
          ! Create flow solver
          b%fs=tpns(cfg=b%cfg,name='Two-phase NS')
@@ -296,14 +296,13 @@ contains
          call b%fs%add_bcond(name='bc_zp',type=slip,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
          call b%fs%add_bcond(name='bc_zm',type=slip,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
-			! b%ps=hypre_str(cfg=b%cfg,name='Pressure',method=pcg_pfmg,nst=7)
-         b%ps=hypre_uns(cfg=b%cfg,name='Pressure',method=gmres_amg,nst=7)
+			b%ps=hypre_str(cfg=b%cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         b%ps%maxlevel=10
+         ! b%ps=hypre_uns(cfg=b%cfg,name='Pressure',method=gmres_amg,nst=7)
          call param_read('Pressure iteration',b%ps%maxit)
          call param_read('Pressure tolerance',b%ps%rcvg)
-         ! Configure implicit velocity solver
-         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=gmres_pfmg,nst=7)
-         call param_read('Implicit iteration',b%vs%maxit)
-         call param_read('Implicit tolerance',b%vs%rcvg)
+         ! Configure velocity solver
+			b%vs=ddadi(cfg=b%cfg,name='Velocity',nst=7)
 			! Setup the solver
 			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
@@ -358,23 +357,25 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         b%smesh=surfmesh(nvar=6,name='plic')
+         b%smesh=surfmesh(nvar=7,name='plic')
          b%smesh%varname(1)='nplane'
          b%smesh%varname(2)='x_velocity'
          b%smesh%varname(3)='y_velocity'
          b%smesh%varname(4)='z_velocity'
          b%smesh%varname(5)='visc_l'
          b%smesh%varname(6)='SRmag'
+         b%smesh%varname(7)='norm_viscl'
          ! Transfer polygons to smesh
          call b%vf%update_surfmesh(b%smesh)
          ! Also populate nplane variable
          b%smesh%var(1,:)=1.0_WP
-         ! Initalize vartiables to 0
+         ! Initalize variables to 0
          b%smesh%var(2,:)=0.0_WP
          b%smesh%var(3,:)=0.0_WP
          b%smesh%var(4,:)=0.0_WP
          b%smesh%var(5,:)=0.0_WP
          b%smesh%var(6,:)=0.0_WP
+         b%smesh%var(7,:)=0.0_WP
          np=0
          do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
             do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -388,6 +389,7 @@ contains
                         b%smesh%var(4,np)=b%Wi(i,j,k)
                         b%smesh%var(5,np)=b%fs%visc_l(i,j,k)
                         b%smesh%var(6,np)=b%SRmag(i,j,k)
+                        b%smesh%var(7,np)=b%visc_norm(i,j,k)
                      end if
                   end do
                end do
@@ -506,8 +508,8 @@ contains
          ! Create event for data postprocessing
          b%ppevt=event(time=b%time,name='Postproc output')
          call param_read('Postproc output period',b%ppevt%tper)
-         ! ! Perform the output
-         ! if (b%ppevt%occurs()) call structure_identification(b)
+         ! Perform the output
+         if (b%ppevt%occurs()) call structure_identification(b)
       end block structure_postproc
       
    end subroutine init
@@ -664,12 +666,13 @@ contains
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
             b%smesh%var(1,:)=1.0_WP
-            ! Initalize vartiables to 0
+            ! Initalize variables to 0
             b%smesh%var(2,:)=0.0_WP
             b%smesh%var(3,:)=0.0_WP
             b%smesh%var(4,:)=0.0_WP
             b%smesh%var(5,:)=0.0_WP
             b%smesh%var(6,:)=0.0_WP
+            b%smesh%var(7,:)=0.0_WP
             np=0
             do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
                do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -683,6 +686,7 @@ contains
                            b%smesh%var(4,np)=b%Wi(i,j,k)
                            b%smesh%var(5,np)=b%fs%visc_l(i,j,k)
                            b%smesh%var(6,np)=b%SRmag(i,j,k)
+                           b%smesh%var(7,np)=b%visc_norm(i,j,k)
                         end if
                      end do
                   end do
