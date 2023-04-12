@@ -38,7 +38,7 @@ module simulation
 	!> Private work arrays
 	real(WP), dimension(:,:,:), 	allocatable :: resU,resV,resW
 	real(WP), dimension(:,:,:), 	allocatable :: Ui,Vi,Wi
-	real(WP), dimension(:,:,:,:),   allocatable :: resSC
+	real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_,trSC_
     real(WP), dimension(:,:,:,:,:), allocatable :: gradu
 	real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
 	real(WP), dimension(:,:,:),   	allocatable :: SRmag
@@ -94,6 +94,8 @@ contains
         	allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			! Scalar solver
 			allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
+			allocate(SC_   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
+			allocate(trSC_ (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1)) !< Temp trSC array for checking bquick bound
 			allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
             allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
 			! Rate depdent polymer viscosity
@@ -126,7 +128,7 @@ contains
 			! Create a VOF solver
 			vf=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF')
 			! Initialize a bubble
-			center=[0.0_WP,0.01_WP,0.0_WP]
+			center=[0.0_WP,0.02_WP,0.0_WP]
 			radius=0.005_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
@@ -234,11 +236,11 @@ contains
 		! Create a FENE model 
 		create_fene: block 
 			use hypre_uns_class,   only: gmres
-			use multiscalar_class, only: quick
+			use multiscalar_class, only: quick,bquick
 			use fene_class,        only: FENECR
 			integer :: i,j,k
 			! Create FENE model solver
-			fm=fene(cfg=cfg,model=FENECR,scheme=quick,name='FENE')
+			fm=fene(cfg=cfg,model=FENECR,scheme=bquick,name='FENE')
 			! Assign aritifical stress diffusivisty
 			call param_read('Stress diffusivisty',stress_diff)
 			fm%diff=stress_diff
@@ -274,7 +276,9 @@ contains
 						fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
 					end do
 				end do
-			end do 
+			end do
+			! Get its divergence 
+			call fm%get_divT(fs)  
 	  	end block create_fene 
 	   
 
@@ -355,6 +359,8 @@ contains
 		   call cflfile%write()
 	   	end block create_monitor
 	   
+		! print *, 'epsilon',epsilon(0.0_WP)
+		! print *, '0.1+epsilon',0.1_WP+epsilon(0.0_WP)
 	   
 	end subroutine simulation_init
 	
@@ -430,21 +436,41 @@ contains
 				call fs%get_gradu(gradu)
 
 				! ============= SCALAR SOLVER =======================  
-				! Explicit calculation of resSC from advection equation equation
-				call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+            	! Reset interpolation metrics to QUICK scheme
+				call fm%metric_reset()
 
-				! Assemble explicit residual
-				resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+				! Calculate explicit SC prior to checking bounds
+				pre_check: block
+				   ! Explicit calculation of resSC from scalar equation
+				   call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+				   ! Assemble explicit residual
+				   resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+				   ! Apply this residual
+				   SC_=2.0_WP*fm%SC-fm%SCold+resSC
+				   ! Temp trSC array for Bquick  
+				   trSC_(:,:,:,1)=SC_(:,:,:,1)+SC_(:,:,:,2)+SC_(:,:,:,3)
+				end block pre_check
+				
+				! Check boundedess of explicit SC calculation
+				call fm%metric_modification(SC=trSC_,SCmin=3.0_WP,SCmax=100.0_WP)
+	
+				! Calculate explicit SC post checking bounds
+				post_check: block
+				   ! Explicit calculation of resSC from scalar equation
+				   call fm%get_drhoSCdt(resSC,fs%U,fs%V,fs%W)
+				   ! Assemble explicit residual
+				   resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
+				end block post_check
 				
 				! Add FENE source terms
 				fene: block
-					! Calculate CgradU terms
-					call fm%get_CgradU(gradu,CgradU)    
-					! Calculate the relaxation function
-					call fm%get_relaxationFunction(fR,Lmax)     
-					! Add source terms to calculated residual
-					resSC=resSC+(CgradU-(fR/lambda))*time%dt
-			 	end block fene
+				   ! Calculate CgradU terms
+				   call fm%get_CgradU(gradu,CgradU)    
+				   ! Calculate the relaxation function
+				   call fm%get_relaxationFunction(fR,Lmax)     
+				   ! Add source terms to calculated residual
+				   resSC=resSC+(CgradU-(fR/lambda))*time%dt
+				end block fene
 	
 				! Form implicit residual
 				call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
@@ -471,39 +497,38 @@ contains
 				resV=-2.0_WP*fs%rho_V*fs%V+(fs%rho_Vold+fs%rho_V)*fs%Vold+time%dt*resV
 				resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
 
-				! Add in polymer stress
-				polymer: block
-					use vfs_class, only: VFlo
-					integer :: i,j,k
-					! Calculate the relaxation function
-					call fm%get_relaxationFunction(fR,Lmax)
-					! Build stress tensor
-					do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-						do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-						    do i=fs%cfg%imino_,fs%cfg%imaxo_
-								fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
-								fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
-								fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
-								fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
-								fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
-								fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
-						    end do
-						end do
-					 end do    
-					! Get its divergence 
-					call fm%get_divT(fs) 
-					! Add divT to momentum equation 
-					do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  		do j=fs%cfg%jmin_,fs%cfg%jmax_
-                    		do i=fs%cfg%imin_,fs%cfg%imax_
-								! Use volume fraction to apply divergence of polymer stress
-									if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
-									if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
-									if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
-							end do
-						end do
-					end do
-			 	end block polymer
+				! ! Add in polymer stress
+				! polymer: block
+				! 	integer :: i,j,k
+				! 	! Calculate the relaxation function
+				! 	call fm%get_relaxationFunction(fR,Lmax)
+				! 	! Build stress tensor
+				! 	do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+				! 		do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+				! 		    do i=fs%cfg%imino_,fs%cfg%imaxo_
+				! 				fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
+				! 				fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
+				! 				fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
+				! 				fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
+				! 				fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
+				! 				fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
+				! 		    end do
+				! 		end do
+				! 	 end do    
+				! 	! Get its divergence 
+				! 	call fm%get_divT(fs) 
+				! 	! Add divT to momentum equation 
+				! 	do k=fs%cfg%kmin_,fs%cfg%kmax_
+                !   		do j=fs%cfg%jmin_,fs%cfg%jmax_
+                !     		do i=fs%cfg%imin_,fs%cfg%imax_
+				! 				! Use volume fraction to apply divergence of polymer stress
+				! 					! if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
+				! 					! if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
+				! 					! if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
+				! 			end do
+				! 		end do
+				! 	end do
+			 	! end block polymer
 				
 				! Form implicit residuals
 			   	call fs%solve_implicit(time%dt,resU,resV,resW)
