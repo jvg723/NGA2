@@ -367,6 +367,7 @@ contains
 	
 	!> Perform an NGA2 simulation
 	subroutine simulation_run
+		use tpns_class, only: arithmetic_visc
 		implicit none
 		
 		! Perform time integration
@@ -419,7 +420,7 @@ contains
 		   	call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 			
 			! Prepare new staggered viscosity (at n+1)
-		   	call fs%get_viscosity(vf=vf)
+			call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
 			
 		   	! Perform sub-iterations
 		   	do while (time%it.le.time%itmax)
@@ -447,12 +448,10 @@ contains
 				   resSC=-2.0_WP*(fm%rho*fm%SC-fm%rho*fm%SCold)+time%dt*resSC
 				   ! Apply this residual
 				   SC_=2.0_WP*fm%SC-fm%SCold+resSC
-				   ! Temp trSC array for Bquick  
-				   trSC_(:,:,:,1)=SC_(:,:,:,1)+SC_(:,:,:,2)+SC_(:,:,:,3)
 				end block pre_check
 				
 				! Check boundedess of explicit SC calculation
-				call fm%metric_modification(SC=trSC_,SCmin=3.0_WP,SCmax=100.0_WP)
+				call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
 	
 				! Calculate explicit SC post checking bounds
 				post_check: block
@@ -497,38 +496,38 @@ contains
 				resV=-2.0_WP*fs%rho_V*fs%V+(fs%rho_Vold+fs%rho_V)*fs%Vold+time%dt*resV
 				resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
 
-				! ! Add in polymer stress
-				! polymer: block
-				! 	integer :: i,j,k
-				! 	! Calculate the relaxation function
-				! 	call fm%get_relaxationFunction(fR,Lmax)
-				! 	! Build stress tensor
-				! 	do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-				! 		do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-				! 		    do i=fs%cfg%imino_,fs%cfg%imaxo_
-				! 				fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
-				! 				fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
-				! 				fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
-				! 				fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
-				! 				fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
-				! 				fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
-				! 		    end do
-				! 		end do
-				! 	 end do    
-				! 	! Get its divergence 
-				! 	call fm%get_divT(fs) 
-				! 	! Add divT to momentum equation 
-				! 	do k=fs%cfg%kmin_,fs%cfg%kmax_
-                !   		do j=fs%cfg%jmin_,fs%cfg%jmax_
-                !     		do i=fs%cfg%imin_,fs%cfg%imax_
-				! 				! Use volume fraction to apply divergence of polymer stress
-				! 					! if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
-				! 					! if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
-				! 					! if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+vf%VF(i,j,k)*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
-				! 			end do
-				! 		end do
-				! 	end do
-			 	! end block polymer
+				! Add in polymer stress
+				polymer: block
+					integer :: i,j,k
+					! Calculate the relaxation function
+					call fm%get_relaxationFunction(fR,Lmax)
+					! Build stress tensor
+					! fm%T=(visc_p/lambda)*fR   
+					do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+						do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+						    do i=fs%cfg%imino_,fs%cfg%imaxo_
+								fm%T(i,j,k,1)=(visc_p(i,j,k)/lambda)*fR(i,j,k,1)
+								fm%T(i,j,k,2)=(visc_p(i,j,k)/lambda)*fR(i,j,k,2)
+								fm%T(i,j,k,3)=(visc_p(i,j,k)/lambda)*fR(i,j,k,3)
+								fm%T(i,j,k,4)=(visc_p(i,j,k)/lambda)*fR(i,j,k,4)
+								fm%T(i,j,k,5)=(visc_p(i,j,k)/lambda)*fR(i,j,k,5)
+								fm%T(i,j,k,6)=(visc_p(i,j,k)/lambda)*fR(i,j,k,6)
+						    end do
+						end do
+					 end do    
+					! Get its divergence 
+					call fm%get_divT(fs) 
+					! Add divT to momentum equation 
+					do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  		do j=fs%cfg%jmin_,fs%cfg%jmax_
+                    		do i=fs%cfg%imin_,fs%cfg%imax_
+								! if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%itpr_x(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
+								! if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%itpr_y(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
+								! if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%itpr_z(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
+							end do
+						end do
+					end do
+			 	end block polymer
 				
 				! Form implicit residuals
 			   	call fs%solve_implicit(time%dt,resU,resV,resW)
