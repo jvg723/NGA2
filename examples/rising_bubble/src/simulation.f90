@@ -256,12 +256,24 @@ contains
 			! Setup the solver
 			call fm%setup(implicit_solver=ss)
 			! Intalize conformation tensor to identity matrix
-			fm%SC(:,:,:,1)=1.00_WP !Cxx
-			fm%SC(:,:,:,2)=0.00_WP !Cyx
-			fm%SC(:,:,:,3)=0.00_WP !Czx
-			fm%SC(:,:,:,4)=1.00_WP !Cyy
-			fm%SC(:,:,:,5)=0.00_WP !Czy
-			fm%SC(:,:,:,6)=1.00_WP !Czz
+			do k=fs%cfg%kmin_,fs%cfg%kmax_
+				do j=fs%cfg%jmin_,fs%cfg%jmax_
+					do i=fs%cfg%imin_,fs%cfg%imax_
+						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,1)=vf%VF(i,j,k)*1.00_WP !Cxx
+						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,2)=vf%VF(i,j,k)*0.00_WP !Cyx
+						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,3)=vf%VF(i,j,k)*0.00_WP !Czx
+						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,4)=vf%VF(i,j,k)*1.00_WP !Cyy
+						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,5)=vf%VF(i,j,k)*0.00_WP !Czy
+						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,6)=vf%VF(i,j,k)*1.00_WP !Czz
+					end do
+			  	end do
+		  	end do
+			! fm%SC(:,:,:,1)=1.00_WP !Cxx
+			! fm%SC(:,:,:,2)=0.00_WP !Cyx
+			! fm%SC(:,:,:,3)=0.00_WP !Czx
+			! fm%SC(:,:,:,4)=1.00_WP !Cyy
+			! fm%SC(:,:,:,5)=0.00_WP !Czy
+			! fm%SC(:,:,:,6)=1.00_WP !Czz
 			! Calculate the relaxation function
 			call fm%get_relaxationFunction(fR,Lmax)
 			! Build stress tensor
@@ -317,6 +329,27 @@ contains
 		   call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
 		   call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
 		   call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
+		   call ens_out%add_scalar('CgradU1',CgradU(:,:,:,1))
+		   call ens_out%add_scalar('CgradU2',CgradU(:,:,:,2))
+		   call ens_out%add_scalar('CgradU3',CgradU(:,:,:,3))
+		   call ens_out%add_scalar('CgradU4',CgradU(:,:,:,4))
+		   call ens_out%add_scalar('CgradU5',CgradU(:,:,:,5))
+		   call ens_out%add_scalar('CgradU6',CgradU(:,:,:,6))
+		   call ens_out%add_scalar('gradU11',gradu(1,1,:,:,:))
+		   call ens_out%add_scalar('gradU12',gradu(1,2,:,:,:))
+		   call ens_out%add_scalar('gradU13',gradu(1,3,:,:,:))
+		   call ens_out%add_scalar('gradU21',gradu(2,1,:,:,:))
+		   call ens_out%add_scalar('gradU22',gradu(2,2,:,:,:))
+		   call ens_out%add_scalar('gradU23',gradu(2,3,:,:,:))
+		   call ens_out%add_scalar('gradU31',gradu(3,1,:,:,:))
+		   call ens_out%add_scalar('gradU32',gradu(3,2,:,:,:))
+		   call ens_out%add_scalar('gradU33',gradu(3,3,:,:,:))
+		   call ens_out%add_scalar('fR1',fR(:,:,:,1))
+		   call ens_out%add_scalar('fR2',fR(:,:,:,2))
+		   call ens_out%add_scalar('fR3',fR(:,:,:,3))
+		   call ens_out%add_scalar('fR4',fR(:,:,:,4))
+		   call ens_out%add_scalar('fR5',fR(:,:,:,5))
+		   call ens_out%add_scalar('fR6',fR(:,:,:,6))
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 	   	end block create_ensight
@@ -358,9 +391,6 @@ contains
 		   call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
 		   call cflfile%write()
 	   	end block create_monitor
-	   
-		! print *, 'epsilon',epsilon(0.0_WP)
-		! print *, '0.1+epsilon',0.1_WP+epsilon(0.0_WP)
 	   
 	end subroutine simulation_init
 	
@@ -451,7 +481,7 @@ contains
 				end block pre_check
 				
 				! Check boundedess of explicit SC calculation
-				call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
+				call fm%metric_modification(SC=SC_,SCmin=0.0_WP,SCmax=100.0_WP)
 	
 				! Calculate explicit SC post checking bounds
 				post_check: block
@@ -463,14 +493,29 @@ contains
 				
 				! Add FENE source terms
 				fene: block
+				   integer :: i,j,k
 				   ! Calculate CgradU terms
 				   call fm%get_CgradU(gradu,CgradU)    
 				   ! Calculate the relaxation function
 				   call fm%get_relaxationFunction(fR,Lmax)     
 				   ! Add source terms to calculated residual
-				   resSC=resSC+(CgradU-(fR/lambda))*time%dt
+				   	do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+						do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+							do i=fs%cfg%imino_,fs%cfg%imaxo_
+								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,1)=resSC(i,j,k,1)+vf%VF(i,j,k)*((CgradU(i,j,k,1)-(fR(i,j,k,1)/lambda))*time%dt)
+								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,2)=resSC(i,j,k,2)+vf%VF(i,j,k)*((CgradU(i,j,k,2)-(fR(i,j,k,2)/lambda))*time%dt)
+								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,3)=resSC(i,j,k,3)+vf%VF(i,j,k)*((CgradU(i,j,k,3)-(fR(i,j,k,3)/lambda))*time%dt)
+								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,4)=resSC(i,j,k,4)+vf%VF(i,j,k)*((CgradU(i,j,k,4)-(fR(i,j,k,4)/lambda))*time%dt)
+								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,5)=resSC(i,j,k,5)+vf%VF(i,j,k)*((CgradU(i,j,k,5)-(fR(i,j,k,5)/lambda))*time%dt)
+								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,6)=resSC(i,j,k,6)+vf%VF(i,j,k)*((CgradU(i,j,k,6)-(fR(i,j,k,6)/lambda))*time%dt)
+							end do
+						end do
+				 	end do 
+				!    resSC=resSC+(CgradU-(fR/lambda))*time%dt
+				!    resSC=resSC+(CgradU)*time%dt
 				end block fene
-	
+				! CgradU causes blow up
+
 				! Form implicit residual
 				call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
 	
