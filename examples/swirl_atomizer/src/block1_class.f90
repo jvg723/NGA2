@@ -3,7 +3,7 @@ module block1_class
    use precision,         only: WP
    use geometry,          only: Dout
    use ibconfig_class,    only: ibconfig
-   use hypre_str_class,   only: hypre_str
+   use ddadi_class,       only: ddadi
    use fftxyz_class,      only: fftxyz
    use incomp_class,      only: incomp
    use sgsmodel_class,    only: sgsmodel
@@ -20,9 +20,8 @@ module block1_class
    type :: block1
       class(ibconfig),   pointer :: cfg           !< Pointer to config
       type(incomp)               :: fs            !< Single phase incompressible flow solver
-      !type(hypre_str)           :: ps
       type(fftxyz)               :: ps            !< Fourier pressure solver
-      type(hypre_str)            :: vs            !< Structured hypre implicit solver
+      type(ddadi)                :: vs
       type(sgsmodel)             :: sgs           !< SGS model
       type(timetracker)          :: time          !< Time tracker
       type(ensight)              :: ens_out       !< Ensight output
@@ -116,14 +115,8 @@ contains
          call param_read('Liquid dynamic viscosity',visc); b%fs%visc=visc
          ! Configure pressure solver
          b%ps=fftxyz(cfg=b%cfg,name='Pressure',nst=7)
-         !ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
-         !ps%maxlevel=14
-         !call param_read('Pressure iteration',ps%maxit)
-         !call param_read('Pressure tolerance',ps%rcvg)
-         ! Configure implicit velocity solver
-         b%vs=hypre_str(cfg=b%cfg,name='Velocity',method=gmres_pfmg,nst=7)
-         call param_read('Implicit iteration',b%vs%maxit)
-         call param_read('Implicit tolerance',b%vs%rcvg)
+         ! Configure velocity solver
+			b%vs=ddadi(cfg=b%cfg,name='Velocity',nst=7)
          ! Setup the solver
          call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_flow_solver
