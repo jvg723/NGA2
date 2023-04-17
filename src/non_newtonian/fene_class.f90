@@ -70,21 +70,32 @@ contains
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradu
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: CgradU
       integer :: i,j,k
-      ! xx tensor component
-      CgradU(:,:,:,1)=2.00_WP*(this%SC(:,:,:,1)*gradu(1,1,:,:,:)+this%SC(:,:,:,2)*gradu(2,1,:,:,:)+this%SC(:,:,:,3)*gradu(3,1,:,:,:))
-      ! yx/xy tensor component
-      CgradU(:,:,:,2)=(this%SC(:,:,:,2)*gradu(1,1,:,:,:)+this%SC(:,:,:,4)*gradu(2,1,:,:,:)+this%SC(:,:,:,5)*gradu(3,1,:,:,:))+&
-      &               (this%SC(:,:,:,1)*gradu(1,2,:,:,:)+this%SC(:,:,:,2)*gradu(2,2,:,:,:)+this%SC(:,:,:,3)*gradu(3,2,:,:,:))
-      ! zx/xz tensor component
-      CgradU(:,:,:,3)=(this%SC(:,:,:,3)*gradu(1,1,:,:,:)+this%SC(:,:,:,5)*gradu(2,1,:,:,:)+this%SC(:,:,:,6)*gradu(3,1,:,:,:))+&
-      &               (this%SC(:,:,:,1)*gradu(1,3,:,:,:)+this%SC(:,:,:,2)*gradu(2,3,:,:,:)+this%SC(:,:,:,3)*gradu(3,3,:,:,:))
-      ! yy tensor component
-      CgradU(:,:,:,4)=2.00_WP*(this%SC(:,:,:,2)*gradu(1,2,:,:,:)+this%SC(:,:,:,4)*gradu(2,2,:,:,:)+this%SC(:,:,:,5)*gradu(3,2,:,:,:))
-      ! zy/yz tensor component
-      CgradU(:,:,:,5)=(this%SC(:,:,:,2)*gradu(1,3,:,:,:)+this%SC(:,:,:,4)*gradu(2,3,:,:,:)+this%SC(:,:,:,5)*gradu(3,3,:,:,:))+&
-      &               (this%SC(:,:,:,3)*gradu(1,2,:,:,:)+this%SC(:,:,:,5)*gradu(2,2,:,:,:)+this%SC(:,:,:,6)*gradu(3,2,:,:,:))
-      ! zz tensor component
-      CgradU(:,:,:,6)=2.00_WP*(this%SC(:,:,:,3)*gradu(1,3,:,:,:)+this%SC(:,:,:,5)*gradu(2,3,:,:,:)+this%SC(:,:,:,6)*gradu(3,3,:,:,:))
+      
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! xx tensor component
+               CgradU(i,j,k,1)=2.00_WP*(this%SC(i,j,k,1)*gradu(1,1,i,j,k)+this%SC(i,j,k,2)*gradu(2,1,i,j,k)+this%SC(i,j,k,3)*gradu(3,1,i,j,k))
+               ! yx/xy tensor component
+               CgradU(i,j,k,2)=(this%SC(i,j,k,2)*gradu(1,1,i,j,k)+this%SC(i,j,k,4)*gradu(2,1,i,j,k)+this%SC(i,j,k,5)*gradu(3,1,i,j,k))+&
+               &               (this%SC(i,j,k,1)*gradu(1,2,i,j,k)+this%SC(i,j,k,2)*gradu(2,2,i,j,k)+this%SC(i,j,k,3)*gradu(3,2,i,j,k))
+               ! zx/xz tensor component
+               CgradU(i,j,k,3)=(this%SC(i,j,k,3)*gradu(1,1,i,j,k)+this%SC(i,j,k,5)*gradu(2,1,i,j,k)+this%SC(i,j,k,6)*gradu(3,1,i,j,k))+&
+               &               (this%SC(i,j,k,1)*gradu(1,3,i,j,k)+this%SC(i,j,k,2)*gradu(2,3,i,j,k)+this%SC(i,j,k,3)*gradu(3,3,i,j,k))
+               ! yy tensor component
+               CgradU(i,j,k,4)=2.00_WP*(this%SC(i,j,k,2)*gradu(1,2,i,j,k)+this%SC(i,j,k,4)*gradu(2,2,i,j,k)+this%SC(i,j,k,5)*gradu(3,2,i,j,k))
+               ! zy/yz tensor component
+               CgradU(i,j,k,5)=(this%SC(i,j,k,2)*gradu(1,3,i,j,k)+this%SC(i,j,k,4)*gradu(2,3,i,j,k)+this%SC(i,j,k,5)*gradu(3,3,i,j,k))+&
+               &               (this%SC(i,j,k,3)*gradu(1,2,i,j,k)+this%SC(i,j,k,5)*gradu(2,2,i,j,k)+this%SC(i,j,k,6)*gradu(3,2,i,j,k))
+               ! zz tensor component
+               CgradU(i,j,k,6)=2.00_WP*(this%SC(i,j,k,3)*gradu(1,3,i,j,k)+this%SC(i,j,k,5)*gradu(2,3,i,j,k)+this%SC(i,j,k,6)*gradu(3,3,i,j,k))
+            end do
+         end do
+      end do
+
+      ! Sync it
+	   call this%cfg%pgrid_rsync_right_array(CgradU)
+      
    end subroutine get_CgradU
 
    !> Calculate the relaxation function for the FENE model
@@ -100,30 +111,46 @@ contains
       ! Allocate scalar arrays 
       allocate(f_C(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); f_C=0.0_WP
 
-      ! Trace of conformation tensor and ensure trC<Lmax^2
+      ! Trace of conformation tensor
       this%trC=this%SC(:,:,:,1)+this%SC(:,:,:,4)+this%SC(:,:,:,6)
 
       select case (this%model)
          case (FENEP)
             ! Peterlin Function
             f_C=(Lmax**2-3.00_WP)/(Lmax**2-this%trC)          
-            ! Build relaxation terms for FENE-P (f(r)*C-I)
-            fR(:,:,:,1)=f_C*this%SC(:,:,:,1)-1.00_WP !> xx tensor component
-            fR(:,:,:,2)=f_C*this%SC(:,:,:,2)-0.00_WP !> yx/xy tensor component
-            fR(:,:,:,3)=f_C*this%SC(:,:,:,3)-0.00_WP !> zx/xz tensor component
-            fR(:,:,:,4)=f_C*this%SC(:,:,:,4)-1.00_WP !> yy tensor component
-            fR(:,:,:,5)=f_C*this%SC(:,:,:,5)-0.00_WP !> zy/yz tensor component
-            fR(:,:,:,6)=f_C*this%SC(:,:,:,6)-1.00_WP !> zz tensor component
+            ! Build relaxation term for FENE-P (f(r)*C-I)
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     fR(i,j,k,1)=f_C(i,j,k)*this%SC(i,j,k,1)-1.00_WP !> xx tensor component
+                     fR(i,j,k,2)=f_C(i,j,k)*this%SC(i,j,k,2)-0.00_WP !> yx/xy tensor component
+                     fR(i,j,k,3)=f_C(i,j,k)*this%SC(i,j,k,3)-0.00_WP !> zx/xz tensor component
+                     fR(i,j,k,4)=f_C(i,j,k)*this%SC(i,j,k,4)-1.00_WP !> yy tensor component
+                     fR(i,j,k,5)=f_C(i,j,k)*this%SC(i,j,k,5)-0.00_WP !> zy/yz tensor component
+                     fR(i,j,k,6)=f_C(i,j,k)*this%SC(i,j,k,6)-1.00_WP !> zz tensor component
+                  end do
+               end do
+            end do
+            ! Sync it
+            call this%cfg%pgrid_rsync_right_array(fR)
          case (FENECR)
             ! Spring force law
             f_C=Lmax**2/(Lmax**2-this%trC)          
-            ! Build relaxation terms for FENE-P (f(r)*(C-I))
-            fR(:,:,:,1)=f_C*(this%SC(:,:,:,1)-1.00_WP) !> xx tensor component
-            fR(:,:,:,2)=f_C*(this%SC(:,:,:,2)-0.00_WP) !> yx/xy tensor component
-            fR(:,:,:,3)=f_C*(this%SC(:,:,:,3)-0.00_WP) !> zx/xz tensor component
-            fR(:,:,:,4)=f_C*(this%SC(:,:,:,4)-1.00_WP) !> yy tensor component
-            fR(:,:,:,5)=f_C*(this%SC(:,:,:,5)-0.00_WP) !> zy/yz tensor component
-            fR(:,:,:,6)=f_C*(this%SC(:,:,:,6)-1.00_WP) !> zz tensor component
+            ! Build relaxation term for FENE-P (f(r)*(C-I))
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     fR(i,j,k,1)=f_C(i,j,k)*(this%SC(i,j,k,1)-1.00_WP) !> xx tensor component
+                     fR(i,j,k,2)=f_C(i,j,k)*(this%SC(i,j,k,2)-0.00_WP) !> yx/xy tensor component
+                     fR(i,j,k,3)=f_C(i,j,k)*(this%SC(i,j,k,3)-0.00_WP) !> zx/xz tensor component
+                     fR(i,j,k,4)=f_C(i,j,k)*(this%SC(i,j,k,4)-1.00_WP) !> yy tensor component
+                     fR(i,j,k,5)=f_C(i,j,k)*(this%SC(i,j,k,5)-0.00_WP) !> zy/yz tensor component
+                     fR(i,j,k,6)=f_C(i,j,k)*(this%SC(i,j,k,6)-1.00_WP) !> zz tensor component
+                  end do
+               end do
+            end do
+            ! Sync it
+            call this%cfg%pgrid_rsync_right_array(fR)
          case default
             call die('[FENE relaxation function] Unknown FENE model selected')
       end select
@@ -136,12 +163,12 @@ contains
 
    !> Calculate the viscoelastic tensor divergence
    subroutine get_divT(this,fs)
-      ! use incomp_class, only: incomp
-      use tpns_class, only: tpns
+      use incomp_class, only: incomp
+      ! use tpns_class, only: tpns
       implicit none
       class(fene), intent(inout) :: this
-      ! class(incomp), intent(in)  :: fs
-      class(tpns), intent(in)  :: fs
+      class(incomp), intent(in)  :: fs
+      ! class(tpns), intent(in)  :: fs
       integer :: i,j,k
       real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
 
