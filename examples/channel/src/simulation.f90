@@ -688,16 +688,23 @@ contains
 
             ! Add in polymer stress
             polymer: block
+               integer :: i,j,k
                ! Calculate the relaxation function
                call fm%get_relaxationFunction(fR,Lmax)
                ! Build stress tensor
                fm%T=(visc_p/lambda)*fR   
                ! Get its divergence 
                call fm%get_divT(fs) 
-               ! Add divT to momentum equation 
-               where (fs%umask.eq.0) resU=resU+fm%divT(:,:,:,1)*time%dt !> x face/U velocity
-               where (fs%vmask.eq.0) resV=resV+fm%divT(:,:,:,2)*time%dt !> y face/V velocity
-               where (fs%wmask.eq.0) resW=resW+fm%divT(:,:,:,3)*time%dt !> z face/W velocity
+               ! Add divT to momentum equation
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                    do i=fs%cfg%imin_,fs%cfg%imax_
+                        if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+fm%divT(i,j,k,1)*time%dt !> x face/U velocity
+                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+fm%divT(i,j,k,2)*time%dt !> y face/V velocity
+                        if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+fm%divT(i,j,k,3)*time%dt !> z face/W velocity
+                     end do
+                  end do
+               end do 
             end block polymer
 
             ! Form implicit residuals
