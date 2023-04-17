@@ -251,7 +251,6 @@ contains
 			! Relaxation time for polymer
 			call param_read('Polymer Relaxation Time',lambda)
 			! Configure the scalar solver
-			! Configure the scalar solver
 			ss=ddadi(cfg=cfg,name='Scalar',nst=13)
 			! Setup the solver
 			call fm%setup(implicit_solver=ss)
@@ -481,7 +480,6 @@ contains
 				
 				! Add FENE source terms
 				fene: block
-				   integer :: i,j,k
 				   ! Calculate CgradU terms
 				   call fm%get_CgradU(gradu,CgradU)    
 				   ! Calculate the relaxation function
@@ -521,7 +519,6 @@ contains
 					! Calculate the relaxation function
 					call fm%get_relaxationFunction(fR,Lmax)
 					! Build stress tensor
-					! fm%T=(visc_p/lambda)*fR   
 					do k=fs%cfg%kmino_,fs%cfg%kmaxo_
 						do j=fs%cfg%jmino_,fs%cfg%jmaxo_
 						    do i=fs%cfg%imino_,fs%cfg%imaxo_

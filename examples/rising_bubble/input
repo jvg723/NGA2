@@ -48,4 +48,4 @@ Scalar tolerance : 1e-4
 Scalar iteration : 100
 
 # Ensight output
-Ensight output period : 1e-3
+Ensight output period : 1e-2
