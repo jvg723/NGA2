@@ -4,6 +4,7 @@ module ligament_class
    use config_class,      only: config
    use iterator_class,    only: iterator
    use ensight_class,     only: ensight
+   !use fft2d_class,       only: fft2d
    use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
    use vfs_class,         only: vfs
@@ -25,6 +26,7 @@ module ligament_class
       !> Flow solver
       type(vfs)         :: vf    !< Volume fraction solver
       type(tpns)        :: fs    !< Two-phase flow solver
+      !type(fft2d)       :: ps    !< FFT-accelerated linear solver for pressure
       type(hypre_str)   :: ps    !< Structured Hypre linear solver for pressure
       type(ddadi)       :: vs    !< DDADI solver for velocity
       type(timetracker) :: time  !< Time info
@@ -198,8 +200,8 @@ contains
       create_flow_solver: block
          use mathtools,       only: Pi
          use param,           only: param_read
-         use hypre_str_class, only: pcg_pfmg
          use tpns_class,      only: dirichlet,clipped_neumann,bcond
+         use hypre_str_class, only: pcg_pfmg
          type(bcond), pointer :: mybc
          integer :: n,i,j,k      
          ! Create flow solver
@@ -214,6 +216,7 @@ contains
          ! Define outflow boundary condition on the right
          call this%fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
          ! Configure pressure solver
+         !this%ps=fft2d(cfg=this%cfg,name='Pressure',nst=7)
          this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg,nst=7)
          this%ps%maxlevel=20
          call param_read('Pressure iteration',this%ps%maxit)
@@ -336,9 +339,6 @@ contains
          
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
-         
-         ! Add momentum source terms
-			call this%fs%addsrc_gravity(this%resU,this%resV,this%resW)
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
