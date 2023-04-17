@@ -2,11 +2,11 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.1
-Ly :	0.2
+Lx :	0.05
+Ly :	0.1
 Lz :	0.0005
-nx :	200
-ny :	400
+nx :	100
+ny :	200
 nz :	1
 <!-- nx :	25
 ny :	50
@@ -27,7 +27,7 @@ Zero shear rate viscosity : 1
 
 # FENE model properties
 Maximum extension of polymer chain : 10
-Polymer Relaxation Time            : 5
+Polymer Relaxation Time            : 0.05   !< Giving trC range similar to paper
 Stress diffusivisty                : 0
 
 # Time integration

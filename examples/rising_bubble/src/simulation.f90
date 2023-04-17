@@ -256,24 +256,12 @@ contains
 			! Setup the solver
 			call fm%setup(implicit_solver=ss)
 			! Intalize conformation tensor to identity matrix
-			do k=fs%cfg%kmin_,fs%cfg%kmax_
-				do j=fs%cfg%jmin_,fs%cfg%jmax_
-					do i=fs%cfg%imin_,fs%cfg%imax_
-						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,1)=vf%VF(i,j,k)*1.00_WP !Cxx
-						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,2)=vf%VF(i,j,k)*0.00_WP !Cyx
-						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,3)=vf%VF(i,j,k)*0.00_WP !Czx
-						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,4)=vf%VF(i,j,k)*1.00_WP !Cyy
-						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,5)=vf%VF(i,j,k)*0.00_WP !Czy
-						if (fm%mask(i,j,k).eq.0) fm%SC(i,j,k,6)=vf%VF(i,j,k)*1.00_WP !Czz
-					end do
-			  	end do
-		  	end do
-			! fm%SC(:,:,:,1)=1.00_WP !Cxx
-			! fm%SC(:,:,:,2)=0.00_WP !Cyx
-			! fm%SC(:,:,:,3)=0.00_WP !Czx
-			! fm%SC(:,:,:,4)=1.00_WP !Cyy
-			! fm%SC(:,:,:,5)=0.00_WP !Czy
-			! fm%SC(:,:,:,6)=1.00_WP !Czz
+			fm%SC(:,:,:,1)=1.00_WP !Cxx
+			fm%SC(:,:,:,2)=0.00_WP !Cyx
+			fm%SC(:,:,:,3)=0.00_WP !Czx
+			fm%SC(:,:,:,4)=1.00_WP !Cyy
+			fm%SC(:,:,:,5)=0.00_WP !Czy
+			fm%SC(:,:,:,6)=1.00_WP !Czz
 			! Calculate the relaxation function
 			call fm%get_relaxationFunction(fR,Lmax)
 			! Build stress tensor
@@ -481,7 +469,7 @@ contains
 				end block pre_check
 				
 				! Check boundedess of explicit SC calculation
-				call fm%metric_modification(SC=SC_,SCmin=0.0_WP,SCmax=100.0_WP)
+				call fm%metric_modification(SC=SC_,SCmin=0.0_WP)
 	
 				! Calculate explicit SC post checking bounds
 				post_check: block
@@ -499,22 +487,8 @@ contains
 				   ! Calculate the relaxation function
 				   call fm%get_relaxationFunction(fR,Lmax)     
 				   ! Add source terms to calculated residual
-				   	do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-						do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-							do i=fs%cfg%imino_,fs%cfg%imaxo_
-								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,1)=resSC(i,j,k,1)+vf%VF(i,j,k)*((CgradU(i,j,k,1)-(fR(i,j,k,1)/lambda))*time%dt)
-								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,2)=resSC(i,j,k,2)+vf%VF(i,j,k)*((CgradU(i,j,k,2)-(fR(i,j,k,2)/lambda))*time%dt)
-								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,3)=resSC(i,j,k,3)+vf%VF(i,j,k)*((CgradU(i,j,k,3)-(fR(i,j,k,3)/lambda))*time%dt)
-								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,4)=resSC(i,j,k,4)+vf%VF(i,j,k)*((CgradU(i,j,k,4)-(fR(i,j,k,4)/lambda))*time%dt)
-								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,5)=resSC(i,j,k,5)+vf%VF(i,j,k)*((CgradU(i,j,k,5)-(fR(i,j,k,5)/lambda))*time%dt)
-								if (fm%mask(i,j,k).eq.0) resSC(i,j,k,6)=resSC(i,j,k,6)+vf%VF(i,j,k)*((CgradU(i,j,k,6)-(fR(i,j,k,6)/lambda))*time%dt)
-							end do
-						end do
-				 	end do 
-				!    resSC=resSC+(CgradU-(fR/lambda))*time%dt
-				!    resSC=resSC+(CgradU)*time%dt
+				   resSC=resSC+(CgradU-(fR/lambda))*time%dt
 				end block fene
-				! CgradU causes blow up
 
 				! Form implicit residual
 				call fm%solve_implicit(time%dt,resSC,fs%U,fs%V,fs%W)
@@ -566,9 +540,9 @@ contains
 					do k=fs%cfg%kmin_,fs%cfg%kmax_
                   		do j=fs%cfg%jmin_,fs%cfg%jmax_
                     		do i=fs%cfg%imin_,fs%cfg%imax_
-								! if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%itpr_x(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
-								! if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%itpr_y(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
-								! if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%itpr_z(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
+								if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%itpr_x(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,1)*time%dt !> x face/U velocity
+								if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%itpr_y(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,2)*time%dt !> y face/V velocity
+								if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%itpr_z(:,i,j,k)*vf%VF(i,j,k))*fm%divT(i,j,k,3)*time%dt !> z face/W velocity
 							end do
 						end do
 					end do
