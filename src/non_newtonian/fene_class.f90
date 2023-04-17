@@ -119,9 +119,9 @@ contains
             ! Peterlin Function
             f_C=(Lmax**2-3.00_WP)/(Lmax**2-this%trC)          
             ! Build relaxation term for FENE-P (f(r)*C-I)
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
+            do k=this%cfg%kmin_,this%cfg%kmax_
+               do j=this%cfg%jmin_,this%cfg%jmax_
+                  do i=this%cfg%imin_,this%cfg%imax_
                      fR(i,j,k,1)=f_C(i,j,k)*this%SC(i,j,k,1)-1.00_WP !> xx tensor component
                      fR(i,j,k,2)=f_C(i,j,k)*this%SC(i,j,k,2)-0.00_WP !> yx/xy tensor component
                      fR(i,j,k,3)=f_C(i,j,k)*this%SC(i,j,k,3)-0.00_WP !> zx/xz tensor component
@@ -137,9 +137,9 @@ contains
             ! Spring force law
             f_C=Lmax**2/(Lmax**2-this%trC)          
             ! Build relaxation term for FENE-P (f(r)*(C-I))
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
+            do k=this%cfg%kmin_,this%cfg%kmax_
+               do j=this%cfg%jmin_,this%cfg%jmax_
+                  do i=this%cfg%imin_,this%cfg%imax_
                      fR(i,j,k,1)=f_C(i,j,k)*(this%SC(i,j,k,1)-1.00_WP) !> xx tensor component
                      fR(i,j,k,2)=f_C(i,j,k)*(this%SC(i,j,k,2)-0.00_WP) !> yx/xy tensor component
                      fR(i,j,k,3)=f_C(i,j,k)*(this%SC(i,j,k,3)-0.00_WP) !> zx/xz tensor component
@@ -163,12 +163,12 @@ contains
 
    !> Calculate the viscoelastic tensor divergence
    subroutine get_divT(this,fs)
-      use incomp_class, only: incomp
-      ! use tpns_class, only: tpns
+      ! use incomp_class, only: incomp
+      use tpns_class, only: tpns
       implicit none
       class(fene), intent(inout) :: this
-      class(incomp), intent(in)  :: fs
-      ! class(tpns), intent(in)  :: fs
+      ! class(incomp), intent(in)  :: fs
+      class(tpns), intent(in)  :: fs
       integer :: i,j,k
       real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
 
