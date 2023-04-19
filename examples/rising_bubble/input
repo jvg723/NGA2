@@ -27,6 +27,11 @@ Maximum extension of polymer chain : 10
 Polymer Relaxation Time            : 0.05   !< Giving trC range similar to paper
 Stress diffusivisty                : 0
 
+# Non-Newtonian modeling
+Polymer viscosity :             0.1
+Polymer relaxation time :       1e-2
+Maximum polymer extensibility : 10
+
 # Time integration
 Max timestep size : 2e-4
 Max cfl number    : 0.5
