@@ -33,6 +33,7 @@ module postproc_class
       procedure :: analyze
       procedure, private :: read_ensight_scalar
       procedure, private :: extract_core
+      procedure, private :: extract_drops
    end type postproc
       
 contains
@@ -139,6 +140,38 @@ contains
          end do
       end if
    end subroutine extract_core
+
+
+   !> Extract a liquid droplets from CCL data
+   subroutine extract_drops(this)
+      use mathtools, only: Pi
+      implicit none
+      class(postproc), intent(inout) :: this
+      integer :: iunit,ierr,n
+      real(WP) :: vol,diam,ecc,lmin,lmax
+      ! Only root process works
+      if (.not.this%cfg%amRoot) return
+      ! Open a text file
+      open(newunit=iunit,file='drop.stat',form='formatted',status='old',access='stream',position='append',iostat=ierr)
+      ! Traverse structures and output those with x>0.025
+      do n=1,this%cc%n_meta_struct
+         if (this%cc%meta_structures_list(n)%x.gt.0.025_WP) then
+            ! Store volume
+            vol=this%cc%meta_structures_list(n)%vol
+            ! Compute equivalent diameter
+            diam=(6.0_WP*vol/Pi)**(1.0_WP/3.0_WP)
+            ! Compute eccentricity
+            lmin=this%cc%meta_structures_list(n)%lengths(3)
+            if (lmin.eq.0.0_WP) lmin=this%cc%meta_structures_list(n)%lengths(2) ! Handle 2D case
+            lmax=this%cc%meta_structures_list(n)%lengths(1)
+            ecc=sqrt(1.0_WP-lmin**2/lmax**2)
+            ! Output structure to a text file
+            write(iunit,'(999999(es12.5,x))') diam,vol,ecc
+         end if
+      end do
+      ! Close the file
+      close(iunit)
+   end subroutine extract_drops
    
    
    !> Analysis of atom simulation
@@ -193,18 +226,18 @@ contains
       allocate_data: block
          allocate(this%VOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%VOF=0.0_WP
          allocate(this%U(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%U=0.0_WP
-         allocate(this%bv(this%cfg%imino:this%cfg%imaxo)); this%bv=0.0_WP
-         allocate(this%by(this%cfg%imino:this%cfg%imaxo)); this%by=0.0_WP
-         allocate(this%bz(this%cfg%imino:this%cfg%imaxo)); this%bz=0.0_WP
+         !allocate(this%bv(this%cfg%imino:this%cfg%imaxo)); this%bv=0.0_WP
+         !allocate(this%by(this%cfg%imino:this%cfg%imaxo)); this%by=0.0_WP
+         !allocate(this%bz(this%cfg%imino:this%cfg%imaxo)); this%bz=0.0_WP
       end block allocate_data
       
       ! Create partmesh and ensight object for core output
       create_ensight: block
-         this%pmesh=partmesh(nvar=2,nvec=0,name='core')
-         this%pmesh%varname(1)='area'
-         this%pmesh%varname(2)='radius'
-         this%ens_out=ensight(cfg=this%cfg,name='postproc')
-         call this%ens_out%add_particle('core',this%pmesh)
+         !this%pmesh=partmesh(nvar=2,nvec=0,name='core')
+         !this%pmesh%varname(1)='area'
+         !this%pmesh%varname(2)='radius'
+         !this%ens_out=ensight(cfg=this%cfg,name='postproc')
+         !call this%ens_out%add_particle('core',this%pmesh)
       end block create_ensight
 
       ! Create CCL
@@ -230,11 +263,13 @@ contains
          call log('|----> File read successfully')
          call this%cc%build_lists(VF=this%VOF,U=this%U,V=this%U,W=this%U)
          call log('|----> CCL analysis done')
-         call this%extract_core()
-         call log('|----> Core extracted')
+         !call this%extract_core()
+         !call log('|----> Core extracted')
+         call this%extract_drops()
+         call log('|----> Drops extracted')
          call this%cc%deallocate_lists()
-         call this%ens_out%write_data(time=real(nfile,WP)*1.0e-3_WP)
-         call log('|----> Ensight output done')
+         !call this%ens_out%write_data(time=real(nfile,WP)*1.0e-3_WP)
+         !call log('|----> Ensight output done')
       end do
       
    end subroutine analyze
