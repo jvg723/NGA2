@@ -8,9 +8,6 @@ Lz :	0.0005
 nx :	100
 ny :	200
 nz :	1
-<!-- nx :	25
-ny :	50
-nz :	1 -->
 
 # Fluid properties
 Gravity :                     0 -9.81 0
