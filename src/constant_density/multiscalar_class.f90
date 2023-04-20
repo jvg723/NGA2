@@ -17,9 +17,9 @@ module multiscalar_class
    integer, parameter, public :: dirichlet=2         !< Dirichlet condition
    integer, parameter, public :: neumann=3           !< Zero normal gradient
    
-   ! List of available advection schemes for multiscalar transport
+   ! List of available advection schemes for scalar transport
    integer, parameter, public :: upwind=0            !< First order upwind scheme
-   integer, parameter, public :: quick =1            !< Quick scheme
+   integer, parameter, public :: quick=1             !< Quick scheme
    integer, parameter, public :: bquick=2            !< BQuick scheme
    
    
@@ -35,71 +35,70 @@ module multiscalar_class
    !> Bcond shift value
    integer, dimension(3,6), parameter :: shift=reshape([+1,0,0,-1,0,0,0,+1,0,0,-1,0,0,0,+1,0,0,-1],shape(shift))
    
-   !> Constant density multiscalar solver object definition
+   !> Constant density scalar solver object definition
    type :: multiscalar
       
       ! This is our config
       class(config), pointer :: cfg                       !< This is the config the solver is build for
       
       ! This is the name of the solver
-      character(len=str_medium) :: name='UNNAMED_multiscalar'  !< Solver name (default=UNNAMED_multiscalar)
+      character(len=str_medium) :: name='UNNAMED_SCALAR'  !< Solver name (default=UNNAMED_SCALAR)
       
       ! Constant property fluid, but diffusivity is still a field due to LES modeling
       real(WP) :: rho                                     !< This is our constant fluid density
-      real(WP), dimension(:,:,:), allocatable :: diff     !< These is our constant+SGS dynamic diffusivity for the multiscalar
+      real(WP), dimension(:,:,:,:), allocatable :: diff   !< These is our constant+SGS dynamic diffusivity for the scalar
       
       ! Boundary condition list
       integer :: nbc                                      !< Number of bcond for our solver
       type(bcond), pointer :: first_bc                    !< List of bcond for our solver
-
-      ! Number of scalars 
-      integer :: nscalar                                  !< Input for number of scalars
       
-      ! multiscalar variable
+      ! Scalar variable
+      integer :: nscalar                                  !< Number of scalars
+      character(len=str_medium), dimension(:), allocatable :: SCname  !< Names of scalars
       real(WP), dimension(:,:,:,:), allocatable :: SC     !< SC array
       
-      ! Old multiscalar variable
+      ! Old scalar variable
       real(WP), dimension(:,:,:,:), allocatable :: SCold  !< SCold array
       
-      ! Implicit multiscalar solver
+      ! Implicit scalar solver
       class(linsol), pointer :: implicit                  !< Iterative linear solver object for an implicit prediction of the scalar residual
       integer, dimension(:,:,:), allocatable :: stmap     !< Inverse map from stencil shift to index location
       
       ! Metrics
-      integer :: scheme                                   !< Advection scheme for multiscalar
+      integer :: scheme                                   !< Advection scheme for scalar
       integer :: nst                                      !< Scheme order (and elemental stencil size)
-      integer :: stp1,stp2                                !< Plus interpolation stencil extent for multiscalar advection
-      integer :: stm1,stm2                                !< Minus interpolation stencil extent for multiscalar advection
-      real(WP), dimension(:,:,:,:), allocatable :: itp_xp,itp_yp,itp_zp   !< Plus interpolation for SC
-      real(WP), dimension(:,:,:,:), allocatable :: itp_xm,itp_ym,itp_zm   !< Minus interpolation for SC
-      real(WP), dimension(:,:,:,:), allocatable :: div_x ,div_y ,div_z    !< Divergence for SC
-      real(WP), dimension(:,:,:,:), allocatable :: grd_x ,grd_y ,grd_z    !< multiscalar gradient for SC
-      real(WP), dimension(:,:,:,:), allocatable :: itp_x ,itp_y ,itp_z    !< Second order interpolation for SC diffusivity
+      integer :: stp1,stp2                                !< Plus interpolation stencil extent for scalar advection
+      integer :: stm1,stm2                                !< Minus interpolation stencil extent for scalar advection
+      real(WP), dimension(:,:,:,:), allocatable :: itp_xp,itp_yp,itp_zp  !< Plus interpolation for SC
+      real(WP), dimension(:,:,:,:), allocatable :: itp_xm,itp_ym,itp_zm  !< Minus interpolation for SC
+      real(WP), dimension(:,:,:,:), allocatable :: div_x ,div_y ,div_z   !< Divergence for SC
+      real(WP), dimension(:,:,:,:), allocatable :: grd_x ,grd_y ,grd_z   !< Scalar gradient for SC
+      real(WP), dimension(:,:,:,:), allocatable :: itp_x ,itp_y ,itp_z   !< Second order interpolation for SC diffusivity
       
       ! Bquick requires additional storage
 	   real(WP), dimension(:,:,:,:), allocatable :: bitp_xp,bitp_yp,bitp_zp  !< Plus interpolation for SC  - backup
       real(WP), dimension(:,:,:,:), allocatable :: bitp_xm,bitp_ym,bitp_zm  !< Minus interpolation for SC - backup
 
       ! Masking info for metric modification
-      integer, dimension(:,:,:), allocatable :: mask              !< Integer array used for modifying SC metrics
+      integer, dimension(:,:,:), allocatable :: mask             !< Integer array used for modifying SC metrics
       
       ! Monitoring quantities
-      real(WP), dimension(:), allocatable :: SCint,SCmax,SCmin    !< Maximum and minimum, integral multiscalar
+      real(WP), dimension(:), allocatable :: SCmax,SCmin,SCint   !< Maximum and minimum, integral scalar
       
    contains
       procedure :: print=>multiscalar_print               !< Output solver to the screen
-      procedure :: setup                                  !< Finish configuring the multiscalar solver
+      procedure, private :: init_metrics                  !< Initialize metrics
+      procedure, private :: adjust_metrics                !< Adjust metrics
+      procedure :: setup                                  !< Finish configuring the scalar solver
       procedure :: add_bcond                              !< Add a boundary condition
       procedure :: get_bcond                              !< Get a boundary condition
       procedure :: apply_bcond                            !< Apply all boundary conditions
-      procedure :: init_metrics                           !< Initialize metrics
-      procedure :: adjust_metrics                         !< Adjust metrics
       procedure :: metric_reset                           !< Reset adaptive metrics like bquick
-      procedure :: metric_modification                    !< Modify adaptive metrics like bquick
+      procedure :: metric_adjust                          !< Adjust adaptive metrics like bquick
       procedure :: get_drhoSCdt                           !< Calculate drhoSC/dt
       procedure :: get_max                                !< Calculate maximum field values
       procedure :: get_int                                !< Calculate integral field values
-      procedure :: solve_implicit                         !< Solve for the multiscalar residuals implicitly
+      procedure :: solve_implicit                         !< Solve for the scalar residuals implicitly
    end type multiscalar
    
    
@@ -125,49 +124,52 @@ contains
       ! Set the name for the solver
       if (present(name)) self%name=trim(adjustl(name))
       
+      ! Set the number of scalars
+      self%nscalar=nscalar
+      if (self%nscalar.le.0) call die('[multiscalar constructor] Multiscalar object requires at least 1 scalar')
+
+      ! Initialize scalar names
+      allocate(self%SCname(1:self%nscalar))
+      self%SCname='' ! User will set names
+
       ! Point to pgrid object
       self%cfg=>cfg
       
       ! Nullify bcond list
       self%nbc=0
       self%first_bc=>NULL()
-
-      ! Assign number of multiscalars being solved for
-      self%nscalar=nscalar
       
       ! Allocate variables
-      allocate(self%SC   (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%SC   =0.0_WP
-      allocate(self%SCold(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,self%nscalar)); self%SCold=0.0_WP
-      allocate(self%diff (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_             )); self%diff =0.0_WP
-      allocate(self%SCmax(1:self%nscalar)); self%SCmax=0.0_WP
-      allocate(self%SCmin(1:self%nscalar)); self%SCmin=0.0_WP
-
+      allocate(self%SC   (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,1:self%nscalar)); self%SC   =0.0_WP
+      allocate(self%SCold(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,1:self%nscalar)); self%SCold=0.0_WP
+      allocate(self%diff (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_,1:self%nscalar)); self%diff =0.0_WP
+      
       ! Prepare advection scheme
       self%scheme=scheme
       select case (self%scheme)
-         case (upwind)
-            ! Check current overlap
-            if (self%cfg%no.lt.1) call die('[multiscalar constructor] multiscalar transport scheme requires larger overlap')
-            ! Set interpolation stencil sizes
-            self%nst=1
-            self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
-            self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
-         case (quick)
-            ! Check current overlap
-            if (self%cfg%no.lt.2) call die('[multiscalar constructor] multiscalar transport scheme requires larger overlap')
-            ! Set interpolation stencil sizes
-            self%nst=3
-            self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
-            self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
-         case (bquick)
-            ! Check current overlap
-            if (self%cfg%no.lt.2) call die('[multiscalar constructor] multiscalar transport scheme requires larger overlap')
-            ! Set interpolation stencil sizes
-            self%nst=3
-            self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
-            self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
-         case default
-               call die('[multiscalar constructor] Unknown multiscalar transport scheme selected')
+      case (upwind)
+         ! Check current overlap
+		   if (self%cfg%no.lt.1) call die('[multiscalar constructor] Scalar transport scheme requires larger overlap')
+         ! Set interpolation stencil sizes
+		   self%nst=1
+         self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
+         self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
+      case (quick)
+         ! Check current overlap
+         if (self%cfg%no.lt.2) call die('[multiscalar constructor] Scalar transport scheme requires larger overlap')
+         ! Set interpolation stencil sizes
+         self%nst=3
+         self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
+         self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
+      case (bquick)
+         ! Check current overlap
+	      if (self%cfg%no.lt.2) call die('[multiscalar constructor] Scalar transport scheme requires larger overlap')
+	      ! Set interpolation stencil sizes
+	      self%nst=3
+	      self%stp1=-(self%nst+1)/2; self%stp2=self%nst+self%stp1-1
+	      self%stm1=-(self%nst-1)/2; self%stm2=self%nst+self%stm1-1
+      case default
+         call die('[multiscalar constructor] Unknown scalar transport scheme selected')
       end select
       
       ! Prepare default metrics
@@ -196,6 +198,11 @@ contains
       end do
       call self%cfg%sync(self%mask)
       
+      ! Monitoring data needs to be allocated
+      allocate(self%SCint(1:self%nscalar))
+      allocate(self%SCmin(1:self%nscalar))
+      allocate(self%SCmax(1:self%nscalar))
+      
    end function constructor
       
    
@@ -204,8 +211,7 @@ contains
       use mathtools, only: fv_itp_build
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: i,j,k,st1,st2
-      real(WP), dimension(-1:0) :: itpx,itpy,itpz
+      integer :: i,j,k
       
       ! Allocate finite difference diffusivity interpolation coefficients
       allocate(this%itp_x(-1:0,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
@@ -222,20 +228,20 @@ contains
          end do
       end do
       
-      ! Allocate finite difference multiscalar interpolation coefficients
+      ! Allocate finite difference scalar interpolation coefficients
       allocate(this%itp_xp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
       allocate(this%itp_xm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< X-face-centered
       allocate(this%itp_yp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
       allocate(this%itp_ym(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Y-face-centered
       allocate(this%itp_zp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
       allocate(this%itp_zm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)) !< Z-face-centered
-      ! Create multiscalar interpolation coefficients to cell faces
+      ! Create scalar interpolation coefficients to cell faces
       select case (this%scheme)
-         case (upwind)
+      case (upwind)
          this%itp_xp=1.0_WP; this%itp_xm=1.0_WP
          this%itp_yp=1.0_WP; this%itp_ym=1.0_WP
          this%itp_zp=1.0_WP; this%itp_zm=1.0_WP
-         case (quick,bquick)
+      case (quick,bquick)
          do k=this%cfg%kmin_,this%cfg%kmax_+1
             do j=this%cfg%jmin_,this%cfg%jmax_+1
                do i=this%cfg%imin_,this%cfg%imax_+1
@@ -282,7 +288,7 @@ contains
             end do
          end do
       end do
-
+      
    end subroutine init_metrics
    
    
@@ -290,8 +296,7 @@ contains
    subroutine adjust_metrics(this)
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: i,j,k,st1,st2
-      real(WP) :: delta,mysum
+      integer :: i,j,k
       
       ! Sync up masks
       call this%cfg%sync(this%mask)
@@ -313,7 +318,7 @@ contains
          end do
       end do
       
-      ! Adjust multiscalar interpolation to reflect Dirichlet boundaries
+      ! Adjust scalar interpolation to reflect Dirichlet boundaries
       do k=this%cfg%kmin_,this%cfg%kmax_+1
          do j=this%cfg%jmin_,this%cfg%jmax_+1
             do i=this%cfg%imin_,this%cfg%imax_+1
@@ -389,7 +394,7 @@ contains
    end subroutine adjust_metrics
    
    
-   !> Finish setting up the multiscalar solver now that bconds have been defined
+   !> Finish setting up the scalar solver now that bconds have been defined
    subroutine setup(this,implicit_solver)
       implicit none
       class(multiscalar), intent(inout) :: this
@@ -401,7 +406,7 @@ contains
       
       ! Bquick needs to remember the quick coefficients
 	   select case (this%scheme)
-         case (bquick)
+      case (bquick)
          allocate(this%bitp_xp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)); this%bitp_xp=this%itp_xp
          allocate(this%bitp_xm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)); this%bitp_xm=this%itp_xm
          allocate(this%bitp_yp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)); this%bitp_yp=this%itp_yp
@@ -409,50 +414,45 @@ contains
          allocate(this%bitp_zp(this%stp1:this%stp2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)); this%bitp_zp=this%itp_zp
          allocate(this%bitp_zm(this%stm1:this%stm2,this%cfg%imin_:this%cfg%imax_+1,this%cfg%jmin_:this%cfg%jmax_+1,this%cfg%kmin_:this%cfg%kmax_+1)); this%bitp_zm=this%itp_zm
       end select
-
+      
       ! Prepare implicit solver if it had been provided
       if (present(implicit_solver)) then
          
-        ! Point to implicit solver linsol object
-        this%implicit=>implicit_solver
-        
-        ! Set dynamic stencil map for the scalar solver
-        count=1; this%implicit%stc(count,:)=[0,0,0]
-        do st=1,abs(this%stp1)
-           count=count+1; this%implicit%stc(count,:)=[+st,0,0]
-           count=count+1; this%implicit%stc(count,:)=[-st,0,0]
-           count=count+1; this%implicit%stc(count,:)=[0,+st,0]
-           count=count+1; this%implicit%stc(count,:)=[0,-st,0]
-           count=count+1; this%implicit%stc(count,:)=[0,0,+st]
-           count=count+1; this%implicit%stc(count,:)=[0,0,-st]
-        end do
-        ! Set the diagonal to 1 to make sure all cells participate in solver
-        this%implicit%opr(1,:,:,:)=1.0_WP
-        
-        ! Initialize the implicit velocity solver
-        call this%implicit%init()
-        
-     end if
+         ! Point to implicit solver linsol object
+         this%implicit=>implicit_solver
+         
+         ! Set dynamic stencil map for the scalar solver
+         count=1; this%implicit%stc(count,:)=[0,0,0]
+         do st=1,abs(this%stp1)
+            count=count+1; this%implicit%stc(count,:)=[+st,0,0]
+            count=count+1; this%implicit%stc(count,:)=[-st,0,0]
+            count=count+1; this%implicit%stc(count,:)=[0,+st,0]
+            count=count+1; this%implicit%stc(count,:)=[0,-st,0]
+            count=count+1; this%implicit%stc(count,:)=[0,0,+st]
+            count=count+1; this%implicit%stc(count,:)=[0,0,-st]
+         end do
+         
+         ! Set the diagonal to 1 to make sure all cells participate in solver
+         this%implicit%opr(1,:,:,:)=1.0_WP
+         
+         ! Initialize the implicit velocity solver
+         call this%implicit%init()
+         
+      end if
       
    end subroutine setup
    
    
    !> Add a boundary condition
    subroutine add_bcond(this,name,type,locator,dir)
-      use string,   only: lowercase
-      use messager, only: die
+      use string,         only: lowercase
+      use messager,       only: die
+      use iterator_class, only: locator_ftype
       implicit none
       class(multiscalar), intent(inout) :: this
       character(len=*), intent(in) :: name
       integer,  intent(in) :: type
-      external :: locator
-      interface
-         logical function locator(pargrid,ind1,ind2,ind3)
-            use pgrid_class, only: pgrid
-            class(pgrid), intent(in) :: pargrid
-            integer, intent(in) :: ind1,ind2,ind3
-         end function locator
-      end interface
+      procedure(locator_ftype) :: locator
       character(len=2), optional :: dir
       type(bcond), pointer :: new_bc
       integer :: i,j,k,n
@@ -475,7 +475,7 @@ contains
          if (new_bc%type.eq.neumann) call die('[multiscalar apply_bcond] Neumann requires a direction')
          new_bc%dir=0
       end if
-      new_bc%itr=iterator(this%cfg,new_bc%name,locator)
+      new_bc%itr=iterator(this%cfg,new_bc%name,locator,'c')
       
       ! Insert it up front
       new_bc%next=>this%first_bc
@@ -524,7 +524,7 @@ contains
       implicit none
       class(multiscalar), intent(inout) :: this
       real(WP), intent(in) :: t,dt
-      integer :: i,j,k,n
+      integer :: i,j,k,n,nsc
       type(bcond), pointer :: my_bc
       
       ! Traverse bcond list
@@ -545,9 +545,11 @@ contains
             case (neumann)             ! Apply Neumann condition
                
                ! Implement based on bcond direction
-               do n=1,my_bc%itr%n_
-                  i=my_bc%itr%map(1,n); j=my_bc%itr%map(2,n); k=my_bc%itr%map(3,n)
-                  this%SC(i,j,k,:)=this%SC(i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir),:)
+               do nsc=1,this%nscalar
+                  do n=1,my_bc%itr%n_
+                     i=my_bc%itr%map(1,n); j=my_bc%itr%map(2,n); k=my_bc%itr%map(3,n)
+                     this%SC(i,j,k,nsc)=this%SC(i-shift(1,my_bc%dir),j-shift(2,my_bc%dir),k-shift(3,my_bc%dir),nsc)
+                  end do
                end do
                
             case default
@@ -571,54 +573,52 @@ contains
    subroutine get_drhoSCdt(this,drhoSCdt,rhoU,rhoV,rhoW)
       implicit none
       class(multiscalar), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(out) :: drhoSCdt !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:   ), intent(in)  :: rhoU     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:   ), intent(in)  :: rhoV     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:   ), intent(in)  :: rhoW     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      integer :: i,j,k,isc
-      real(WP), dimension(:,:,:,:), allocatable :: FX,FY,FZ
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(out) :: drhoSCdt !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:nscalar)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in)  :: rhoU        !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in)  :: rhoV        !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in)  :: rhoW        !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: i,j,k,nsc
+      real(WP), dimension(:,:,:), allocatable :: FX,FY,FZ
       ! Allocate flux arrays
-      allocate(FX(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,this%nscalar))
-      allocate(FY(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,this%nscalar))
-      allocate(FZ(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,this%nscalar))
-      ! Flux of rhoSC
-      do isc=1,this%nscalar
+      allocate(FX(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FY(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FZ(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      ! Work on each scalar
+      do nsc=1,this%nscalar
+         ! Flux of rhoSC
          do k=this%cfg%kmin_,this%cfg%kmax_+1
             do j=this%cfg%jmin_,this%cfg%jmax_+1
                do i=this%cfg%imin_,this%cfg%imax_+1
                   ! Fluxes on x-face
-                  FX(i,j,k,isc)=-0.5_WP*(rhoU(i,j,k)+abs(rhoU(i,j,k)))*sum(this%itp_xp(:,i,j,k)*this%SC(i+this%stp1:i+this%stp2,j,k,isc)) &
-                  &             -0.5_WP*(rhoU(i,j,k)-abs(rhoU(i,j,k)))*sum(this%itp_xm(:,i,j,k)*this%SC(i+this%stm1:i+this%stm2,j,k,isc)) &
-                  &             +sum(this%itp_x(:,i,j,k)*this%diff(i-1:i,j,k))*sum(this%grd_x(:,i,j,k)*this%SC(i-1:i,j,k,isc))
+                  FX(i,j,k)=-0.5_WP*(rhoU(i,j,k)+abs(rhoU(i,j,k)))*sum(this%itp_xp(:,i,j,k)*this%SC(i+this%stp1:i+this%stp2,j,k,nsc)) &
+                  &         -0.5_WP*(rhoU(i,j,k)-abs(rhoU(i,j,k)))*sum(this%itp_xm(:,i,j,k)*this%SC(i+this%stm1:i+this%stm2,j,k,nsc)) &
+                  &         +sum(this%itp_x(:,i,j,k)*this%diff(i-1:i,j,k,nsc))*sum(this%grd_x(:,i,j,k)*this%SC(i-1:i,j,k,nsc))
                   ! Fluxes on y-face
-                  FY(i,j,k,isc)=-0.5_WP*(rhoV(i,j,k)+abs(rhoV(i,j,k)))*sum(this%itp_yp(:,i,j,k)*this%SC(i,j+this%stp1:j+this%stp2,k,isc)) &
-                  &             -0.5_WP*(rhoV(i,j,k)-abs(rhoV(i,j,k)))*sum(this%itp_ym(:,i,j,k)*this%SC(i,j+this%stm1:j+this%stm2,k,isc)) &
-                  &             +sum(this%itp_y(:,i,j,k)*this%diff(i,j-1:j,k))*sum(this%grd_y(:,i,j,k)*this%SC(i,j-1:j,k,isc))
+                  FY(i,j,k)=-0.5_WP*(rhoV(i,j,k)+abs(rhoV(i,j,k)))*sum(this%itp_yp(:,i,j,k)*this%SC(i,j+this%stp1:j+this%stp2,k,nsc)) &
+                  &         -0.5_WP*(rhoV(i,j,k)-abs(rhoV(i,j,k)))*sum(this%itp_ym(:,i,j,k)*this%SC(i,j+this%stm1:j+this%stm2,k,nsc)) &
+                  &         +sum(this%itp_y(:,i,j,k)*this%diff(i,j-1:j,k,nsc))*sum(this%grd_y(:,i,j,k)*this%SC(i,j-1:j,k,nsc))
                   ! Fluxes on z-face
-                  FZ(i,j,k,isc)=-0.5_WP*(rhoW(i,j,k)+abs(rhoW(i,j,k)))*sum(this%itp_zp(:,i,j,k)*this%SC(i,j,k+this%stp1:k+this%stp2,isc)) &
-                  &             -0.5_WP*(rhoW(i,j,k)-abs(rhoW(i,j,k)))*sum(this%itp_zm(:,i,j,k)*this%SC(i,j,k+this%stm1:k+this%stm2,isc)) &
-                  &             +sum(this%itp_z(:,i,j,k)*this%diff(i,j,k-1:k))*sum(this%grd_z(:,i,j,k)*this%SC(i,j,k-1:k,isc))
+                  FZ(i,j,k)=-0.5_WP*(rhoW(i,j,k)+abs(rhoW(i,j,k)))*sum(this%itp_zp(:,i,j,k)*this%SC(i,j,k+this%stp1:k+this%stp2,nsc)) &
+                  &         -0.5_WP*(rhoW(i,j,k)-abs(rhoW(i,j,k)))*sum(this%itp_zm(:,i,j,k)*this%SC(i,j,k+this%stm1:k+this%stm2,nsc)) &
+                  &         +sum(this%itp_z(:,i,j,k)*this%diff(i,j,k-1:k,nsc))*sum(this%grd_z(:,i,j,k)*this%SC(i,j,k-1:k,nsc))
                end do
             end do
          end do
-      end do
-      ! Time derivative of rhoSC
-      do isc=1,this%nscalar
+         ! Time derivative of rhoSC
          do k=this%cfg%kmin_,this%cfg%kmax_
             do j=this%cfg%jmin_,this%cfg%jmax_
                do i=this%cfg%imin_,this%cfg%imax_
-                  drhoSCdt(i,j,k,isc)=sum(this%div_x(:,i,j,k)*FX(i:i+1,j,k,isc))+&
-                  &                   sum(this%div_y(:,i,j,k)*FY(i,j:j+1,k,isc))+&
-                  &                   sum(this%div_z(:,i,j,k)*FZ(i,j,k:k+1,isc))
+                  drhoSCdt(i,j,k,nsc)=sum(this%div_x(:,i,j,k)*FX(i:i+1,j,k))+&
+                  &                   sum(this%div_y(:,i,j,k)*FY(i,j:j+1,k))+&
+                  &                   sum(this%div_z(:,i,j,k)*FZ(i,j,k:k+1))
                end do
             end do
          end do
+         ! Sync residual
+         call this%cfg%sync(drhoSCdt(:,:,:,nsc))
       end do
-
       ! Deallocate flux arrays
       deallocate(FX,FY,FZ)
-      ! Sync residual
-      call this%cfg%pgrid_rsync_right_array(drhoSCdt)
    end subroutine get_drhoSCdt
    
    
@@ -628,23 +628,11 @@ contains
       use parallel, only: MPI_REAL_WP
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: i,j,k,isc,ierr
+      integer :: ierr,nsc
       real(WP) :: my_SCmax,my_SCmin
-
-      ! Set all to zero
-      do isc=1,this%nscalar
-         my_SCmax=0.0_WP; my_SCmin=0.0_WP
-         do k=this%cfg%kmin_,this%cfg%kmax_
-            do j=this%cfg%jmin_,this%cfg%jmax_
-               do i=this%cfg%imin_,this%cfg%imax_
-                  my_SCmax=max(my_SCmax,abs(this%SC(i,j,k,isc)))
-                  my_SCmin=min(my_SCmin,abs(this%SC(i,j,k,isc)))
-               end do
-            end do
-         end do
-         ! Get the parallel max
-         call MPI_ALLREDUCE(my_SCmax,this%SCmax(isc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-         call MPI_ALLREDUCE(my_SCmin,this%SCmin(isc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+      do nsc=1,this%nscalar
+         my_SCmax=maxval(this%SC(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmax,this%SCmax(nsc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+         my_SCmin=minval(this%SC(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmin,this%SCmin(nsc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
       end do
    end subroutine get_max
    
@@ -653,78 +641,82 @@ contains
    subroutine get_int(this)
       implicit none
       class(multiscalar), intent(inout) :: this
-      integer :: isc
-      do isc=1,this%nscalar
-         call this%cfg%integrate(this%SC(:,:,:,isc),integral=this%SCint(isc))
+      integer :: nsc
+      do nsc=1,this%nscalar
+         call this%cfg%integrate(this%SC(:,:,:,nsc),integral=this%SCint(nsc))
       end do
    end subroutine get_int
    
    
-   !> Solve for implicit multiscalar residual
+   !> Solve for implicit scalar residual
    subroutine solve_implicit(this,dt,resSC,rhoU,rhoV,rhoW)
       implicit none
       class(multiscalar), intent(inout) :: this
       real(WP), intent(in) :: dt
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:   ), intent(in)    :: rhoU  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:   ), intent(in)    :: rhoV  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:   ), intent(in)    :: rhoW  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      integer :: i,j,k,sti,std,isc
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:nscalar)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in)    :: rhoU  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in)    :: rhoV  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in)    :: rhoW  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: i,j,k,sti,std,nsc
       
-      ! Prepare convective operator
-      this%implicit%opr(1,:,:,:)=this%rho; this%implicit%opr(2:,:,:,:)=0.0_WP
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               ! Loop over divergence stencil
-               do std=0,1
-                  ! Loop over plus interpolation stencil
-                  do sti=this%stp1,this%stp2
-                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%div_x(std,i,j,k)*0.5_WP*(rhoU(i+std,j,k)+abs(rhoU(i+std,j,k)))*this%itp_xp(sti,i+std,j,k)
-                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%div_y(std,i,j,k)*0.5_WP*(rhoV(i,j+std,k)+abs(rhoV(i,j+std,k)))*this%itp_yp(sti,i,j+std,k)
-                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%div_z(std,i,j,k)*0.5_WP*(rhoW(i,j,k+std)+abs(rhoW(i,j,k+std)))*this%itp_zp(sti,i,j,k+std)
-                  end do
-                  ! Loop over minus interpolation stencil
-                  do sti=this%stm1,this%stm2
-                     this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%div_x(std,i,j,k)*0.5_WP*(rhoU(i+std,j,k)-abs(rhoU(i+std,j,k)))*this%itp_xm(sti,i+std,j,k)
-                     this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%div_y(std,i,j,k)*0.5_WP*(rhoV(i,j+std,k)-abs(rhoV(i,j+std,k)))*this%itp_ym(sti,i,j+std,k)
-                     this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%div_z(std,i,j,k)*0.5_WP*(rhoW(i,j,k+std)-abs(rhoW(i,j,k+std)))*this%itp_zm(sti,i,j,k+std)
+      ! Apply implicit treatment for each scalar
+      do nsc=1,this%nscalar
+         
+         ! Prepare convective operator
+         this%implicit%opr(1,:,:,:)=this%rho; this%implicit%opr(2:,:,:,:)=0.0_WP
+         do k=this%cfg%kmin_,this%cfg%kmax_
+            do j=this%cfg%jmin_,this%cfg%jmax_
+               do i=this%cfg%imin_,this%cfg%imax_
+                  ! Loop over divergence stencil
+                  do std=0,1
+                     ! Loop over plus interpolation stencil
+                     do sti=this%stp1,this%stp2
+                        this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%div_x(std,i,j,k)*0.5_WP*(rhoU(i+std,j,k)+abs(rhoU(i+std,j,k)))*this%itp_xp(sti,i+std,j,k)
+                        this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%div_y(std,i,j,k)*0.5_WP*(rhoV(i,j+std,k)+abs(rhoV(i,j+std,k)))*this%itp_yp(sti,i,j+std,k)
+                        this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%div_z(std,i,j,k)*0.5_WP*(rhoW(i,j,k+std)+abs(rhoW(i,j,k+std)))*this%itp_zp(sti,i,j,k+std)
+                     end do
+                     ! Loop over minus interpolation stencil
+                     do sti=this%stm1,this%stm2
+                        this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)=this%implicit%opr(this%implicit%stmap(sti+std,0,0),i,j,k)+0.5_WP*dt*this%div_x(std,i,j,k)*0.5_WP*(rhoU(i+std,j,k)-abs(rhoU(i+std,j,k)))*this%itp_xm(sti,i+std,j,k)
+                        this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)=this%implicit%opr(this%implicit%stmap(0,sti+std,0),i,j,k)+0.5_WP*dt*this%div_y(std,i,j,k)*0.5_WP*(rhoV(i,j+std,k)-abs(rhoV(i,j+std,k)))*this%itp_ym(sti,i,j+std,k)
+                        this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)=this%implicit%opr(this%implicit%stmap(0,0,sti+std),i,j,k)+0.5_WP*dt*this%div_z(std,i,j,k)*0.5_WP*(rhoW(i,j,k+std)-abs(rhoW(i,j,k+std)))*this%itp_zm(sti,i,j,k+std)
+                     end do
                   end do
                end do
             end do
          end do
-      end do
-        
-      ! Prepare diffusive operator
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%div_x(+1,i,j,k)*sum(this%itp_x(:,i+1,j,k)*this%diff(i  :i+1,j,k))*this%grd_x(-1,i+1,j,k)+&
-               &                                                                this%div_x( 0,i,j,k)*sum(this%itp_x(:,i  ,j,k)*this%diff(i-1:i  ,j,k))*this%grd_x( 0,i  ,j,k)+&
-               &                                                                this%div_y(+1,i,j,k)*sum(this%itp_y(:,i,j+1,k)*this%diff(i,j  :j+1,k))*this%grd_y(-1,i,j+1,k)+&
-               &                                                                this%div_y( 0,i,j,k)*sum(this%itp_y(:,i,j  ,k)*this%diff(i,j-1:j  ,k))*this%grd_y( 0,i,j  ,k)+&
-               &                                                                this%div_z(+1,i,j,k)*sum(this%itp_z(:,i,j,k+1)*this%diff(i,j,k  :k+1))*this%grd_z(-1,i,j,k+1)+&
-               &                                                                this%div_z( 0,i,j,k)*sum(this%itp_z(:,i,j,k  )*this%diff(i,j,k-1:k  ))*this%grd_z( 0,i,j,k  ))
-               this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%div_x(+1,i,j,k)*sum(this%itp_x(:,i+1,j,k)*this%diff(i  :i+1,j,k))*this%grd_x( 0,i+1,j,k))
-               this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%div_x( 0,i,j,k)*sum(this%itp_x(:,i  ,j,k)*this%diff(i-1:i  ,j,k))*this%grd_x(-1,i  ,j,k))
-               this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%div_y(+1,i,j,k)*sum(this%itp_y(:,i,j+1,k)*this%diff(i,j  :j+1,k))*this%grd_y( 0,i,j+1,k))
-               this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%div_y( 0,i,j,k)*sum(this%itp_y(:,i,j  ,k)*this%diff(i,j-1:j  ,k))*this%grd_y(-1,i,j  ,k))
-               this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%div_z(+1,i,j,k)*sum(this%itp_z(:,i,j,k+1)*this%diff(i,j,k  :k+1))*this%grd_z( 0,i,j,k+1))
-               this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%div_z( 0,i,j,k)*sum(this%itp_z(:,i,j,k  )*this%diff(i,j,k-1:k  ))*this%grd_z(-1,i,j,k  ))
+         
+         ! Prepare diffusive operator
+         do k=this%cfg%kmin_,this%cfg%kmax_
+            do j=this%cfg%jmin_,this%cfg%jmax_
+               do i=this%cfg%imin_,this%cfg%imax_
+                  this%implicit%opr(1,i,j,k)=this%implicit%opr(1,i,j,k)-0.5_WP*dt*(this%div_x(+1,i,j,k)*sum(this%itp_x(:,i+1,j,k)*this%diff(i  :i+1,j,k,nsc))*this%grd_x(-1,i+1,j,k)+&
+                  &                                                                this%div_x( 0,i,j,k)*sum(this%itp_x(:,i  ,j,k)*this%diff(i-1:i  ,j,k,nsc))*this%grd_x( 0,i  ,j,k)+&
+                  &                                                                this%div_y(+1,i,j,k)*sum(this%itp_y(:,i,j+1,k)*this%diff(i,j  :j+1,k,nsc))*this%grd_y(-1,i,j+1,k)+&
+                  &                                                                this%div_y( 0,i,j,k)*sum(this%itp_y(:,i,j  ,k)*this%diff(i,j-1:j  ,k,nsc))*this%grd_y( 0,i,j  ,k)+&
+                  &                                                                this%div_z(+1,i,j,k)*sum(this%itp_z(:,i,j,k+1)*this%diff(i,j,k  :k+1,nsc))*this%grd_z(-1,i,j,k+1)+&
+                  &                                                                this%div_z( 0,i,j,k)*sum(this%itp_z(:,i,j,k  )*this%diff(i,j,k-1:k  ,nsc))*this%grd_z( 0,i,j,k  ))
+                  this%implicit%opr(2,i,j,k)=this%implicit%opr(2,i,j,k)-0.5_WP*dt*(this%div_x(+1,i,j,k)*sum(this%itp_x(:,i+1,j,k)*this%diff(i  :i+1,j,k,nsc))*this%grd_x( 0,i+1,j,k))
+                  this%implicit%opr(3,i,j,k)=this%implicit%opr(3,i,j,k)-0.5_WP*dt*(this%div_x( 0,i,j,k)*sum(this%itp_x(:,i  ,j,k)*this%diff(i-1:i  ,j,k,nsc))*this%grd_x(-1,i  ,j,k))
+                  this%implicit%opr(4,i,j,k)=this%implicit%opr(4,i,j,k)-0.5_WP*dt*(this%div_y(+1,i,j,k)*sum(this%itp_y(:,i,j+1,k)*this%diff(i,j  :j+1,k,nsc))*this%grd_y( 0,i,j+1,k))
+                  this%implicit%opr(5,i,j,k)=this%implicit%opr(5,i,j,k)-0.5_WP*dt*(this%div_y( 0,i,j,k)*sum(this%itp_y(:,i,j  ,k)*this%diff(i,j-1:j  ,k,nsc))*this%grd_y(-1,i,j  ,k))
+                  this%implicit%opr(6,i,j,k)=this%implicit%opr(6,i,j,k)-0.5_WP*dt*(this%div_z(+1,i,j,k)*sum(this%itp_z(:,i,j,k+1)*this%diff(i,j,k  :k+1,nsc))*this%grd_z( 0,i,j,k+1))
+                  this%implicit%opr(7,i,j,k)=this%implicit%opr(7,i,j,k)-0.5_WP*dt*(this%div_z( 0,i,j,k)*sum(this%itp_z(:,i,j,k  )*this%diff(i,j,k-1:k  ,nsc))*this%grd_z(-1,i,j,k  ))
+               end do
             end do
          end do
-      end do
-      
-      do isc=1,this%nscalar
+         
          ! Solve the linear system
          call this%implicit%setup()
-         this%implicit%rhs=resSC(:,:,:,isc)
+         this%implicit%rhs=resSC(:,:,:,nsc)
          this%implicit%sol=0.0_WP
          call this%implicit%solve()
-         resSC(:,:,:,isc)=this%implicit%sol
+         resSC(:,:,:,nsc)=this%implicit%sol
+         
+         ! Sync up residual
+         call this%cfg%sync(resSC(:,:,:,nsc))
+         
       end do
-      ! Sync up residual
-      call this%cfg%pgrid_rsync_right_array(resSC)
       
    end subroutine solve_implicit
    
@@ -743,73 +735,47 @@ contains
 	     this%itp_zm=this%bitp_zm
 	  end select
    end subroutine metric_reset
-
-
-   !> Modify adaptive metrics like bquick
-   subroutine metric_modification(this,SC,SCmin,SCmax)
-	   implicit none
-	   class(multiscalar), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(in) :: SC !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-	   real(WP), optional :: SCmin
-	   real(WP), optional :: SCmax
-	   integer :: i,j,k
-	   select case (this%scheme)
-	   case (bquick) ! Modifys metrics to first order upwind
-         if (present(SCmin)) then
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
-                     if (minval(SC(i-1:i,j,k,:)).lt.SCmin) then
-                        this%itp_xp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        this%itp_xm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     end if
-                     if (minval(SC(i,j-1:j,k,:)).lt.SCmin) then
-                        this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     end if
-                     if (minval(SC(i,j,k-1:k,:)).lt.SCmin) then
-                        this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     end if
-                  end do
+   
+   
+   !> Adjust adaptive metrics like bquick
+   subroutine metric_adjust(this,SC,flag)
+      implicit none
+      class(multiscalar), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(in) :: SC   !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:nscalar)
+      logical , dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:)   , intent(in) :: flag !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: i,j,k
+      select case (this%scheme)
+      case (bquick)
+         do k=this%cfg%kmin_,this%cfg%kmax_+1
+            do j=this%cfg%jmin_,this%cfg%jmax_+1
+               do i=this%cfg%imin_,this%cfg%imax_+1
+                  if (any(flag(i-1:i,j,k))) then
+                     this%itp_xp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_xm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                  end if
+                  if (any(flag(i,j-1:j,k))) then
+                     this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                  end if
+                  if (any(flag(i,j,k-1:k))) then
+                     this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                     this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
+                  end if
                end do
             end do
-         end if
-         if (present(SCmax)) then
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
-                     if (maxval(SC(i-1:i,j,k,:)).gt.SCmax) then
-                        this%itp_xp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        this%itp_xm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     end if
-                     if (maxval(SC(i,j-1:j,k,:)).gt.SCmax) then
-                        this%itp_yp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        this%itp_ym(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     end if
-                     if (maxval(SC(i,j,k-1:k,:)).gt.SCmax) then
-                        this%itp_zp(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                        this%itp_zm(:,i,j,k)=[0.0_WP,1.0_WP,0.0_WP]
-                     end if
-                  end do
-               end do
-            end do
-         end if
-	   end select
-   end subroutine metric_modification
-
+         end do
+      end select
+   end subroutine metric_adjust
+   
    
    !> Print out info for multiscalar solver
    subroutine multiscalar_print(this)
       use, intrinsic :: iso_fortran_env, only: output_unit
       implicit none
       class(multiscalar), intent(in) :: this
-      
-      ! Output
       if (this%cfg%amRoot) then
-         write(output_unit,'("Constant density multiscalar solver [",a,"] for config [",a,"]")') trim(this%name),trim(this%cfg%name)
+         write(output_unit,'("Constant density multiscalar solver [",a,"] with [",i3,"] scalars for config [",a,"]")') trim(this%name),this%nscalar,trim(this%cfg%name)
       end if
-      
    end subroutine multiscalar_print
    
    
