@@ -165,7 +165,7 @@ contains
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
-         call param_read('Liquid dynamic viscosity',visc_l); fs%visc_l=visc_l
+         call param_read('Liquid dynamic viscosity',visc_l) !; fs%visc_l=visc_l
          call param_read('Gas dynamic viscosity',fs%visc_g)
          ! Assign constant density to each phase
          call param_read('Liquid density',fs%rho_l)
@@ -197,7 +197,9 @@ contains
          call param_read('Power law constant',power_const)
          call param_read('Shear rate parameter',alpha)
          visc_p=nn%visc
-         ! call param_read('Zero shear rate viscosity',visc_0)
+         call param_read('Zero shear rate viscosity',visc_0)
+         ! Initial liquid viscosity
+         fs%visc_l=visc_0
          ! fs%visc_l=visc_0
          ! ! Zero shear rate viscosity
          ! visc_0=visc_s; b%fs%visc_l=visc_0
@@ -256,6 +258,7 @@ contains
          end do
          call ens_out%add_scalar('SRmag',SRmag)
          call ens_out%add_scalar('visc_p',visc_p)
+         call ens_out%add_scalar('visc_l',fs%visc_l)
          call ens_out%add_surface('plic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -469,8 +472,9 @@ contains
                         do i=fs%cfg%imino_,fs%cfg%imaxo_
                            ! Cell Strain rate magnitude
                            SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-                           ! ! Rate depdentdent viscostiy
-                           visc_p(i,j,k)=0.0_WP+(nn%visc-0.0_WP)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((power_const-1.00_WP)/2.00_WP)
+                           ! Rate depdentdent polymer viscostiy
+                           visc_p(i,j,k)=(visc_0-visc_l)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((power_const-1.00_WP)/2.00_WP)
+                           fs%visc_l(i,j,k)=visc_l+visc_p(i,j,k)
                            ! visc_p(i,j,k)=0.0_WP+(nn%visc-0.0_WP)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**0
                            ! b%visc_norm(i,j,k)=b%fs%visc_l(i,j,k)/visc_0
                         ! stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
