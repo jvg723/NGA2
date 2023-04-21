@@ -36,10 +36,12 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
+   real(WP), dimension(:,:,:),     allocatable :: SRmag
    
    !> Problem definition
    real(WP), dimension(3) :: center
@@ -79,6 +81,8 @@ contains
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -235,6 +239,7 @@ contains
          do nsc=1,nn%nscalar
             call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
          end do
+         call ens_out%add_scalar('SRmag',SRmag)
          call ens_out%add_surface('plic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -325,6 +330,9 @@ contains
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
+
+         ! Calculate SR
+         call fs%get_strainrate(SR=SR)
          
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
@@ -438,7 +446,18 @@ contains
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                ! Calculate the polymer relaxation
                stress=0.0_WP; call nn%addsrc_relax(stress)
-               ! Build liquid stress tensor
+               ! Build liquid stress tensor - rate depdenent viscosity (Carreau model from Ohta et al. 2019)
+               do n=1,6
+                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                        do i=fs%cfg%imino_,fs%cfg%imaxo_
+                           SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+                        end do
+                     end do
+                  end do
+                  ! stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
+               end do
+               ! Build liquid stress tensor - constant viscosity
                do n=1,6
                   stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
                end do
@@ -545,7 +564,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
-      deallocate(resSC,SCtmp,gradU)
+      deallocate(resSC,SCtmp,gradU,SR,SRmag)
       
    end subroutine simulation_final
    
