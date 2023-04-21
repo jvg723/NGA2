@@ -10,7 +10,6 @@ ny :	40
 nz :	1
 Stretching : 2.1
 
-!! Test
 
 # Fluid properties and velocity
 Solvent dynamic viscosity : 0.01
