@@ -42,13 +42,14 @@ module simulation
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    real(WP), dimension(:,:,:,:),   allocatable :: SR
    real(WP), dimension(:,:,:),     allocatable :: SRmag
+   real(WP), dimension(:,:,:),     allocatable :: visc_p
    
    !> Problem definition
    real(WP), dimension(3) :: center
    real(WP) :: radius
 
-   !> Viscosity parameters
-   real(WP) :: visc_l
+   !> Carreau model parameters
+   real(WP) :: visc_l,visc_0,power_const,alpha
    
 contains
 
@@ -72,17 +73,18 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(resU (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-         allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-         allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resU     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW     (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui       (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi       (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi       (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resSC    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SCtmp    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(gradU    (1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SRmag    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR       (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(visc_p   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -188,6 +190,19 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
+
+      ! Set inital viscosity of liquid phase 
+		solvent_viscosity: block
+         ! Carreau model parameters	
+         call param_read('Power law constant',power_const)
+         call param_read('Shear rate parameter',alpha)
+         visc_p=nn%visc
+         ! call param_read('Zero shear rate viscosity',visc_0)
+         ! fs%visc_l=visc_0
+         ! ! Zero shear rate viscosity
+         ! visc_0=visc_s; b%fs%visc_l=visc_0
+         ! b%visc_norm=b%fs%visc_l/visc_0
+      end block solvent_viscosity 
       
       
       ! Create a FENE model 
@@ -240,6 +255,7 @@ contains
             call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
          end do
          call ens_out%add_scalar('SRmag',SRmag)
+         call ens_out%add_scalar('visc_p',visc_p)
          call ens_out%add_surface('plic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -451,11 +467,17 @@ contains
                   do k=fs%cfg%kmino_,fs%cfg%kmaxo_
                      do j=fs%cfg%jmino_,fs%cfg%jmaxo_
                         do i=fs%cfg%imino_,fs%cfg%imaxo_
+                           ! Cell Strain rate magnitude
                            SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+                           ! ! Rate depdentdent viscostiy
+                           visc_p(i,j,k)=0.0_WP+(nn%visc-0.0_WP)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((power_const-1.00_WP)/2.00_WP)
+                           ! visc_p(i,j,k)=0.0_WP+(nn%visc-0.0_WP)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**0
+                           ! b%visc_norm(i,j,k)=b%fs%visc_l(i,j,k)/visc_0
+                        ! stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
                         end do
                      end do
                   end do
-                  ! stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
+                  
                end do
                ! Build liquid stress tensor - constant viscosity
                do n=1,6
