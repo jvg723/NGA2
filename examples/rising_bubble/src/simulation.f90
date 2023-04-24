@@ -193,8 +193,12 @@ contains
       create_fene: block 
          use multiscalar_class, only: bquick
          use fene_class,        only: fenecr
+         use fene_class,        only: fenecr
          integer :: i,j,k
          ! Create FENE model solver
+         nn=fene(cfg=cfg,model=fenecr,scheme=bquick,name='FENE')
+         ! Assign unity density for simplicity
+         nn%rho=1.0_WP
          nn=fene(cfg=cfg,model=fenecr,scheme=bquick,name='FENE')
          ! Assign unity density for simplicity
          nn%rho=1.0_WP
@@ -395,6 +399,37 @@ contains
                call nn%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
             end block bquick
             
+            ! Perform bquick procedure
+            bquick: block
+               integer :: i,j,k
+               logical, dimension(:,:,:), allocatable :: flag
+               ! Allocate work array
+               allocate(flag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               ! Assemble explicit residual
+               resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
+               ! Apply it to get explicit scalar prediction
+               SCtmp=2.0_WP*nn%SC-nn%SCold+resSC
+               ! Check cells that require bquick
+               do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                  do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                     do i=nn%cfg%imino_,nn%cfg%imaxo_
+                        if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
+                        &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
+                           flag(i,j,k)=.true.
+                        else
+                           flag(i,j,k)=.false.
+                        end if
+                     end do
+                  end do
+               end do
+               ! Adjust metrics
+               call nn%metric_adjust(SCtmp,flag)
+               ! Clean up
+               deallocate(flag)
+               ! Recompute drhoSC/dt
+               call nn%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
+            end block bquick
+            
             ! Add fene sources
             call nn%addsrc_CgradU(gradU,resSC)
             call nn%addsrc_relax(resSC)
@@ -407,6 +442,26 @@ contains
             
             ! Update scalars
             nn%SC=2.0_WP*nn%SC-nn%SCold+resSC
+            
+            ! Force the gas scalar to identity
+            gas_scalar_forcing: block
+               integer :: i,j,k
+               do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                  do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                     do i=nn%cfg%imino_,nn%cfg%imaxo_
+                        if (nn%mask(i,j,k).eq.0) then
+                           nn%SC(i,j,k,1)=vf%VF(i,j,k)*nn%SC(i,j,k,1)+(1.0_WP-vf%VF(i,j,k))*1.0_WP
+                           nn%SC(i,j,k,2)=vf%VF(i,j,k)*nn%SC(i,j,k,2)
+                           nn%SC(i,j,k,3)=vf%VF(i,j,k)*nn%SC(i,j,k,3)
+                           nn%SC(i,j,k,4)=vf%VF(i,j,k)*nn%SC(i,j,k,4)+(1.0_WP-vf%VF(i,j,k))*1.0_WP
+                           nn%SC(i,j,k,5)=vf%VF(i,j,k)*nn%SC(i,j,k,5)
+                           nn%SC(i,j,k,6)=vf%VF(i,j,k)*nn%SC(i,j,k,6)+(1.0_WP-vf%VF(i,j,k))*1.0_WP
+                        end if
+                     end do
+                  end do
+               end do
+            end block gas_scalar_forcing
+
             
             ! Force the gas scalar to identity
             gas_scalar_forcing: block
