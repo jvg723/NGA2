@@ -4,7 +4,7 @@ module ligament_class
    use config_class,      only: config
    use iterator_class,    only: iterator
    use ensight_class,     only: ensight
-   !use fft2d_class,       only: fft2d
+   use surfmesh_class,    only: surfmesh
    use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
    use vfs_class,         only: vfs
@@ -26,12 +26,12 @@ module ligament_class
       !> Flow solver
       type(vfs)         :: vf    !< Volume fraction solver
       type(tpns)        :: fs    !< Two-phase flow solver
-      !type(fft2d)       :: ps    !< FFT-accelerated linear solver for pressure
       type(hypre_str)   :: ps    !< Structured Hypre linear solver for pressure
       type(ddadi)       :: vs    !< DDADI solver for velocity
       type(timetracker) :: time  !< Time info
       
       !> Ensight postprocessing
+      type(surfmesh) :: smesh    !< Surface mesh for interface
       type(ensight)  :: ens_out  !< Ensight output for flow variables
       type(event)    :: ens_evt  !< Event trigger for Ensight output
       
@@ -67,7 +67,7 @@ contains
 		real(WP), dimension(3),intent(in) :: xyz
 		real(WP), intent(in) :: t
 		real(WP) :: G
-	   G=0.5_WP-sqrt(xyz(1)**2+xyz(2)**2)
+	   G=0.5_WP-sqrt(xyz(1)**2+xyz(2)**2+xyz(3)**2)
 	end function levelset_ligament
    
    
@@ -116,6 +116,7 @@ contains
          this%time=timetracker(amRoot=this%cfg%amRoot)
          call param_read('Max timestep size',this%time%dtmax)
          call param_read('Max cfl number',this%time%cflmax)
+         call param_read('Max time',this%time%tmax)
          this%time%dt=this%time%dtmax
          this%time%itmax=2
       end block initialize_timetracker
@@ -134,7 +135,7 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: elvira,VFlo,VFhi
+         use vfs_class, only: VFlo,VFhi,elvira,r2p,art
          use mms_geom,  only: cube_refine_vol
          use param,     only: param_read
 			integer :: i,j,k,n,si,sj,sk
@@ -142,8 +143,8 @@ contains
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
-         ! Create a VOF solver with LVIRA
-         this%vf=vfs(cfg=this%cfg,reconstruction_method=elvira,name='VOF')
+         ! Create a VOF solver
+         this%vf=vfs(cfg=this%cfg,reconstruction_method=art,name='VOF')
          ! Initialize to a ligament
 		   do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
 				do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
@@ -216,7 +217,6 @@ contains
          ! Define outflow boundary condition on the right
          call this%fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
          ! Configure pressure solver
-         !this%ps=fft2d(cfg=this%cfg,name='Pressure',nst=7)
          this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg,nst=7)
          this%ps%maxlevel=20
          call param_read('Pressure iteration',this%ps%maxit)
@@ -240,6 +240,34 @@ contains
       end block create_flow_solver
       
 
+      ! Create surfmesh object for interface polygon output
+      create_smesh: block
+         use irl_fortran_interface
+         integer :: i,j,k,nplane,np
+         ! Include an extra variable for number of planes
+         this%smesh=surfmesh(nvar=2,name='plic')
+         this%smesh%varname(1)='nplane'
+         this%smesh%varname(2)='type'
+         ! Transfer polygons to smesh
+         call this%vf%update_surfmesh(this%smesh)
+         ! Also populate nplane variable
+         this%smesh%var(1,:)=1.0_WP
+         np=0
+         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                        this%smesh%var(2,np)=this%vf%type(i,j,k)
+                     end if
+                  end do
+               end do
+            end do
+         end do
+      end block create_smesh
+
+
       ! Add Ensight output
       create_ensight: block
          use param, only: param_read
@@ -253,6 +281,7 @@ contains
          call this%ens_out%add_scalar('VOF',this%vf%VF)
          call this%ens_out%add_scalar('curvature',this%vf%curv)
          call this%ens_out%add_scalar('pressure',this%fs%P)
+         call this%ens_out%add_surface('plic',this%smesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -301,6 +330,7 @@ contains
    
    !> Take one time step
    subroutine step(this)
+      use tpns_class, only: arithmetic_visc
       implicit none
       class(ligament), intent(inout) :: this
       
@@ -324,7 +354,7 @@ contains
       call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
       
       ! Prepare new staggered viscosity (at n+1)
-      call this%fs%get_viscosity(vf=this%vf)
+      call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
       
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
@@ -388,7 +418,32 @@ contains
       end block remove_vof
       
       ! Output to ensight
-      if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
+      if (this%ens_evt%occurs()) then
+         ! Update surfmesh object
+         update_smesh: block
+            use irl_fortran_interface
+            integer :: i,j,k,nplane,np
+            ! Transfer polygons to smesh
+            call this%vf%update_surfmesh(this%smesh)
+            ! Also populate nplane variable
+            this%smesh%var(1,:)=1.0_WP
+            np=0
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%type(i,j,k)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end block update_smesh
+         ! Perform ensight output
+         call this%ens_out%write_data(this%time%t)
+      end if
       
       ! Perform and output monitoring
       call this%fs%get_max()
