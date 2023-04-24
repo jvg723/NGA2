@@ -58,7 +58,7 @@ module block2_class
    real(WP) :: max_eccentricity=2.0_WP
 
    !> Shear thinning parameters
-	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_l
+	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_l,beta
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
@@ -340,10 +340,10 @@ contains
 
       ! Set inital viscosity of liquid phase 
 		liquid_viscosity: block
-         real(WP), parameter :: c0=999.00_WP ! Polymer concentration parameter in zero shear rate region
          ! Carreau model parameters	
          call param_read('Power law constant',power_constant)
          call param_read('Shear rate parameter',alpha)
+         call param_read('Viscosity Ratio',beta)
          ! call param_read('Zero shear rate viscosity',visc_0)
          ! !> Carreau model
          ! ! No infintie shear rate viscosity
@@ -352,8 +352,8 @@ contains
          ! visc_0=visc_l; b%fs%visc_l=visc_0
          ! b%visc_norm=b%fs%visc_l/visc_0
          !> Hybrid model
-         ! Zero shear rate polymer viscosity
-         b%nn%visc=c0*visc_l
+         ! Zero/initial shear rate polymer viscosity
+         b%nn%visc=visc_l/beta-visc_l
          ! Zero shear rate liquid viscosity
          visc_0=visc_l+b%nn%visc
          b%fs%visc_l=visc_0
@@ -867,6 +867,7 @@ contains
       call b%vf%get_max()
       call b%mfile%write()
       call b%cflfile%write()
+      call b%scfile%write()
 
       ! Specialized post-processing
       call structure_identification(b)

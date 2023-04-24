@@ -35,6 +35,7 @@ Surface tension coefficient : 0.002
 # Polymer viscosity :             1
 Polymer relaxation time :       0.05
 Maximum polymer extensibility : 10
+Viscosity Ratio               : 0.5
 
 # Shear thinning properties
 Power law constant        : 0.5
