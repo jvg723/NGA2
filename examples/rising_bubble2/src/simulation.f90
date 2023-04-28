@@ -36,17 +36,19 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
+   real(WP), dimension(:,:,:),     allocatable :: SRmag
    
    !> Problem definition
    real(WP), dimension(3) :: center
    real(WP) :: radius
 
    !> Constant solvent viscosity 
-   real(WP) :: visc_s
+   real(WP) :: visc_s,visc_0,power_const,alpha
    
 contains
 
@@ -79,6 +81,8 @@ contains
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SRmag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -212,8 +216,15 @@ contains
 
       ! Initalize total liquid viscosity
       liquid_visc: block
-         ! Standard FENE-CR model has a constant liquid viscosity (visc_l=visc_s+visc_p)
-         fs%visc_l=visc_s+nn%visc
+         ! Carreau model parameters	
+         call param_read('Power law constant',power_const)
+         call param_read('Shear rate parameter',alpha)
+         call param_read('Zero shear rate viscosity',visc_0)
+         ! ! Standard FENE-CR model has a constant liquid viscosity (visc_l=visc_s+visc_p)
+         ! fs%visc_l=visc_s+nn%visc
+         ! Inital hybrid model viscosity
+         visc_0=visc_s+nn%visc   !< Zero shear rate viscosity
+         fs%visc_l=visc_0        !< Initial fluid viscosity
       end block liquid_visc
       
 
@@ -240,6 +251,8 @@ contains
          do nsc=1,nn%nscalar
             call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
          end do
+         call ens_out%add_scalar('SRmag',SRmag)
+         call ens_out%add_scalar('visc_l',fs%visc_l)
          call ens_out%add_surface('plic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -333,6 +346,9 @@ contains
          
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
+
+         ! Calculate SR
+         call fs%get_strainrate(SR=SR)
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -443,10 +459,26 @@ contains
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                ! Calculate the polymer relaxation
                stress=0.0_WP; call nn%addsrc_relax(stress)
-               ! Build liquid stress tensor
+               ! Build liquid stress tensor - rate depdenent viscosity (Carreau model from Ohta et al. 2019)
                do n=1,6
-                  stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
+                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+                        do i=fs%cfg%imino_,fs%cfg%imaxo_
+                           ! Cell Strain rate magnitude
+                           SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+                           ! Rate depdentdent polymer viscostiy
+                           nn%visc=(visc_0-visc_s)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((power_const-1.00_WP)/2.00_WP)
+                           fs%visc_l(i,j,k)=visc_s+nn%visc
+                           ! Viscoelastic stress
+                           stress(i,j,k,n)=-nn%visc*vf%VF(i,j,k)*stress(i,j,k,n)
+                        end do
+                     end do
+                  end do
                end do
+               ! ! Build liquid stress tensor
+               ! do n=1,6
+               !    stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
+               ! end do
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1
                   do j=cfg%jmin_,cfg%jmax_+1
