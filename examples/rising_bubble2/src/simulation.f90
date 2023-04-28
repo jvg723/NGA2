@@ -45,8 +45,8 @@ module simulation
    real(WP), dimension(3) :: center
    real(WP) :: radius
 
-   !> Carreau model parameters
-   real(WP) :: visc_l
+   !> Constant solvent viscosity 
+   real(WP) :: visc_s
    
 contains
 
@@ -159,7 +159,7 @@ contains
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
-         call param_read('Liquid dynamic viscosity',visc_l); fs%visc_l=visc_l
+         call param_read('Liquid dynamic viscosity',visc_s) !; fs%visc_l=visc_l
          call param_read('Gas dynamic viscosity',fs%visc_g)
          ! Assign constant density to each phase
          call param_read('Liquid density',fs%rho_l)
@@ -184,8 +184,7 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
-      
-      
+
       ! Create a FENE model 
       create_fene: block 
          use multiscalar_class, only: bquick
@@ -210,6 +209,12 @@ contains
          nn%SC(:,:,:,4)=1.0_WP !< Cyy
          nn%SC(:,:,:,6)=1.0_WP !< Czz
       end block create_fene
+
+      ! Initalize total liquid viscosity
+      liquid_visc: block
+         ! Standard FENE-CR model has a constant liquid viscosity (visc_l=visc_s+visc_p)
+         fs%visc_l=visc_s+nn%visc
+      end block liquid_visc
       
 
       ! Create surfmesh object for interface polygon output
