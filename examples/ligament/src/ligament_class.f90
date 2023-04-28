@@ -40,8 +40,10 @@ module ligament_class
       type(monitor) :: cflfile  !< CFL monitoring
       
       !> Work arrays
-      real(WP), dimension(:,:,:), allocatable :: resU,resV,resW      !< Residuals
-      real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
+      real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW      !< Residuals
+      real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
+      real(WP), dimension(:,:,:),   allocatable :: SRmag
+      real(WP), dimension(:,:,:,:), allocatable :: SR
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -57,8 +59,8 @@ module ligament_class
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=5
 
-   ! Viscosity
-   real(WP) :: visc_l
+   !> Shear thinning parameters
+	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_l
    
 
 contains
@@ -133,6 +135,8 @@ contains
          allocate(this%Ui  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vi  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wi  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%SRmag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%SR   (6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -241,7 +245,20 @@ contains
          ! Compute divergence
          call this%fs%get_div()
       end block create_flow_solver
-      
+
+      ! Set inital viscosity of liquid phase 
+		liquid_viscosity: block
+         use param, only: param_read
+         ! Carreau model parameters	
+         call param_read('Power law constant',power_constant)
+         call param_read('Shear rate parameter',alpha)
+         !> Carreau model
+         ! No infintie shear rate viscosity
+         visc_inf=0.0_WP
+         ! Zero shear rate viscosity
+         visc_0=this%fs%visc_g*visc_l
+      end block liquid_viscosity 
+   
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -285,6 +302,8 @@ contains
          call this%ens_out%add_scalar('curvature',this%vf%curv)
          call this%ens_out%add_scalar('pressure',this%fs%P)
          call this%ens_out%add_surface('plic',this%smesh)
+         call this%ens_out%add_scalar('SRmag', this%SRmag)
+         call this%ens_out%add_scalar('visc_l',this%fs%visc_l)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -341,6 +360,25 @@ contains
       call this%fs%get_cfl(this%time%dt,this%time%cfl)
       call this%time%adjust_dt()
       call this%time%increment()
+
+      ! Calculate SR
+		call this%fs%get_strainrate(SR=this%SR)
+
+      ! Model shear thinning viscosity
+		update_viscosity: block
+         integer :: i,j,k
+         do k=this%fs%cfg%kmino_,this%fs%cfg%kmaxo_
+           do j=this%fs%cfg%jmino_,this%fs%cfg%jmaxo_
+             do i=this%fs%cfg%imino_,this%fs%cfg%imaxo_
+               ! Strain rate magnitude
+               this%SRmag(i,j,k)=sqrt(2.00_WP*this%SR(1,i,j,k)**2+this%SR(2,i,j,k)**2+this%SR(3,i,j,k)**2+2.0_WP*(this%SR(4,i,j,k)**2+this%SR(5,i,j,k)**2+this%SR(6,i,j,k)**2))
+               ! Carreau Model
+               this%fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*this%SRmag(i,j,k))**2)**((power_constant-1.00_WP)/2.00_WP)
+             end do
+           end do
+         end do
+         call this%fs%cfg%sync(this%fs%visc_l)
+      end block update_viscosity
       
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
@@ -464,7 +502,7 @@ contains
       class(ligament), intent(inout) :: this
       
       ! Deallocate work arrays
-      deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
+      deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%SR,this%SRmag)
       
    end subroutine final
    
