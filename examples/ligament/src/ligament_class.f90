@@ -56,6 +56,9 @@ module ligament_class
    
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=5
+
+   ! Viscosity
+   real(WP) :: visc_l
    
 
 contains
@@ -67,7 +70,7 @@ contains
 		real(WP), dimension(3),intent(in) :: xyz
 		real(WP), intent(in) :: t
 		real(WP) :: G
-	   G=0.5_WP-sqrt(xyz(1)**2+xyz(2)**2+xyz(3)**2)
+	   G=0.5_WP-sqrt(xyz(1)**2+xyz(3)**2)
 	end function levelset_ligament
    
    
@@ -210,7 +213,7 @@ contains
          ! Set fluid properties
          this%fs%rho_g=1.0_WP; call param_read('Density ratio',this%fs%rho_l)
          call param_read('Reynolds number',this%fs%visc_g); this%fs%visc_g=1.0_WP/this%fs%visc_g
-         call param_read('Viscosity ratio',this%fs%visc_l); this%fs%visc_l=this%fs%visc_g*this%fs%visc_l
+         call param_read('Viscosity ratio',visc_l); this%fs%visc_l=this%fs%visc_g*visc_l
          call param_read('Weber number',this%fs%sigma); this%fs%sigma=1.0_WP/this%fs%sigma
          ! Define inflow boundary condition on the left
          call this%fs%add_bcond(name='inflow',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
