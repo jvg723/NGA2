@@ -152,7 +152,7 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: VFlo,VFhi,elvira,r2p,art
+         use vfs_class, only: VFlo,VFhi,elvira,r2p,art,lvira
          use mms_geom,  only: cube_refine_vol
          use param,     only: param_read
          integer :: i,j,k,n,si,sj,sk
@@ -161,7 +161,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         this%vf=vfs(cfg=this%cfg,reconstruction_method=art,name='VOF')
+         this%vf=vfs(cfg=this%cfg,reconstruction_method=lvira,name='VOF')
          ! Initialize to a ligament
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
