@@ -48,7 +48,7 @@ module simulation
    real(WP) :: radius
 
    !> Constant solvent viscosity 
-   real(WP) :: visc_s,visc_0,power_const,alpha
+   real(WP) :: visc_s,visc_0,power_const,alpha,visc_p0
    
 contains
 
@@ -203,7 +203,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',nn%lambda)
          ! Polymer viscosity
-         call param_read('Polymer viscosity',nn%visc)
+         call param_read('Polymer viscosity',visc_p0)
          ! Configure implicit scalar solver
          ss=ddadi(cfg=cfg,name='scalar',nst=13)
          ! Setup the solver
@@ -219,11 +219,11 @@ contains
          ! Carreau model parameters	
          call param_read('Power law constant',power_const)
          call param_read('Shear rate parameter',alpha)
-         call param_read('Zero shear rate viscosity',visc_0)
          ! ! Standard FENE-CR model has a constant liquid viscosity (visc_l=visc_s+visc_p)
          ! fs%visc_l=visc_s+nn%visc
          ! Inital hybrid model viscosity
-         visc_0=visc_s+nn%visc   !< Zero shear rate viscosity
+         visc_0=visc_s+visc_p0   !< Zero shear rate viscosity
+         nn%visc=visc_p0         !< Polymer viscosity
          fs%visc_l=visc_0        !< Initial fluid viscosity
       end block liquid_visc
       
@@ -461,12 +461,13 @@ contains
                stress=0.0_WP; call nn%addsrc_relax(stress)
                ! Build liquid stress tensor - rate depdenent viscosity (Carreau model from Ohta et al. 2019)
                do n=1,6
-                  do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-                     do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                        do i=fs%cfg%imino_,fs%cfg%imaxo_
+                  SRmag=0.0_WP; nn%visc=visc_p0; fs%visc_l=visc_0
+                  do k=fs%cfg%kmin_,fs%cfg%kmax_
+                     do j=fs%cfg%jmin_,fs%cfg%jmax_
+                        do i=fs%cfg%imin_,fs%cfg%imax_
                            ! Cell Strain rate magnitude
                            SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
-                           ! Rate depdentdent polymer viscostiy
+                           ! Rate depdentdent polymer viscostiy - polymer stress added to liquid viscosity
                            nn%visc=(visc_0-visc_s)*(1.00_WP+(alpha*SRmag(i,j,k))**2)**((power_const-1.00_WP)/2.00_WP)
                            fs%visc_l(i,j,k)=visc_s+nn%visc
                            ! Viscoelastic stress
@@ -474,7 +475,11 @@ contains
                         end do
                      end do
                   end do
+                  ! Sync up stress
+                  call fs%cfg%sync(stress(:,:,:,n))
                end do
+               ! Sync up total liquid viscosity
+               call fs%cfg%sync(fs%visc_l)
                ! ! Build liquid stress tensor
                ! do n=1,6
                !    stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
