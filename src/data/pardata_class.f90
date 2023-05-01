@@ -1,59 +1,68 @@
-!> Datafile concept is defined here: given a partitioned grid,
-!> it provides parallel I/O access to a data file
-module datafile_class
-   use precision,   only: WP
-   use string,      only: str_short,str_medium
-   use pgrid_class, only: pgrid
+!> Parallel data file concept is defined here: given a partitioned grid and
+!> an I/O partition, it provides efficient parallel I/O access to a data file
+module pardata_class
+   use precision,     only: WP
+   use string,        only: str_short,str_medium
+   use pgrid_class,   only: pgrid
+   use coupler_class, only: coupler
    implicit none
    private
    
    ! Expose type/constructor/methods
-   public :: datafile
+   public :: pardata   
    
-   
-   !> Datafile object definition as an array of values and variables
-   !> The choice is made here to *copy* the data to simplify reading.
-   type :: datafile
-      ! A datafile works in a partitioned grid
-      type(pgrid), pointer :: pg                                      !< Partitioned grid for the data I/O
-      ! A datafile has a filename
-      character(len=str_medium) :: filename                           !< Name of datafile to read/write
-      ! A datafile stores scalar values
+
+   !> pardata object definition as an array of values and variables
+   !> The choice is made here to *copy* the data to simplify the process
+   type :: pardata
+      ! pardata has two partitioned grid
+      type(pgrid), pointer     :: pg                                  !< Original partitioned grid
+      type(pgrid), allocatable :: pg_io                               !< Partitioned grid for I/O
+      ! I/O partition info
+      logical :: ingrp_io
+      integer, dimension(3) :: partition_io
+      ! Couplers for transfering data for reading and writing
+      type(coupler), allocatable :: wcpl,rcpl
+      ! Filename for read/write operations
+      character(len=str_medium) :: filename
+      ! A pardata stores scalar values
       integer :: nval                                                 !< Number of scalar values
       character(len=str_short), dimension(:), allocatable :: valname  !< Name of scalar values
       real(WP), dimension(:), allocatable :: val                      !< Values
-      ! A datafile stores real(WP) variables of pgrid-compatible size
+      ! A pardata stores real(WP) variables of pgrid-compatible size
       integer :: nvar                                                 !< Number of field variables
       character(len=str_short), dimension(:), allocatable :: varname  !< Name of field variables
       real(WP), dimension(:,:,:,:), allocatable :: var                !< Variables (without overlap!)
+      real(WP), dimension(:,:,:,:), allocatable :: var_io             !< Variables for I/O (only allocated when reading/writing)
    contains
-      procedure, private :: findval              !< Function that returns val index if name is found, zero otherwise
-      procedure, private :: findvar              !< Function that returns var index if name is found, zero otherwise
-      procedure :: pushval=>datafile_pushval     !< Push data to datafile
-      procedure :: pullval=>datafile_pullval     !< Pull data from datafile
-      procedure :: pushvar=>datafile_pushvar     !< Push data to datafile
-      procedure :: pullvar=>datafile_pullvar     !< Pull data from datafile
-      procedure :: write  =>datafile_write       !< Parallel write a datafile object to disk
-      procedure :: print  =>datafile_print       !< Print out debugging info to screen
-      procedure :: log    =>datafile_log         !< Print out debugging info to log
-      final     :: destructor                    !< Destructor for datafile
-   end type datafile
+      procedure, private :: prep_iomap            !< IO group/pgrid/map
+      procedure, private :: findval               !< Function that returns val index if name is found, zero otherwise
+      procedure, private :: findvar               !< Function that returns var index if name is found, zero otherwise
+      procedure :: pushval=>pardata_pushval       !< Push data to pardata
+      procedure :: pullval=>pardata_pullval       !< Pull data from pardata
+      procedure :: pushvar=>pardata_pushvar       !< Push data to pardata
+      procedure :: pullvar=>pardata_pullvar       !< Pull data from pardata
+      procedure :: write=>pardata_write           !< Parallel write a pardata object to disk
+      procedure :: print=>pardata_print           !< Print out debugging info to screen
+      procedure :: log  =>pardata_log             !< Print out debugging info to log
+      final     :: destructor                     !< Destructor for pardata
+   end type pardata
    
    
-   !> Declare datafile constructor
-   interface datafile
-      procedure datafile_from_args
-      procedure datafile_from_file
-   end interface datafile
+   !> Declare pardata constructor
+   interface pardata
+      procedure pardata_from_args
+      procedure pardata_from_file
+   end interface pardata
    
    
 contains
    
    
-   !> Destructor for datafile object
+   !> Destructor for pardata object
    subroutine destructor(this)
       implicit none
-      type(datafile) :: this
+      type(pardata) :: this
       if (allocated(this%valname)) deallocate(this%valname)
       if (allocated(this%val    )) deallocate(this%val    )
       if (allocated(this%varname)) deallocate(this%varname)
@@ -61,19 +70,64 @@ contains
    end subroutine destructor
    
    
-   !> Constructor for an empty datafile object
-   function datafile_from_args(pg,filename,nval,nvar) result(self)
+   !> Prepare the io group/pgrid/map
+   subroutine prep_iomap(this,iopartition)
       use messager, only: die
+      use mpi_f08,  only: MPI_Group_range_incl
       implicit none
-      type(datafile) :: self
+      class(pardata) :: this
+      integer, dimension(3), intent(in) :: iopartition
+      type(MPI_Group) :: iogrp
+      integer, dimension(3,1) :: iorange
+      integer :: ierr
+      
+      ! Store IO partition
+      this%partition_io=iopartition
+      
+      ! Basic checks on the partition
+      if (product(this%partition_io).le.0) call die('[pardata constructor] At least one process must be assigned to IO')
+      if (product(this%partition_io).gt.this%pg%nproc) call die('[pardata constructor] Number of IO processes must be less or equal to pgrid processes')
+      
+      ! Create IO MPI group using the first ranks (could explore other strategies here)
+      iorange(:,1)=[0,product(this%partition_io)-1,1]
+      call MPI_Group_range_incl(this%pg%group,1,iorange,iogrp,ierr)
+      
+      ! Create IO logical
+      this%ingrp_io=.false.
+      if (this%pg%rank.le.product(this%partition_io)-1) this%ingrp_io=.true.
+      
+      ! Create IO pgrid
+      if (this%ingrp_io) this%pg_io=pgrid(this%pg%sgrid,iogrp,this%partition_io)
+      
+      ! Prepare coupler for writing
+      this%wcpl=coupler(src_grp=this%pg%group,dst_grp=this%pg_io%group,name='write')
+      call this%wcpl%set_src(this%pg); if (this%ingrp_io) call this%wcpl%set_dst(this%pg_io)
+      call this%wcpl%initialize()
+      
+      ! Prepare coupler for reading
+      this%rcpl=coupler(src_grp=this%pg_io%group,dst_grp=this%pg%group,name='read')
+      if (this%ingrp_io) call this%rcpl%set_src(this%pg_io); call this%rcpl%set_dst(this%pg)
+      call this%rcpl%initialize()
+      
+   end subroutine prep_iomap
+   
+   
+   !> Constructor for an empty pardata object
+   function pardata_from_args(pg,filename,nval,nvar,iopartition) result(self)
+      implicit none
+      type(pardata) :: self
       class(pgrid), target, intent(in) :: pg
       character(len=*), intent(in) :: filename
       integer, intent(in) :: nval,nvar
+      integer, dimension(3), intent(in) :: iopartition
       
       ! Link the partitioned grid and store the filename
       self%pg=>pg
       self%filename=trim(adjustl(filename))
       
+      ! Prepare the IO-specialized partition and map
+      call self%prepare_iomap(iopartition)
+
       ! Allocate storage and store names for vals
       self%nval=nval
       allocate(self%valname(self%nval))
@@ -88,17 +142,17 @@ contains
       allocate(self%var(self%pg%imin_:self%pg%imax_,self%pg%jmin_:self%pg%jmax_,self%pg%kmin_:self%pg%kmax_,self%nvar))
       self%var=0.0_WP
       
-   end function datafile_from_args
+   end function pardata_from_args
    
    
-   !> Constructor for a datafile object based on an existing file
-   function datafile_from_file(pg,fdata) result(self)
+   !> Constructor for a pardata object based on an existing file
+   function pardata_from_file(pg,fdata) result(self)
       use param,    only: verbose
       use messager, only: die
       use parallel, only: info_mpiio,MPI_REAL_WP
       use mpi_f08
       implicit none
-      type(datafile) :: self
+      type(pardata) :: self
       character(len=*), intent(in) :: fdata
       class(pgrid), target, intent(in) :: pg
       integer :: ierr,n
@@ -111,6 +165,9 @@ contains
       self%pg=>pg
       self%filename=trim(adjustl(fdata))
       
+      ! Prepare the IO-specialized partition and map
+      call self%prepare_iomap(iopartition)
+
       ! First open the file in parallel
       call MPI_FILE_OPEN(self%pg%comm,trim(self%filename),MPI_MODE_RDONLY,info_mpiio,ifile,ierr)
       if (ierr.ne.0) call die('[datafile constructor] Problem encountered while reading data file: '//trim(self%filename))
@@ -163,17 +220,17 @@ contains
       if (verbose.gt.1) call self%log('Read')
       if (verbose.gt.2) call self%print('Read')
       
-   end function datafile_from_file
+   end function pardata_from_file
    
    
-   !> Write a datafile object to a file
-   subroutine datafile_write(this,fdata)
+   !> Write a pardata object to a file
+   subroutine pardata_write(this,fdata)
       use param,    only: verbose
       use messager, only: die
       use parallel, only: info_mpiio,MPI_REAL_WP
       use mpi_f08
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       character(len=*), optional :: fdata
       integer :: ierr,n,iunit
       type(MPI_File) :: ifile
@@ -232,47 +289,49 @@ contains
       if (verbose.gt.1) call this%log('Wrote')
       if (verbose.gt.2) call this%print('Wrote')
       
-   end subroutine datafile_write
+   end subroutine pardata_write
    
    
-   !> Print datafile content to the screen
-   subroutine datafile_print(this,text)
+   !> Print pardata content to the screen
+   subroutine pardata_print(this,text)
       use, intrinsic :: iso_fortran_env, only: output_unit
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       character(*), intent(in) :: text
       if (this%pg%amRoot) then
-         write(output_unit,'(a," datafile [",a,"] for partitioned grid [",a,"]")') trim(text),trim(this%filename),trim(this%pg%name)
+         write(output_unit,'(a," pardata [",a,"] for partitioned grid [",a,"]")') trim(text),trim(this%filename),trim(this%pg%name)
          write(output_unit,'(" >      nval = ",i0)') this%nval
          write(output_unit,'(" > val names = ",1000(a,1x))') this%valname
          write(output_unit,'(" >      nvar = ",i0)') this%nvar
          write(output_unit,'(" > var names = ",1000(a,1x))') this%varname
+         write(output_unit,'(" > IO partition is ",i0,"x",i0,"x",i0)') this%pg_io%npx,this%pg_io%npy,this%pg_io%npz
       end if
-   end subroutine datafile_print
+   end subroutine pardata_print
    
    
-   !> Print datafile content to the log
-   subroutine datafile_log(this,text)
+   !> Print pardata content to the log
+   subroutine pardata_log(this,text)
       use messager, only: log
       use string,   only: str_long
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       character(*), intent(in) :: text
       character(len=str_long) :: message
       if (this%pg%amRoot) then
-         write(message,'(a," datafile [",a,"] for partitioned grid [",a,"]")') trim(text),trim(this%filename),trim(this%pg%name); call log(message)
+         write(message,'(a," pardata [",a,"] for partitioned grid [",a,"]")') trim(text),trim(this%filename),trim(this%pg%name); call log(message)
          write(message,'(" >      nval = ",i0)') this%nval; call log(message)
          write(message,'(" > val names = ",1000(a,1x))') this%valname; call log(message)
          write(message,'(" >      nvar = ",i0)') this%nvar; call log(message)
          write(message,'(" > var names = ",1000(a,1x))') this%varname; call log(message)
+         write(message,'(" > IO partition is ",i0,"x",i0,"x",i0)') this%pg_io%npx,this%pg_io%npy,this%pg_io%npz; call log(message)
       end if
-   end subroutine datafile_log
+   end subroutine pardata_log
    
    
    !> Index finding for val
    function findval(this,name) result(ind)
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       integer :: ind
       character(len=*), intent(in) :: name
       integer :: n
@@ -284,10 +343,10 @@ contains
    
    
    !> Push data to a val
-   subroutine datafile_pushval(this,name,val)
+   subroutine pardata_pushval(this,name,val)
       use messager, only: die
       implicit none
-      class(datafile), intent(inout) :: this
+      class(pardata), intent(inout) :: this
       character(len=*), intent(in) :: name
       real(WP), intent(in) :: val
       integer :: n
@@ -295,16 +354,16 @@ contains
       if (n.gt.0) then
          this%val(n)=val
       else
-         call die('[datafile pushval] Val does not exist in the datafile: '//name)
+         call die('[pardata pushval] Val does not exist in the data file: '//name)
       end if
-   end subroutine datafile_pushval
+   end subroutine pardata_pushval
    
    
    !> Pull data from a val
-   subroutine datafile_pullval(this,name,val)
+   subroutine pardata_pullval(this,name,val)
       use messager, only: die
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       character(len=*), intent(in) :: name
       real(WP), intent(out) :: val
       integer :: n
@@ -312,15 +371,15 @@ contains
       if (n.gt.0) then
          val=this%val(n)
       else
-         call die('[datafile pullval] Val does not exist in the datafile: '//name)
+         call die('[pardata pullval] Val does not exist in the data file: '//name)
       end if
-   end subroutine datafile_pullval
+   end subroutine pardata_pullval
    
    
    !> Index finding for var
    function findvar(this,name) result(ind)
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       integer :: ind
       character(len=*), intent(in) :: name
       integer :: n
@@ -332,10 +391,10 @@ contains
    
    
    !> Push data to a var
-   subroutine datafile_pushvar(this,name,var)
+   subroutine pardata_pushvar(this,name,var)
       use messager, only: die
       implicit none
-      class(datafile), intent(inout) :: this
+      class(pardata), intent(inout) :: this
       character(len=*), intent(in) :: name
       real(WP), dimension(this%pg%imino_:,this%pg%jmino_:,this%pg%kmino_:), intent(in) :: var !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       integer :: n
@@ -343,16 +402,16 @@ contains
       if (n.gt.0) then
          this%var(:,:,:,n)=var(this%pg%imin_:this%pg%imax_,this%pg%jmin_:this%pg%jmax_,this%pg%kmin_:this%pg%kmax_)
       else
-         call die('[datafile pushvar] Var does not exist in the datafile: '//name)
+         call die('[pardata pushvar] Var does not exist in the data file: '//name)
       end if
-   end subroutine datafile_pushvar
+   end subroutine pardata_pushvar
    
    
    !> Pull data from a var and synchronize it
-   subroutine datafile_pullvar(this,name,var)
+   subroutine pardata_pullvar(this,name,var)
       use messager, only: die
       implicit none
-      class(datafile), intent(in) :: this
+      class(pardata), intent(in) :: this
       character(len=*), intent(in) :: name
       real(WP), dimension(this%pg%imino_:,this%pg%jmino_:,this%pg%kmino_:), intent(out) :: var !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       integer :: n
@@ -361,9 +420,9 @@ contains
          var(this%pg%imin_:this%pg%imax_,this%pg%jmin_:this%pg%jmax_,this%pg%kmin_:this%pg%kmax_)=this%var(:,:,:,n)
          call this%pg%sync(var)
       else
-         call die('[datafile pullvar] Var does not exist in the datafile: '//name)
+         call die('[pardata pullvar] Var does not exist in the data file: '//name)
       end if
-   end subroutine datafile_pullvar
+   end subroutine pardata_pullvar
    
    
-end module datafile_class
+end module pardata_class
