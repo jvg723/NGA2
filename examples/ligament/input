@@ -18,6 +18,11 @@ Density ratio :        1000
 Target Re_lambda :     45
 Turbulence intensity : 0.1
 
+# Non-Newtonian modeling
+Polymer viscosity :             0.25
+Polymer relaxation time :       0.5
+Maximum polymer extensibility : 10
+
 # Shear thinning properties
 Power law constant        : 0.5
 Shear rate parameter      : 1
