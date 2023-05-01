@@ -347,8 +347,6 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
-         ! Calculate SR
-         call fs%get_strainrate(SR=SR)
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -432,6 +430,9 @@ contains
             ! ===================================================
 
             ! ============ VELOCITY SOLVER ======================
+
+            ! Calculate SR
+            call fs%get_strainrate(SR=SR)
             
             ! Build mid-time velocity
             fs%U=0.5_WP*(fs%U+fs%Uold)
