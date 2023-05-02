@@ -588,7 +588,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
-      deallocate(resSC,SCtmp,gradU)
+      deallocate(resSC,SCtmp,gradU,SR,SRmag)
       
    end subroutine simulation_final
    
