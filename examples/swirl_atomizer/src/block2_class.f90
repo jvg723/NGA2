@@ -58,7 +58,7 @@ module block2_class
    real(WP) :: max_eccentricity=2.0_WP
 
    !> Shear thinning parameters
-	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_l,beta
+	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_s,visc_p0
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
@@ -182,12 +182,12 @@ contains
          allocate(b%Wi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%SRmag(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%SR (6,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         allocate(b%gradU (1:3,1:3,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          ! ! Array for normalized viscosity
 			allocate(b%visc_norm(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          ! Scalar solver arrays
          allocate(b%resSC (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_,1:6))
          allocate(b%SCtmp (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_,1:6))
-         allocate(b%gradU (1:3,1:3,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -284,7 +284,7 @@ contains
          ! Create flow solver
          b%fs=tpns(cfg=b%cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
-         call param_read('Liquid dynamic viscosity',visc_l) !; b%fs%visc_l=visc_l
+         call param_read('Liquid dynamic viscosity',visc_s) !; b%fs%visc_l=visc_l
          call param_read('Gas dynamic viscosity'   ,b%fs%visc_g)
          ! Assign constant density to each phase
          call param_read('Liquid density',b%fs%rho_l)
@@ -326,8 +326,8 @@ contains
          call param_read('Maximum polymer extensibility',b%nn%Lmax)
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',b%nn%lambda)
-         ! ! Polymer viscosity
-         ! call param_read('Polymer viscosity',nn%visc)
+         ! Polymer viscosity
+         call param_read('Polymer viscosity',visc_p0)
          ! Configure implicit scalar solver
          b%ss=ddadi(cfg=b%cfg,name='scalar',nst=13)
          ! Setup the solver
@@ -343,20 +343,17 @@ contains
          ! Carreau model parameters	
          call param_read('Power law constant',power_constant)
          call param_read('Shear rate parameter',alpha)
-         call param_read('Viscosity Ratio',beta)
-         ! call param_read('Zero shear rate viscosity',visc_0)
          ! !> Carreau model
          ! ! No infintie shear rate viscosity
          ! visc_inf=0.0_WP
          ! ! Zero shear rate viscosity
          ! visc_0=visc_l; b%fs%visc_l=visc_0
          ! b%visc_norm=b%fs%visc_l/visc_0
-         !> Hybrid model
-         ! Zero/initial shear rate polymer viscosity
-         b%nn%visc=visc_l/beta-visc_l
-         ! Zero shear rate liquid viscosity
-         visc_0=visc_l+b%nn%visc
-         b%fs%visc_l=visc_0
+         ! Inital hybrid model viscosity  
+         visc_0=visc_s+visc_p0            !< Zero shear rate viscosity
+         b%nn%visc=visc_p0                !< Polymer viscosity
+         b%fs%visc_l=visc_0               !< Initial fluid viscosity
+         b%visc_norm=b%fs%visc_l/visc_0   !< Normalized viscosity
       end block liquid_viscosity 
       
 
@@ -453,7 +450,7 @@ contains
          call b%ens_out%add_surface('vofplic',b%smesh)
          call b%ens_out%add_scalar('SRmag',b%SRmag)
          call b%ens_out%add_scalar('visc_l',b%fs%visc_l)
-         ! call b%ens_out%add_scalar('normvisc_l',b%visc_norm)
+         call b%ens_out%add_scalar('norm_visc',b%visc_norm)
          do nsc=1,b%nn%nscalar
             call b%ens_out%add_scalar(trim(b%nn%SCname(nsc)),b%nn%SC(:,:,:,nsc))
          end do
@@ -709,23 +706,26 @@ contains
             stress=0.0_WP; call b%nn%addsrc_relax(stress)
             ! Build liquid stress tensor - rate depdenent viscosity (Carreau model from Ohta et al. 2019)
             do n=1,6
-               b%SRmag=0.0_WP; b%nn%visc=visc_0-visc_l;b%fs%visc_l=visc_0
-               do k=b%fs%cfg%kmino_,b%fs%cfg%kmaxo_
-                  do j=b%fs%cfg%jmino_,b%fs%cfg%jmaxo_
-                     do i=b%fs%cfg%imino_,b%fs%cfg%imaxo_
+               b%SRmag=0.0_WP; b%nn%visc=visc_p0; b%fs%visc_l=visc_0
+               do k=b%fs%cfg%kmin_,b%fs%cfg%kmax_
+                  do j=b%fs%cfg%jmin_,b%fs%cfg%jmax_
+                     do i=b%fs%cfg%imin_,b%fs%cfg%imax_
                         ! Cell Strain rate magnitude
                         b%SRmag(i,j,k)=sqrt(b%SR(1,i,j,k)**2+b%SR(2,i,j,k)**2+b%SR(3,i,j,k)**2+2.0_WP*(b%SR(4,i,j,k)**2+b%SR(5,i,j,k)**2+b%SR(6,i,j,k)**2))
                         ! Rate depdentdent polymer viscostiy
-                        b%nn%visc=(visc_0-visc_l)*(1.00_WP+(alpha*b%SRmag(i,j,k))**2)**((power_constant-1.00_WP)/2.00_WP)
-                        b%fs%visc_l(i,j,k)=visc_l+b%nn%visc
+                        b%nn%visc=(visc_0-visc_s)*(1.00_WP+(alpha*b%SRmag(i,j,k))**2)**((power_constant-1.00_WP)/2.00_WP)
+                        b%fs%visc_l(i,j,k)=visc_s+b%nn%visc
                         b%visc_norm(i,j,k)=b%fs%visc_l(i,j,k)/visc_0
                         ! Viscoelastic stress
                         stress(i,j,k,n)=-b%nn%visc*b%vf%VF(i,j,k)*stress(i,j,k,n)
                      end do
                   end do
                end do
-               
+               ! Sync up stress
+               call b%fs%cfg%sync(stress(:,:,:,n))
             end do
+            ! Sync up total liquid viscosity
+            call b%fs%cfg%sync(b%fs%visc_l)
             ! ! Build liquid stress tensor - constant viscosity
             ! do n=1,6
             !    stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
@@ -869,8 +869,8 @@ contains
       call b%cflfile%write()
       call b%scfile%write()
 
-      ! Specialized post-processing
-      call structure_identification(b)
+      ! ! Specialized post-processing
+      ! call structure_identification(b)
 
       
    end subroutine step
@@ -946,7 +946,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi,b%SR,b%SRmag)
+      deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi)
       deallocate(b%resSC,b%SCtmp,b%gradU,b%SR,b%SRmag)
       
    end subroutine final
