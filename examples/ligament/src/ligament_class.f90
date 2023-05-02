@@ -345,6 +345,7 @@ contains
       ! Add Ensight output
       create_ensight: block
          use param, only: param_read
+         integer :: nsc
          ! Create Ensight output from cfg
          this%ens_out=ensight(cfg=this%cfg,name='ligament')
          ! Create event for Ensight output
@@ -359,6 +360,9 @@ contains
          call this%ens_out%add_scalar('SRmag', this%SRmag)
          call this%ens_out%add_scalar('visc_l',this%fs%visc_l)
          call this%ens_out%add_scalar('visc_vorm',this%visc_norm)
+         do nsc=1,this%nn%nscalar
+            call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
+         end do
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
