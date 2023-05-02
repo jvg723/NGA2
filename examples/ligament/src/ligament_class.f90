@@ -9,6 +9,7 @@ module ligament_class
    use ddadi_class,       only: ddadi
    use vfs_class,         only: vfs
    use fene_class,        only: fene
+   use ccl_class,         only: ccl
    use tpns_class,        only: tpns
    use timetracker_class, only: timetracker
    use event_class,       only: event
@@ -30,6 +31,7 @@ module ligament_class
       type(hypre_str)   :: ps       !< Structured Hypre linear solver for pressure
       type(ddadi)       :: vs,ss    !< DDADI solver for velocity and scalar
       type(fene)        :: nn       !< FENE model for polymer stress
+      type(ccl)         :: cc       !< Connected component labeling class
       type(timetracker) :: time     !< Time info
       
       !> Ensight postprocessing
@@ -312,6 +314,20 @@ contains
       !    this%fs%visc_l=visc_0        !< Initial fluid viscosity
       !    this%visc_norm=visc_0/visc_0
       ! end block liquid_viscosity 
+
+       ! Create a connected-component labeling object
+      create_and_initialize_ccl: block
+         use vfs_class, only: VFlo
+         ! Create the CCL object
+         this%cc=ccl(cfg=this%cfg,name='CCL')
+         this%cc%max_interface_planes=2
+         this%cc%VFlo=VFlo
+         this%cc%dot_threshold=-0.5_WP
+         ! Perform CCL step
+         call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+         call this%cc%film_classify(Lbary=this%vf%Lbary,Gbary=this%vf%Gbary)
+         call this%cc%deallocate_lists()
+      end block create_and_initialize_ccl
    
 
       ! Create surfmesh object for interface polygon output
@@ -319,13 +335,27 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=2,name='plic')
+         this%smesh=surfmesh(nvar=8,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='type'
+         this%smesh%varname(3)='x_velocity'
+         this%smesh%varname(4)='y_velocity'
+         this%smesh%varname(5)='z_velocity'
+         this%smesh%varname(6)='visc_l'
+         this%smesh%varname(7)='SRmag'
+         this%smesh%varname(8)='norm_visc'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
          this%smesh%var(1,:)=1.0_WP
+         ! Initalize variables to 0
+         this%smesh%var(2,:)=0.0_WP
+         this%smesh%var(3,:)=0.0_WP
+         this%smesh%var(4,:)=0.0_WP
+         this%smesh%var(5,:)=0.0_WP
+         this%smesh%var(6,:)=0.0_WP
+         this%smesh%var(7,:)=0.0_WP
+         this%smesh%var(8,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -334,6 +364,12 @@ contains
                      if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                         this%smesh%var(2,np)=this%vf%type(i,j,k)
+                        this%smesh%var(3,np)=this%Ui(i,j,k)
+                        this%smesh%var(4,np)=this%Vi(i,j,k)
+                        this%smesh%var(5,np)=this%Wi(i,j,k)
+                        this%smesh%var(6,np)=this%fs%visc_l(i,j,k)
+                        this%smesh%var(7,np)=this%SRmag(i,j,k)
+                        this%smesh%var(8,np)=this%visc_norm(i,j,k)
                      end if
                   end do
                end do
@@ -366,7 +402,6 @@ contains
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
-      
 
       ! Create a monitor file
       create_monitor: block
@@ -415,6 +450,7 @@ contains
          end do
          call this%scfile%write()
       end block create_monitor
+
       
    end subroutine init
    
@@ -702,6 +738,13 @@ contains
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%type(i,j,k)
+                           this%smesh%var(2,np)=this%vf%type(i,j,k)
+                           this%smesh%var(3,np)=this%Ui(i,j,k)
+                           this%smesh%var(4,np)=this%Vi(i,j,k)
+                           this%smesh%var(5,np)=this%Wi(i,j,k)
+                           this%smesh%var(6,np)=this%fs%visc_l(i,j,k)
+                           this%smesh%var(7,np)=this%SRmag(i,j,k)
+                           this%smesh%var(8,np)=this%visc_norm(i,j,k)
                         end if
                      end do
                   end do
