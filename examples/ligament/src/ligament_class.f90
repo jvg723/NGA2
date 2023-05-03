@@ -5,11 +5,13 @@ module ligament_class
    use iterator_class,    only: iterator
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
+   use partmesh_class,    only: partmesh
    use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
    use vfs_class,         only: vfs
    use fene_class,        only: fene
    use ccl_class,         only: ccl
+   use lpt_class,         only: lpt
    use tpns_class,        only: tpns
    use timetracker_class, only: timetracker
    use event_class,       only: event
@@ -32,17 +34,20 @@ module ligament_class
       type(ddadi)       :: vs,ss    !< DDADI solver for velocity and scalar
       type(fene)        :: nn       !< FENE model for polymer stress
       type(ccl)         :: cc       !< Connected component labeling class
+      type(lpt)         :: lp       !< Particle tracking
       type(timetracker) :: time     !< Time info
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
+      type(partmesh) :: pmesh
       type(ensight)  :: ens_out  !< Ensight output for flow variables
       type(event)    :: ens_evt  !< Event trigger for Ensight output
       
       !> Simulation monitor file
-      type(monitor) :: mfile    !< General simulation monitoring
-      type(monitor) :: cflfile  !< CFL monitoring
-      type(monitor) :: scfile   !< CFL monitoring
+      type(monitor)  :: mfile       !< General simulation monitoring
+      type(monitor)  :: cflfile     !< CFL monitoring
+      type(monitor)  :: scfile      !< Scalar monitoring
+      type(monitor)  :: sprayfile   !< Spray monitoring file
       
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
@@ -60,9 +65,10 @@ module ligament_class
       
       
    contains
-      procedure :: init                            !< Initialize nozzle simulation
-      procedure :: step                            !< Advance nozzle simulation by one time step
-      procedure :: final                           !< Finalize nozzle simulation
+      procedure :: init                    !< Initialize nozzle simulation
+      procedure :: step                    !< Advance nozzle simulation by one time step
+      procedure :: final                   !< Finalize nozzle simulation
+      procedure :: transfer_vf_to_drops    !< Convert VOF to particles
    end type ligament
    
    
@@ -71,6 +77,13 @@ module ligament_class
 
    !> Shear thinning parameters
 	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_l,visc_s,visc_p0
+
+   !> Transfer model parameters
+   real(WP) :: filmthickness_over_dx  =5.0e-1_WP
+   real(WP) :: min_filmthickness      =1.0e-3_WP
+   real(WP) :: diam_over_filmthickness=1.0e+1_WP
+   real(WP) :: max_eccentricity       =5.0e-1_WP
+   real(WP) :: d_threshold            =1.0e-1_WP
    
 
 contains
@@ -328,6 +341,14 @@ contains
          call this%cc%film_classify(Lbary=this%vf%Lbary,Gbary=this%vf%Gbary)
          call this%cc%deallocate_lists()
       end block create_and_initialize_ccl
+
+      ! Create a Lagrangian spray tracker
+      create_lpt: block
+         ! Create the solver
+         this%lp=lpt(cfg=this%cfg,name='spray')
+         ! Get particle density from the flow solver
+         this%lp%rho=this%fs%rho_l
+      end block create_lpt
    
 
       ! Create surfmesh object for interface polygon output
@@ -377,6 +398,20 @@ contains
          end do
       end block create_smesh
 
+      ! Create partmesh object for Lagrangian particle output
+      create_pmesh: block
+         integer :: i
+         ! Include an extra variable for droplet diameter
+         this%pmesh=partmesh(nvar=1,nvec=0,name='lpt')
+         this%pmesh%varname(1)='diameter'
+         ! Transfer particles to pmesh
+         call this%lp%update_partmesh(this%pmesh)
+         ! Also populate diameter variable
+         do i=1,this%lp%np_
+            this%pmesh%var(1,i)=this%lp%p(i)%d
+         end do
+      end block create_pmesh
+
 
       ! Add Ensight output
       create_ensight: block
@@ -399,6 +434,7 @@ contains
          do nsc=1,this%nn%nscalar
             call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
          end do
+         call this%ens_out%add_particle('spray',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -410,6 +446,7 @@ contains
          call this%fs%get_cfl(this%time%dt,this%time%cfl)
          call this%fs%get_max()
          call this%vf%get_max()
+         call this%lp%get_max()
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -449,6 +486,25 @@ contains
             call this%scfile%add_column(this%nn%SCmax(nsc),trim(this%nn%SCname(nsc))//'_max')
          end do
          call this%scfile%write()
+         ! Create a spray monitor
+         this%sprayfile=monitor(amroot=this%lp%cfg%amRoot,name='spray')
+         call this%sprayfile%add_column(this%time%n,'Timestep number')
+         call this%sprayfile%add_column(this%time%t,'Time')
+         call this%sprayfile%add_column(this%time%dt,'Timestep size')
+         call this%sprayfile%add_column(this%lp%np,'Droplet number')
+         call this%sprayfile%add_column(this%lp%Umin, 'Umin')
+         call this%sprayfile%add_column(this%lp%Umax, 'Umax')
+         call this%sprayfile%add_column(this%lp%Umean,'Umean')
+         call this%sprayfile%add_column(this%lp%Vmin, 'Vmin')
+         call this%sprayfile%add_column(this%lp%Vmax, 'Vmax')
+         call this%sprayfile%add_column(this%lp%Vmean,'Vmean')
+         call this%sprayfile%add_column(this%lp%Wmin, 'Wmin')
+         call this%sprayfile%add_column(this%lp%Wmax, 'Wmax')
+         call this%sprayfile%add_column(this%lp%Wmean,'Wmean')
+         call this%sprayfile%add_column(this%lp%dmin, 'dmin')
+         call this%sprayfile%add_column(this%lp%dmax, 'dmax')
+         call this%sprayfile%add_column(this%lp%dmean,'dmean')
+         call this%sprayfile%write()
       end block create_monitor
 
       
@@ -485,6 +541,10 @@ contains
       !    end do
       !    call this%fs%cfg%sync(this%fs%visc_l)
       ! end block update_viscosity
+
+      ! Advance our spray
+      this%resU=this%fs%rho_g; this%resV=this%fs%visc_g
+      call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
       
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
@@ -711,6 +771,9 @@ contains
       ! Recompute interpolated velocity and divergence
       call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       call this%fs%get_div()
+
+      ! Perform volume-fraction-to-droplet transfer
+      call this%transfer_vf_to_drops()
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -751,6 +814,16 @@ contains
                end do
             end do
          end block update_smesh
+         ! Update partmesh object
+         update_pmesh: block
+            integer :: i
+            ! Transfer particles to pmesh
+            call this%lp%update_partmesh(this%pmesh)
+            ! Also populate diameter variable
+            do i=1,this%lp%np_
+               this%pmesh%var(1,i)=this%lp%p(i)%d
+            end do
+         end block update_pmesh
          ! Perform ensight output
          call this%ens_out%write_data(this%time%t)
       end if
@@ -760,6 +833,7 @@ contains
       call this%vf%get_max()
       call this%mfile%write()
       call this%cflfile%write()
+      call this%sprayfile%write() 
       
       
    end subroutine step
@@ -807,6 +881,171 @@ contains
       isIn=.false.
       if (i.ge.pg%imax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
+
+   !> Transfer vf to drops
+   subroutine transfer_vf_to_drops(this)
+      implicit none
+      class(ligament), intent(inout) :: this
+      
+      ! Perform a first pass with simplest CCL
+      call this%cc%build_lists(VF=this%vf%VF,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      
+      ! Loop through identified detached structs and remove those that are spherical enough
+      remove_struct: block
+         use mathtools, only: pi
+         integer :: m,n,l,i,j,k,np
+         real(WP) :: lmin,lmax,eccentricity,diam
+         
+         ! Loops over film segments contained locally
+         do m=1,this%cc%n_meta_struct
+            
+            ! Test if sphericity is compatible with transfer
+            lmin=this%cc%meta_structures_list(m)%lengths(3)
+            if (lmin.eq.0.0_WP) lmin=this%cc%meta_structures_list(m)%lengths(2) ! Handle 2D case
+            lmax=this%cc%meta_structures_list(m)%lengths(1)
+            eccentricity=sqrt(1.0_WP-lmin**2/lmax**2)
+            if (eccentricity.gt.max_eccentricity) cycle
+            
+            ! Test if diameter is compatible with transfer
+            diam=(6.0_WP*this%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
+            if (diam.eq.0.0_WP.or.diam.gt.d_threshold) cycle
+            
+            ! Create drop from available liquid volume - only one root does that
+            if (this%cc%cfg%amRoot) then
+               ! Make room for new drop
+               np=this%lp%np_+1; call this%lp%resize(np)
+               ! Add the drop
+               this%lp%p(np)%id  =int(0,8)                                                                                 !< Give id (maybe based on break-up model?)
+               this%lp%p(np)%dt  =0.0_WP                                                                                   !< Let the drop find it own integration time
+               this%lp%p(np)%Acol=0.0_WP                                                                                   !< Give zero collision force (axial)
+               this%lp%p(np)%Tcol=0.0_WP                                                                                   !< Give zero collision force (tangential)
+               this%lp%p(np)%d   =diam                                                                                     !< Assign diameter to account for full volume
+               this%lp%p(np)%pos =[this%cc%meta_structures_list(m)%x,this%cc%meta_structures_list(m)%y,this%cc%meta_structures_list(m)%z] !< Place the drop at the liquid barycenter
+               this%lp%p(np)%vel =[this%cc%meta_structures_list(m)%u,this%cc%meta_structures_list(m)%v,this%cc%meta_structures_list(m)%w] !< Assign mean structure velocity as drop velocity
+               this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])                !< Place the drop in the proper cell for the this%lp%cfg
+               this%lp%p(np)%flag=0                                                                                        !< Activate it
+               ! Increment particle counter
+               this%lp%np_=np
+            end if
+            
+            ! Find local structs with matching id
+            do n=this%cc%sync_offset+1,this%cc%sync_offset+this%cc%n_struct
+               if (this%cc%struct_list(this%cc%struct_map_(n))%parent.ne.this%cc%meta_structures_list(m)%id) cycle
+               ! Remove liquid in meta-structure cells
+               do l=1,this%cc%struct_list(this%cc%struct_map_(n))%nnode ! Loops over cells within local
+                  i=this%cc%struct_list(this%cc%struct_map_(n))%node(1,l)
+                  j=this%cc%struct_list(this%cc%struct_map_(n))%node(2,l)
+                  k=this%cc%struct_list(this%cc%struct_map_(n))%node(3,l)
+                  ! Remove liquid in that cell
+                  this%vf%VF(i,j,k)=0.0_WP
+               end do
+            end do
+            
+         end do
+         
+      end block remove_struct
+      
+      ! Sync VF and clean up IRL and band
+      call this%vf%cfg%sync(this%vf%VF)
+      call this%vf%clean_irl_and_band()
+      
+      ! Clean up CCL
+      call this%cc%deallocate_lists()
+      
+      ! Perform more detailed CCL in a second pass
+      this%cc%max_interface_planes=2
+      call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      call this%cc%get_min_thickness()
+      call this%cc%sort_by_thickness()
+      
+      ! Loop through identified films and remove those that are thin enough
+      remove_film: block
+         use mathtools, only: pi
+         integer :: m,n,i,j,k,np,ip,np_old
+         real(WP) :: Vt,Vl,Hl,Vd
+         
+         ! Loops over film segments contained locally
+         do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
+            
+            ! Skip non-liquid films
+            if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
+            
+            ! Skip films that are still thick enough
+            if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.min_filmthickness) cycle
+            
+            ! We are still here: transfer the film to drops
+            Vt=0.0_WP      ! Transferred volume
+            Vl=0.0_WP      ! We will keep track incrementally of the liquid volume to transfer to ensure conservation
+            np_old=this%lp%np_  ! Remember old number of particles
+            do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
+               i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
+               j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
+               k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
+               ! Increment liquid volume to remove
+               Vl=Vl+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+               ! Estimate drop size based on local film thickness in current cell
+               Hl=max(this%cc%film_thickness(i,j,k),min_filmthickness)
+               Vd=pi/6.0_WP*(diam_over_filmthickness*Hl)**3
+               ! Create drops from available liquid volume
+               do while (Vl-Vd.gt.0.0_WP)
+                  ! Make room for new drop
+                  np=this%lp%np_+1; call this%lp%resize(np)
+                  ! Add the drop
+                  this%lp%p(np)%id  =int(0,8)                                   !< Give id (maybe based on break-up model?)
+                  this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
+                  this%lp%p(np)%Acol=0.0_WP                                     !< Give zero collision force (axial)
+                  this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
+                  this%lp%p(np)%d   =(6.0_WP*Vd/pi)**(1.0_WP/3.0_WP)            !< Assign diameter from model above
+                  this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
+                  this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
+                  this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
+                  this%lp%p(np)%flag=0                                          !< Activate it
+                  ! Increment particle counter
+                  this%lp%np_=np
+                  ! Update tracked volumes
+                  Vl=Vl-Vd
+                  Vt=Vt+Vd
+               end do
+               ! Remove liquid in that cell
+               this%vf%VF(i,j,k)=0.0_WP
+            end do
+            
+            ! Based on how many particles were created, decide what to do with left-over volume
+            if (Vt.eq.0.0_WP) then ! No particle was created, we need one...
+               ! Add one last drop for remaining liquid volume
+               np=this%lp%np_+1; call this%lp%resize(np)
+               ! Add the drop
+               this%lp%p(np)%id  =int(0,8)                                   !< Give id (maybe based on break-up model?)
+               this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
+               this%lp%p(np)%Acol=0.0_WP                                     !< Give zero collision force (axial)
+               this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
+               this%lp%p(np)%d   =(6.0_WP*Vl/pi)**(1.0_WP/3.0_WP)            !< Assign diameter based on remaining liquid volume
+               this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
+               this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
+               this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
+               this%lp%p(np)%flag=0                                          !< Activate it
+               ! Increment particle counter
+               this%lp%np_=np
+            else ! Some particles were created, make them all larger
+               do ip=np_old+1,this%lp%np_
+                  this%lp%p(ip)%d=this%lp%p(ip)%d*((Vt+Vl)/Vt)**(1.0_WP/3.0_WP)
+               end do
+            end if
+         end do
+         
+      end block remove_film
+      
+      ! Sync VF and clean up IRL and band
+      call this%vf%cfg%sync(this%vf%VF)
+      call this%vf%clean_irl_and_band()
+      
+      ! Clean up CCL
+      call this%cc%deallocate_lists()
+      
+      ! Resync the spray
+      call this%lp%sync()
+      
+   end subroutine transfer_vf_to_drops
    
    
 end module ligament_class
