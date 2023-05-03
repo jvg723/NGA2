@@ -24,6 +24,8 @@ module fene_class
       real(WP) :: Lmax                                     !< Polymer maximum extensibility
       ! Polymer viscosity
       real(WP), dimension(:,:,:), allocatable :: visc_p    !< Polymer viscosity
+      ! SRmag
+      real(WP), dimension(:,:,:), allocatable :: SRmag     !< Strain rate magnitude
    contains
       procedure :: update_visc_p                           !< Update visc_p given strain rate tensor using Carreau model
       procedure :: addsrc_CgradU                           !< Add C.gradU source term to residual
@@ -59,6 +61,7 @@ contains
       self%model=model
       ! Allocate and set polymer viscosity
       allocate(self%visc_p(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%visc_p=0.0_WP
+      allocate(self%SRmag (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%SRmag =0.0_WP
    end function construct_fene_from_args
    
    
@@ -67,15 +70,15 @@ contains
       implicit none
       class(fene), intent(inout) :: this
       real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: SR
-      real(WP) :: SRmag
+      ! real(WP) :: SRmag
       integer :: i,j,k
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Compute magnitude of strain rate tensor
-               SRmag=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+               this%SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
                ! Compute polymer viscosity
-               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%trelax*SRmag)**2)**(0.5_WP*this%ncoeff-0.5_WP)
+               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%trelax*this%SRmag(i,j,k))**2)**(0.5_WP*this%ncoeff-0.5_WP)
             end do
          end do
       end do
