@@ -295,8 +295,6 @@ contains
          this%nn%rho=1.0_WP
          ! Maximum extensibility of polymer chain
          call param_read('Maximum polymer extensibility',this%nn%Lmax)
-         ! Relaxation time for polymer
-         call param_read('Polymer relaxation time',this%nn%lambda)
          ! Polymer viscosity
          call param_read('Polymer viscosity',visc_p0)
          ! Configure implicit scalar solver
