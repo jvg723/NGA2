@@ -8,6 +8,7 @@ module block1_class
    use incomp_class,      only: incomp
    use sgsmodel_class,    only: sgsmodel
    use timetracker_class, only: timetracker
+   use fene_class,        only: fene
    use ensight_class,     only: ensight
    use event_class,       only: event
    use monitor_class,     only: monitor
@@ -21,7 +22,8 @@ module block1_class
       class(ibconfig),   pointer :: cfg           !< Pointer to config
       type(incomp)               :: fs            !< Single phase incompressible flow solver
       type(fftxyz)               :: ps            !< Fourier pressure solver
-      type(ddadi)                :: vs
+      type(ddadi)                :: vs,ss         !< Velocity/Scalar solver
+      type(fene)                 :: nn            !< FENE model for non-newt behavior
       type(sgsmodel)             :: sgs           !< SGS model
       type(timetracker)          :: time          !< Time tracker
       type(ensight)              :: ens_out       !< Ensight output
@@ -112,7 +114,7 @@ contains
          b%fs=incomp(cfg=b%cfg,name='Incompressible NS')
          ! Set the flow properties
          call param_read('Liquid density',b%fs%rho)
-         call param_read('Liquid dynamic viscosity',visc); b%fs%visc=visc
+         call param_read('Liquid dynamic viscosity',visc)
          ! Configure pressure solver
          b%ps=fftxyz(cfg=b%cfg,name='Pressure',nst=7)
          ! Configure velocity solver
@@ -120,6 +122,33 @@ contains
          ! Setup the solver
          call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_flow_solver
+
+      ! Create a FENE model 
+      create_fene: block 
+         use multiscalar_class, only: bquick
+         use fene_class,        only: fenecr
+         integer :: i,j,k
+         ! Create FENE model solver
+         b%nn=fene(cfg=b%cfg,model=fenecr,scheme=bquick,name='FENE')
+         ! Assign unity density for simplicity
+         b%nn%rho=1.0_WP
+         ! Maximum extensibility of polymer chain
+         call param_read('Maximum polymer extensibility',b%nn%Lmax)
+         ! Relaxation time for polymer
+         call param_read('Polymer relaxation time',b%nn%trelax)
+         ! Polymer viscosity at zero strain rate
+         call param_read('Polymer viscosity',b%nn%visc); b%fs%visc=visc+b%nn%visc
+         ! Powerlaw coefficient in Carreau model
+         call param_read('Carreau powerlaw',b%nn%ncoeff)
+         ! Configure implicit scalar solver
+         b%ss=ddadi(cfg=b%cfg,name='scalar',nst=13)
+         ! Setup the solver
+         call b%nn%setup(implicit_solver=b%ss)
+         ! Initialize conformation tensor to identity
+         b%nn%SC(:,:,:,1)=1.0_WP !< Cxx
+         b%nn%SC(:,:,:,4)=1.0_WP !< Cyy
+         b%nn%SC(:,:,:,6)=1.0_WP !< Czz
+      end block create_fene
       
       
       ! Initialize our velocity field
@@ -198,6 +227,7 @@ contains
          call b%ens_out%add_scalar('levelset',b%cfg%Gib)
          call b%ens_out%add_scalar('pressure',b%fs%P)
          call b%ens_out%add_scalar('visc_sgs',b%sgs%visc)
+         call b%ens_out%add_scalar('visc',b%fs%visc)
          ! Output to ensight
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
@@ -255,6 +285,22 @@ contains
       b%fs%Uold=b%fs%U
       b%fs%Vold=b%fs%V
       b%fs%Wold=b%fs%W
+
+      ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
+      shear_thinning: block
+         integer :: i,j,k
+         real(WP), dimension(:,:,:,:), allocatable :: SR
+         ! Allocate SR array
+         allocate(SR(1:6,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         ! Calculate strain rate
+         call b%fs%get_strainrate(SR)
+         ! Update polymer viscosity using Carreau model
+         call b%nn%update_visc_p(SR)
+         ! Update total liquid viscosity
+         b%fs%visc=visc+b%nn%visc_p
+         ! Deallocate SR array
+         deallocate(SR)
+      end block shear_thinning
          
       ! Turbulence modeling
       sgs_modeling: block
