@@ -75,9 +75,6 @@ module ligament_class
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=5
 
-   !> Shear thinning parameters
-	real(WP) :: power_constant,alpha,visc_0,visc_inf,visc_l,visc_s,visc_p0
-
    !> Transfer model parameters
    real(WP) :: filmthickness_over_dx  =5.0e-1_WP
    real(WP) :: min_filmthickness      =1.0e-3_WP
@@ -254,7 +251,7 @@ contains
          ! Set fluid properties
          this%fs%rho_g=1.0_WP; call param_read('Density ratio',this%fs%rho_l)
          call param_read('Reynolds number',this%fs%visc_g); this%fs%visc_g=1.0_WP/this%fs%visc_g
-         call param_read('Viscosity ratio',visc_l); this%fs%visc_l=this%fs%visc_g*visc_l; visc_s=this%fs%visc_g*visc_l
+         call param_read('Viscosity ratio',this%fs%visc_l); this%fs%visc_l=this%fs%visc_g*this%fs%visc_l
          call param_read('Weber number',this%fs%sigma); this%fs%sigma=1.0_WP/this%fs%sigma
          ! Define inflow boundary condition on the left
          call this%fs%add_bcond(name='inflow',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
@@ -283,11 +280,11 @@ contains
          call this%fs%get_div()
       end block create_flow_solver
 
-      ! Create a FENE model 
+     ! Create a FENE model 
       create_fene: block 
-         use param, only: param_read
          use multiscalar_class, only: bquick
          use fene_class,        only: fenecr
+         use param,             only: param_read
          integer :: i,j,k
          ! Create FENE model solver
          this%nn=fene(cfg=this%cfg,model=fenecr,scheme=bquick,name='FENE')
@@ -295,8 +292,12 @@ contains
          this%nn%rho=1.0_WP
          ! Maximum extensibility of polymer chain
          call param_read('Maximum polymer extensibility',this%nn%Lmax)
-         ! Polymer viscosity
-         call param_read('Polymer viscosity',visc_p0)
+         ! Relaxation time for polymer
+         call param_read('Polymer relaxation time',this%nn%trelax)
+         ! Polymer viscosity at zero strain rate
+         call param_read('Polymer viscosity',this%nn%visc)
+         ! Powerlaw coefficient in Carreau model
+         call param_read('Carreau powerlaw',this%nn%ncoeff)
          ! Configure implicit scalar solver
          this%ss=ddadi(cfg=this%cfg,name='scalar',nst=13)
          ! Setup the solver
@@ -307,26 +308,7 @@ contains
          this%nn%SC(:,:,:,6)=1.0_WP !< Czz
       end block create_fene
 
-      ! ! Set inital viscosity of liquid phase 
-		! liquid_viscosity: block
-      !    use param, only: param_read
-      !    ! Carreau model parameters	
-      !    call param_read('Power law constant',power_constant)
-      !    call param_read('Shear rate parameter',alpha)
-      !    ! !> Carreau model
-      !    ! ! No infintie shear rate viscosity
-      !    ! visc_inf=0.0_WP
-      !    ! ! Zero shear rate viscosity
-      !    ! visc_0=visc_l
-      !    ! this%visc_norm=visc_0/visc_0
-      !    ! Inital hybrid model viscosity
-      !    visc_0=visc_s+visc_p0        !< Zero shear rate viscosity
-      !    this%nn%visc=visc_p0         !< Polymer viscosity
-      !    this%fs%visc_l=visc_0        !< Initial fluid viscosity
-      !    this%visc_norm=visc_0/visc_0
-      ! end block liquid_viscosity 
-
-       ! Create a connected-component labeling object
+      ! Create a connected-component labeling object
       create_and_initialize_ccl: block
          use vfs_class, only: VFlo
          ! Create the CCL object
@@ -360,9 +342,8 @@ contains
          this%smesh%varname(3)='x_velocity'
          this%smesh%varname(4)='y_velocity'
          this%smesh%varname(5)='z_velocity'
-         this%smesh%varname(6)='visc_l'
+         this%smesh%varname(6)='visc'
          this%smesh%varname(7)='SRmag'
-         this%smesh%varname(8)='norm_visc'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -374,7 +355,6 @@ contains
          this%smesh%var(5,:)=0.0_WP
          this%smesh%var(6,:)=0.0_WP
          this%smesh%var(7,:)=0.0_WP
-         this%smesh%var(8,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -386,9 +366,8 @@ contains
                         this%smesh%var(3,np)=this%Ui(i,j,k)
                         this%smesh%var(4,np)=this%Vi(i,j,k)
                         this%smesh%var(5,np)=this%Wi(i,j,k)
-                        this%smesh%var(6,np)=this%fs%visc_l(i,j,k)
-                        this%smesh%var(7,np)=this%SRmag(i,j,k)
-                        this%smesh%var(8,np)=this%visc_norm(i,j,k)
+                        this%smesh%var(6,np)=this%fs%visc(i,j,k)
+                        this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
                      end if
                   end do
                end do
@@ -427,12 +406,12 @@ contains
          call this%ens_out%add_scalar('pressure',this%fs%P)
          call this%ens_out%add_surface('plic',this%smesh)
          call this%ens_out%add_scalar('SRmag', this%SRmag)
-         call this%ens_out%add_scalar('visc_l',this%fs%visc_l)
-         call this%ens_out%add_scalar('visc_vorm',this%visc_norm)
+         call this%ens_out%add_scalar('viscosity',this%fs%visc)
          do nsc=1,this%nn%nscalar
             call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
          end do
          call this%ens_out%add_particle('spray',this%pmesh)
+         call this%ens_out%add_scalar('SRmag',this%nn%SRmag)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -520,26 +499,6 @@ contains
       call this%time%adjust_dt()
       call this%time%increment()
 
-      ! ! Calculate SR
-		! call this%fs%get_strainrate(SR=this%SR)
-
-      ! ! Model shear thinning viscosity
-		! update_viscosity: block
-      !    integer :: i,j,k
-      !    do k=this%fs%cfg%kmino_,this%fs%cfg%kmaxo_
-      !      do j=this%fs%cfg%jmino_,this%fs%cfg%jmaxo_
-      !        do i=this%fs%cfg%imino_,this%fs%cfg%imaxo_
-      !          ! Strain rate magnitude
-      !          this%SRmag(i,j,k)=sqrt(2.00_WP*this%SR(1,i,j,k)**2+this%SR(2,i,j,k)**2+this%SR(3,i,j,k)**2+2.0_WP*(this%SR(4,i,j,k)**2+this%SR(5,i,j,k)**2+this%SR(6,i,j,k)**2))
-      !          ! Carreau Model
-      !          this%fs%visc_l(i,j,k)=visc_inf+(visc_0-visc_inf)*(1.00_WP+(alpha*this%SRmag(i,j,k))**2)**((power_constant-1.00_WP)/2.00_WP)
-      !          this%visc_norm(i,j,k)=this%fs%visc_l(i,j,k)/visc_0
-      !        end do
-      !      end do
-      !    end do
-      !    call this%fs%cfg%sync(this%fs%visc_l)
-      ! end block update_viscosity
-
       ! Advance our spray
       this%resU=this%fs%rho_g; this%resV=this%fs%visc_g
       call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
@@ -552,8 +511,8 @@ contains
       this%fs%Vold=this%fs%V
       this%fs%Wold=this%fs%W
 
-      ! Remember old scalars
-      this%nn%SCold=this%nn%SC
+      ! ! Remember old scalars
+      ! this%nn%SCold=this%nn%SC
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
@@ -561,8 +520,8 @@ contains
       ! VOF solver step
       call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
       
-      ! Prepare new staggered viscosity (at n+1)
-      call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
+      ! ! Prepare new staggered viscosity (at n+1)
+      ! call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
 
       ! Calculate grad(U)
       call this%fs%get_gradU(this%gradU)
@@ -650,13 +609,58 @@ contains
          
          ! ============ VELOCITY SOLVER ======================
 
-         ! Calculate SR
-         call this%fs%get_strainrate(SR=this%SR)
-
          ! Build mid-time velocity
          this%fs%U=0.5_WP*(this%fs%U+this%fs%Uold)
          this%fs%V=0.5_WP*(this%fs%V+this%fs%Vold)
          this%fs%W=0.5_WP*(this%fs%W+this%fs%Wold)
+
+         ! Include shear-thinning effect here by adjusting viscosity based on mid-time strain-rate
+         ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
+         shear_thinning: block
+            integer :: i,j,k
+            real(WP) :: liq_vol,gas_vol,tot_vol
+            real(WP) :: visc_l
+            real(WP), dimension(:,:,:,:), allocatable :: SR
+            ! Allocate SR array
+            allocate(SR(1:6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            ! Calculate strain rate
+            call this%fs%get_strainrate(SR)
+            ! Update polymer viscosity using Carreau model
+            call this%nn%update_visc_p(SR)
+            ! Handle mixture viscosity
+            do k=this%fs%cfg%kmino_+1,this%fs%cfg%kmaxo_
+               do j=this%fs%cfg%jmino_+1,this%fs%cfg%jmaxo_
+                  do i=this%fs%cfg%imino_+1,this%fs%cfg%imaxo_
+                     ! VISC at [xm,ym,zm] - direct sum in x/y/z
+                     liq_vol=sum(this%vf%Lvol(:,:,:,i,j,k))
+                     gas_vol=sum(this%vf%Gvol(:,:,:,i,j,k))
+                     tot_vol=gas_vol+liq_vol
+                     visc_l=this%fs%visc_l+this%nn%visc_p(i,j,k)
+                     this%fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+                     ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
+                     liq_vol=sum(this%vf%Lvol(0,0,:,i,j,k))+sum(this%vf%Lvol(1,0,:,i-1,j,k))+sum(this%vf%Lvol(0,1,:,i,j-1,k))+sum(this%vf%Lvol(1,1,:,i-1,j-1,k))
+                     gas_vol=sum(this%vf%Gvol(0,0,:,i,j,k))+sum(this%vf%Gvol(1,0,:,i-1,j,k))+sum(this%vf%Gvol(0,1,:,i,j-1,k))+sum(this%vf%Gvol(1,1,:,i-1,j-1,k))
+                     tot_vol=gas_vol+liq_vol
+                     visc_l=this%fs%visc_l+sum(this%fs%itp_xy(:,:,i,j,k)*this%nn%visc_p(i-1:i,j-1:j,k))
+                     this%fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_xy(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+                     ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
+                     liq_vol=sum(this%vf%Lvol(:,0,0,i,j,k))+sum(this%vf%Lvol(:,1,0,i,j-1,k))+sum(this%vf%Lvol(:,0,1,i,j,k-1))+sum(this%vf%Lvol(:,1,1,i,j-1,k-1))
+                     gas_vol=sum(this%vf%Gvol(:,0,0,i,j,k))+sum(this%vf%Gvol(:,1,0,i,j-1,k))+sum(this%vf%Gvol(:,0,1,i,j,k-1))+sum(this%vf%Gvol(:,1,1,i,j-1,k-1))
+                     tot_vol=gas_vol+liq_vol
+                     visc_l=this%fs%visc_l+sum(this%fs%itp_yz(:,:,i,j,k)*this%nn%visc_p(i,j-1:j,k-1:k))
+                     this%fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_yz(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+                     ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
+                     liq_vol=sum(this%vf%Lvol(0,:,0,i,j,k))+sum(this%vf%Lvol(0,:,1,i,j,k-1))+sum(this%vf%Lvol(1,:,0,i-1,j,k))+sum(this%vf%Lvol(1,:,1,i-1,j,k-1))
+                     gas_vol=sum(this%vf%Gvol(0,:,0,i,j,k))+sum(this%vf%Gvol(0,:,1,i,j,k-1))+sum(this%vf%Gvol(1,:,0,i-1,j,k))+sum(this%vf%Gvol(1,:,1,i-1,j,k-1))
+                     tot_vol=gas_vol+liq_vol
+                     visc_l=this%fs%visc_l+sum(this%fs%itp_xz(:,:,i,j,k)*this%nn%visc_p(i-1:i,j,k-1:k))
+                     this%fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_zx(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+                  end do
+               end do
+            end do
+            ! Deallocate SR array
+            deallocate(SR)
+         end block shear_thinning
          
          ! Preliminary mass and momentum transport step at the interface
          call this%fs%prepare_advection_upwind(dt=this%time%dt)
@@ -791,6 +795,12 @@ contains
             call this%vf%update_surfmesh(this%smesh)
             ! Also populate nplane variable
             this%smesh%var(1,:)=1.0_WP
+            ! Initalize variables to 0
+            this%smesh%var(2,:)=0.0_WP
+            this%smesh%var(3,:)=0.0_WP
+            this%smesh%var(4,:)=0.0_WP
+            this%smesh%var(5,:)=0.0_WP
+            this%smesh%var(6,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -799,13 +809,11 @@ contains
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%type(i,j,k)
-                           this%smesh%var(2,np)=this%vf%type(i,j,k)
                            this%smesh%var(3,np)=this%Ui(i,j,k)
                            this%smesh%var(4,np)=this%Vi(i,j,k)
                            this%smesh%var(5,np)=this%Wi(i,j,k)
-                           this%smesh%var(6,np)=this%fs%visc_l(i,j,k)
-                           this%smesh%var(7,np)=this%SRmag(i,j,k)
-                           this%smesh%var(8,np)=this%visc_norm(i,j,k)
+                           this%smesh%var(6,np)=this%fs%visc(i,j,k)
+                           this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
                         end if
                      end do
                   end do
