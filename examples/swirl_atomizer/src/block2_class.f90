@@ -315,7 +315,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',b%nn%trelax)
          ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity',b%nn%visc)
+         call param_read('Polymer viscosity',b%nn%visc); b%fs%visc=b%fs%visc_l+b%nn%visc
          ! Powerlaw coefficient in Carreau model
          call param_read('Carreau powerlaw',b%nn%ncoeff)
          ! Configure implicit scalar solver
@@ -416,7 +416,7 @@ contains
          call b%ens_out%add_scalar('Pressure',b%fs%P)
          call b%ens_out%add_scalar('curvature',b%vf%curv)
          call b%ens_out%add_surface('vofplic',b%smesh)
-         call b%ens_out%add_scalar('viscosity',b%fs%visc)
+         call b%ens_out%add_scalar('visc_l',b%nn%visc_p)
          do nsc=1,b%nn%nscalar
             call b%ens_out%add_scalar(trim(b%nn%SCname(nsc)),b%nn%SC(:,:,:,nsc))
          end do

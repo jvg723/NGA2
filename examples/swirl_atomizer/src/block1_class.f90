@@ -227,7 +227,7 @@ contains
          call b%ens_out%add_scalar('levelset',b%cfg%Gib)
          call b%ens_out%add_scalar('pressure',b%fs%P)
          call b%ens_out%add_scalar('visc_sgs',b%sgs%visc)
-         call b%ens_out%add_scalar('visc',b%fs%visc)
+         call b%ens_out%add_scalar('visc_l',b%nn%visc_p)
          ! Output to ensight
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
