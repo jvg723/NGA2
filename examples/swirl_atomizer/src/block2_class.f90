@@ -193,14 +193,14 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,r2p,VFhi,VFlo
+         use vfs_class, only: lvira,r2p,VFhi,VFlo,art
          integer :: i,j,k,n,si,sj,sk
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         b%vf=vfs(cfg=b%cfg,reconstruction_method=lvira,name='VOF')
+         b%vf=vfs(cfg=b%cfg,reconstruction_method=art,name='VOF')
          ! Set full domain to gas
          do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
             do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
