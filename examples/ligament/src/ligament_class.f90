@@ -52,8 +52,6 @@ module ligament_class
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
-      real(WP), dimension(:,:,:),     allocatable :: SRmag
-      real(WP), dimension(:,:,:,:),   allocatable :: SR
       real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU
 
@@ -165,9 +163,6 @@ contains
          allocate(this%Ui       (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vi       (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wi       (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%SRmag    (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%SR       (6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-			allocate(this%visc_norm(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%resSC    (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%SCtmp    (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
@@ -295,7 +290,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',this%nn%trelax)
          ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity',this%nn%visc)
+         call param_read('Polymer viscosity',this%nn%visc); this%nn%visc_p=this%nn%visc
          ! Powerlaw coefficient in Carreau model
          call param_read('Carreau powerlaw',this%nn%ncoeff)
          ! Configure implicit scalar solver
@@ -344,6 +339,7 @@ contains
          this%smesh%varname(5)='z_velocity'
          this%smesh%varname(6)='visc'
          this%smesh%varname(7)='SRmag'
+         this%smesh%varname(8)='film'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -355,6 +351,7 @@ contains
          this%smesh%var(5,:)=0.0_WP
          this%smesh%var(6,:)=0.0_WP
          this%smesh%var(7,:)=0.0_WP
+         this%smesh%var(8,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -366,8 +363,9 @@ contains
                         this%smesh%var(3,np)=this%Ui(i,j,k)
                         this%smesh%var(4,np)=this%Vi(i,j,k)
                         this%smesh%var(5,np)=this%Wi(i,j,k)
-                        this%smesh%var(6,np)=this%fs%visc(i,j,k)
+                        this%smesh%var(6,np)=this%nn%visc_p(i,j,k)
                         this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
+                        this%smesh%var(8,np)=this%cc%film_thickness(i,j,k)
                      end if
                   end do
                end do
@@ -379,13 +377,19 @@ contains
       create_pmesh: block
          integer :: i
          ! Include an extra variable for droplet diameter
-         this%pmesh=partmesh(nvar=1,nvec=0,name='lpt')
+         this%pmesh=partmesh(nvar=1,nvec=3,name='lpt')
          this%pmesh%varname(1)='diameter'
+         this%pmesh%vecname(1)='velocity'
+         this%pmesh%vecname(2)='ang_vel'
+         this%pmesh%vecname(3)='Fcol'
          ! Transfer particles to pmesh
          call this%lp%update_partmesh(this%pmesh)
          ! Also populate diameter variable
          do i=1,this%lp%np_
             this%pmesh%var(1,i)=this%lp%p(i)%d
+            this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+            this%pmesh%vec(:,2,i)=this%lp%p(i)%angVel
+            this%pmesh%vec(:,3,i)=this%lp%p(i)%Acol
          end do
       end block create_pmesh
 
@@ -405,13 +409,13 @@ contains
          call this%ens_out%add_scalar('curvature',this%vf%curv)
          call this%ens_out%add_scalar('pressure',this%fs%P)
          call this%ens_out%add_surface('plic',this%smesh)
-         call this%ens_out%add_scalar('SRmag', this%SRmag)
-         call this%ens_out%add_scalar('viscosity',this%fs%visc)
+         call this%ens_out%add_scalar('viscosity',this%nn%visc_p)
          do nsc=1,this%nn%nscalar
             call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
          end do
          call this%ens_out%add_particle('spray',this%pmesh)
          call this%ens_out%add_scalar('SRmag',this%nn%SRmag)
+         call this%ens_out%add_particle('particles',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -801,6 +805,8 @@ contains
             this%smesh%var(4,:)=0.0_WP
             this%smesh%var(5,:)=0.0_WP
             this%smesh%var(6,:)=0.0_WP
+            this%smesh%var(7,:)=0.0_WP
+            this%smesh%var(8,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -814,6 +820,7 @@ contains
                            this%smesh%var(5,np)=this%Wi(i,j,k)
                            this%smesh%var(6,np)=this%fs%visc(i,j,k)
                            this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
+                           this%smesh%var(8,np)=this%cc%film_thickness(i,j,k)
                         end if
                      end do
                   end do
@@ -828,6 +835,9 @@ contains
             ! Also populate diameter variable
             do i=1,this%lp%np_
                this%pmesh%var(1,i)=this%lp%p(i)%d
+               this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+               this%pmesh%vec(:,2,i)=this%lp%p(i)%angVel
+               this%pmesh%vec(:,3,i)=this%lp%p(i)%Acol
             end do
          end block update_pmesh
          ! Perform ensight output
@@ -851,7 +861,7 @@ contains
       class(ligament), intent(inout) :: this
       
       ! Deallocate work arrays
-      deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%SR,this%SRmag,this%resSC,this%gradU,this%SCtmp)
+      deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%resSC,this%gradU,this%SCtmp)
       
    end subroutine final
    
