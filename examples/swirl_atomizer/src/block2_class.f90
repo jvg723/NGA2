@@ -369,7 +369,7 @@ contains
          b%smesh%varname(2)='x_velocity'
          b%smesh%varname(3)='y_velocity'
          b%smesh%varname(4)='z_velocity'
-         b%smesh%varname(5)='visc'
+         b%smesh%varname(5)='visc_l'
          b%smesh%varname(6)='SRmag'
          ! Transfer polygons to smesh
          call b%vf%update_surfmesh(b%smesh)
@@ -392,7 +392,7 @@ contains
                         b%smesh%var(2,np)=b%Ui(i,j,k)
                         b%smesh%var(3,np)=b%Vi(i,j,k)
                         b%smesh%var(4,np)=b%Wi(i,j,k)
-                        b%smesh%var(5,np)=b%fs%visc(i,j,k)
+                        b%smesh%var(5,np)=b%nn%visc_p(i,j,k)
                         b%smesh%var(6,np)=b%nn%SRmag(i,j,k)
                      end if
                   end do
@@ -684,51 +684,51 @@ contains
          ! Add momentum source terms
          call b%fs%addsrc_gravity(b%resU,b%resV,b%resW)
 
-         ! Add polymer stress term
-         polymer_stress: block
-            integer :: i,j,k,n
-            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-            real(WP), dimension(:,:,:,:), allocatable :: stress
-            ! Allocate work arrays
-            allocate(stress(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_,1:6))
-            allocate(Txy   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
-            allocate(Tyz   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
-            allocate(Tzx   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
-            ! Calculate the polymer relaxation
-            stress=0.0_WP; call b%nn%addsrc_relax(stress)
-            ! Build liquid stress tensor
-            do n=1,6
-               stress(:,:,:,n)=-b%nn%visc_p(:,:,:)*b%vf%VF*stress(:,:,:,n)
-            end do
-            ! Interpolate tensor components to cell edges
-            do k=b%cfg%kmin_,b%cfg%kmax_+1
-               do j=b%cfg%jmin_,b%cfg%jmax_+1
-                  do i=b%cfg%imin_,b%cfg%imax_+1
-                     Txy(i,j,k)=sum(b%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-                     Tyz(i,j,k)=sum(b%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-                     Tzx(i,j,k)=sum(b%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-                  end do
-               end do
-            end do
-            ! Add divergence of stress to residual
-            do k=b%fs%cfg%kmin_,b%fs%cfg%kmax_
-               do j=b%fs%cfg%jmin_,b%fs%cfg%jmax_
-                  do i=b%fs%cfg%imin_,b%fs%cfg%imax_
-                     if (b%fs%umask(i,j,k).eq.0) b%resU(i,j,k)=b%resU(i,j,k)+sum(b%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-                     &                                                      +sum(b%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-                     &                                                      +sum(b%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-                     if (b%fs%vmask(i,j,k).eq.0) b%resV(i,j,k)=b%resV(i,j,k)+sum(b%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-                     &                                                      +sum(b%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-                     &                                                      +sum(b%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-                     if (b%fs%wmask(i,j,k).eq.0) b%resW(i,j,k)=b%resW(i,j,k)+sum(b%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-                     &                                                      +sum(b%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-                     &                                                      +sum(b%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-                  end do
-               end do
-            end do
-            ! Clean up
-            deallocate(stress,Txy,Tyz,Tzx)
-         end block polymer_stress
+         ! ! Add polymer stress term
+         ! polymer_stress: block
+         !    integer :: i,j,k,n
+         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+         !    real(WP), dimension(:,:,:,:), allocatable :: stress
+         !    ! Allocate work arrays
+         !    allocate(stress(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_,1:6))
+         !    allocate(Txy   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         !    allocate(Tyz   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         !    allocate(Tzx   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         !    ! Calculate the polymer relaxation
+         !    stress=0.0_WP; call b%nn%addsrc_relax(stress)
+         !    ! Build liquid stress tensor
+         !    do n=1,6
+         !       stress(:,:,:,n)=-b%nn%visc_p(:,:,:)*b%vf%VF*stress(:,:,:,n)
+         !    end do
+         !    ! Interpolate tensor components to cell edges
+         !    do k=b%cfg%kmin_,b%cfg%kmax_+1
+         !       do j=b%cfg%jmin_,b%cfg%jmax_+1
+         !          do i=b%cfg%imin_,b%cfg%imax_+1
+         !             Txy(i,j,k)=sum(b%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+         !             Tyz(i,j,k)=sum(b%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+         !             Tzx(i,j,k)=sum(b%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+         !          end do
+         !       end do
+         !    end do
+         !    ! Add divergence of stress to residual
+         !    do k=b%fs%cfg%kmin_,b%fs%cfg%kmax_
+         !       do j=b%fs%cfg%jmin_,b%fs%cfg%jmax_
+         !          do i=b%fs%cfg%imin_,b%fs%cfg%imax_
+         !             if (b%fs%umask(i,j,k).eq.0) b%resU(i,j,k)=b%resU(i,j,k)+sum(b%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+         !             &                                                      +sum(b%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+         !             &                                                      +sum(b%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+         !             if (b%fs%vmask(i,j,k).eq.0) b%resV(i,j,k)=b%resV(i,j,k)+sum(b%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+         !             &                                                      +sum(b%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+         !             &                                                      +sum(b%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+         !             if (b%fs%wmask(i,j,k).eq.0) b%resW(i,j,k)=b%resW(i,j,k)+sum(b%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+         !             &                                                      +sum(b%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+         !             &                                                      +sum(b%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+         !          end do
+         !       end do
+         !    end do
+         !    ! Clean up
+         !    deallocate(stress,Txy,Tyz,Tzx)
+         ! end block polymer_stress
             
          ! Assemble explicit residual
          b%resU=-2.0_WP*b%fs%rho_U*b%fs%U+(b%fs%rho_Uold+b%fs%rho_U)*b%fs%Uold+b%time%dt*b%resU
@@ -817,7 +817,7 @@ contains
                            b%smesh%var(2,np)=b%Ui(i,j,k)
                            b%smesh%var(3,np)=b%Vi(i,j,k)
                            b%smesh%var(4,np)=b%Wi(i,j,k)
-                           b%smesh%var(5,np)=b%fs%visc(i,j,k)
+                           b%smesh%var(5,np)=b%nn%visc_p(i,j,k)
                            b%smesh%var(6,np)=b%nn%SRmag(i,j,k)
                         end if
                      end do

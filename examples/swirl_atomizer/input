@@ -32,9 +32,9 @@ Gas density                 : 1e-3
 Surface tension coefficient : 0.002
 
 # Non-Newtonian modeling
-Carreau powerlaw :              0.12
-Polymer viscosity :             0.01
-Polymer relaxation time :       0.1
+Carreau powerlaw :              0.5
+Polymer viscosity :             0.001
+Polymer relaxation time :       1
 Maximum polymer extensibility : 10
 
 # Time integration
