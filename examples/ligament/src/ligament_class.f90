@@ -8,11 +8,13 @@ module ligament_class
    use partmesh_class,    only: partmesh
    use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
-   use vfs_class,         only: vfs
+   ! use vfs_class,         only: vfs
+   use film_vfs_class,    only: film_vfs
    use fene_class,        only: fene
    use ccl_class,         only: ccl
    use lpt_class,         only: lpt
-   use tpns_class,        only: tpns
+   !use tpns_class,        only: tpns
+   use film_tpns_class,   only: film_tpns
    use timetracker_class, only: timetracker
    use event_class,       only: event
    use monitor_class,     only: monitor
@@ -28,8 +30,10 @@ module ligament_class
       type(config) :: cfg
       
       !> Flow solver
-      type(vfs)         :: vf       !< Volume fraction solver
-      type(tpns)        :: fs       !< Two-phase flow solver
+      ! type(vfs)         :: vf       !< Volume fraction solver
+      ! type(tpns)        :: fs       !< Two-phase flow solver
+      type(film_vfs)    :: vf       !< Volume fraction solver
+      type(film_tpns)   :: fs       !< Two-phase flow solver
       type(hypre_str)   :: ps       !< Structured Hypre linear solver for pressure
       type(ddadi)       :: vs,ss    !< DDADI solver for velocity and scalar
       type(fene)        :: nn       !< FENE model for polymer stress
@@ -180,7 +184,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         this%vf=vfs(cfg=this%cfg,reconstruction_method=r2p,name='VOF')
+         this%vf=film_vfs(cfg=this%cfg,reconstruction_method=art,name='VOF')
          ! Initialize to a ligament
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
@@ -242,7 +246,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: n,i,j,k      
          ! Create flow solver
-         this%fs=tpns(cfg=this%cfg,name='Two-phase NS')
+         this%fs=film_tpns(cfg=this%cfg,name='Two-phase NS')
          ! Set fluid properties
          this%fs%rho_g=1.0_WP; call param_read('Density ratio',this%fs%rho_l)
          call param_read('Reynolds number',this%fs%visc_g); this%fs%visc_g=1.0_WP/this%fs%visc_g
@@ -311,6 +315,7 @@ contains
          this%cc%max_interface_planes=2
          this%cc%VFlo=VFlo
          this%cc%dot_threshold=-0.5_WP
+         this%cc%thickness_cutoff=filmthickness_over_dx
          ! Perform CCL step
          call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
          call this%cc%film_classify(Lbary=this%vf%Lbary,Gbary=this%vf%Gbary)
@@ -756,7 +761,8 @@ contains
          call this%fs%update_laplacian()
          call this%fs%correct_mfr()
          call this%fs%get_div()
-         call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         call this%fs%add_surface_tension_jump_film(dt=this%time%dt,div=this%fs%div,vf=this%vf)
          this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
          this%fs%psolv%sol=0.0_WP
          call this%fs%psolv%solve()
