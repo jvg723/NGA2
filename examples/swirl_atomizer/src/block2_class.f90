@@ -344,19 +344,19 @@ contains
          call b%fs%get_div()
       end block initialize_velocity
 
-      ! ! Create a connected-component labeling object
-      ! create_and_initialize_ccl: block
-      !    use vfs_class, only: VFlo
-      !    ! Create the CCL object
-      !    b%cc=ccl(cfg=b%cfg,name='CCL')
-      !    b%cc%max_interface_planes=2
-      !    b%cc%VFlo=VFlo
-      !    b%cc%dot_threshold=-0.5_WP
-      !    ! Perform CCL step
-      !    call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
-      !    call b%cc%film_classify(Lbary=b%vf%Lbary,Gbary=b%vf%Gbary)
-      !    call b%cc%deallocate_lists()
-      ! end block create_and_initialize_ccl
+      ! Create a connected-component labeling object
+      create_and_initialize_ccl: block
+         use vfs_class, only: VFlo
+         ! Create the CCL object
+         b%cc=ccl(cfg=b%cfg,name='CCL')
+         b%cc%max_interface_planes=2
+         b%cc%VFlo=VFlo
+         b%cc%dot_threshold=-0.5_WP
+         ! Perform CCL step
+         call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+         call b%cc%film_classify(Lbary=b%vf%Lbary,Gbary=b%vf%Gbary)
+         call b%cc%deallocate_lists()
+      end block create_and_initialize_ccl
       
 
       ! Create surfmesh object for interface polygon output
