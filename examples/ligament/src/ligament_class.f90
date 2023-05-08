@@ -382,19 +382,15 @@ contains
       create_pmesh: block
          integer :: i
          ! Include an extra variable for droplet diameter
-         this%pmesh=partmesh(nvar=1,nvec=3,name='lpt')
+         this%pmesh=partmesh(nvar=1,nvec=1,name='lpt')
          this%pmesh%varname(1)='diameter'
          this%pmesh%vecname(1)='velocity'
-         this%pmesh%vecname(2)='ang_vel'
-         this%pmesh%vecname(3)='Fcol'
          ! Transfer particles to pmesh
          call this%lp%update_partmesh(this%pmesh)
          ! Also populate diameter variable
          do i=1,this%lp%np_
             this%pmesh%var(1,i)=this%lp%p(i)%d
             this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
-            this%pmesh%vec(:,2,i)=this%lp%p(i)%angVel
-            this%pmesh%vec(:,3,i)=this%lp%p(i)%Acol
          end do
       end block create_pmesh
 
@@ -420,7 +416,6 @@ contains
          end do
          call this%ens_out%add_particle('spray',this%pmesh)
          call this%ens_out%add_scalar('SRmag',this%nn%SRmag)
-         call this%ens_out%add_particle('particles',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -842,8 +837,6 @@ contains
             do i=1,this%lp%np_
                this%pmesh%var(1,i)=this%lp%p(i)%d
                this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
-               this%pmesh%vec(:,2,i)=this%lp%p(i)%angVel
-               this%pmesh%vec(:,3,i)=this%lp%p(i)%Acol
             end do
          end block update_pmesh
          ! Perform ensight output
@@ -853,6 +846,7 @@ contains
       ! Perform and output monitoring
       call this%fs%get_max()
       call this%vf%get_max()
+      call this%lp%get_max()
       call this%mfile%write()
       call this%cflfile%write()
       call this%sprayfile%write() 
@@ -937,7 +931,7 @@ contains
                ! Make room for new drop
                np=this%lp%np_+1; call this%lp%resize(np)
                ! Add the drop
-               this%lp%p(np)%id  =int(0,8)                                                                                 !< Give id (maybe based on break-up model?)
+               this%lp%p(np)%id  =int(1,8)                                                                                 !< Give id (maybe based on break-up model?)
                this%lp%p(np)%dt  =0.0_WP                                                                                   !< Let the drop find it own integration time
                this%lp%p(np)%Acol=0.0_WP                                                                                   !< Give zero collision force (axial)
                this%lp%p(np)%Tcol=0.0_WP                                                                                   !< Give zero collision force (tangential)
@@ -1013,7 +1007,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(0,8)                                   !< Give id (maybe based on break-up model?)
+                  this%lp%p(np)%id  =int(1,8)                                   !< Give id (maybe based on break-up model?)
                   this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
                   this%lp%p(np)%Acol=0.0_WP                                     !< Give zero collision force (axial)
                   this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
@@ -1037,7 +1031,7 @@ contains
                ! Add one last drop for remaining liquid volume
                np=this%lp%np_+1; call this%lp%resize(np)
                ! Add the drop
-               this%lp%p(np)%id  =int(0,8)                                   !< Give id (maybe based on break-up model?)
+               this%lp%p(np)%id  =int(1,8)                                   !< Give id (maybe based on break-up model?)
                this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
                this%lp%p(np)%Acol=0.0_WP                                     !< Give zero collision force (axial)
                this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
