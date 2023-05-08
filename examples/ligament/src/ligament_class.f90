@@ -294,7 +294,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',this%nn%trelax)
          ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity',this%nn%visc); this%nn%visc_p=this%nn%visc
+         call param_read('Polymer viscosity ratio',this%nn%visc); this%nn%visc=this%fs%visc_g*this%nn%visc; this%nn%visc_p=this%nn%visc
          ! Powerlaw coefficient in Carreau model
          call param_read('Carreau powerlaw',this%nn%ncoeff)
          ! Configure implicit scalar solver
