@@ -37,6 +37,17 @@ module simulation
 contains
    
    
+   !> Function that localizes the left (x-) of the domain
+   function xm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin) isIn=.true.
+   end function xm_locator
+   
+   
    !> Function that localizes the right (x+) of the domain
    function xp_locator(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
@@ -47,7 +58,7 @@ contains
       if (i.eq.pg%imax+1) isIn=.true.
    end function xp_locator
    
-
+   
    !> Function that localizes the top (y+) of the domain
    function yp_locator(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
@@ -57,17 +68,6 @@ contains
       isIn=.false.
       if (j.eq.pg%jmax+1) isIn=.true.
    end function yp_locator
-   
-
-   !> Function that localizes the left (x-) of the domain
-   function xm_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imin) isIn=.true.
-   end function xm_locator
    
    
    !> Initialization of problem solver
@@ -162,7 +162,7 @@ contains
          call fs%add_bcond(name='inlet',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
          ! Clipped Neumann outflow on the right of domain
          call fs%add_bcond(name='outlet',type=clipped_neumann,face='x',dir=+1,canCorrect=.false.,locator=xp_locator)
-         ! Slip boundary on the top of domain
+         ! Slip boundary on the side of domain
          call fs%add_bcond(name='top',type=slip,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
@@ -178,12 +178,19 @@ contains
 
       ! Initialize our velocity field
       initialize_velocity: block
+         integer :: i,j,k
          real(WP) :: Uin
          ! Zero initial field in the domain
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
          ! Set inlet velocity everywhere
          call param_read('Inlet velocity',Uin)
-         where (fs%umask.ne.1) fs%U=Uin
+         do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+            do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+               do i=fs%cfg%imino_,fs%cfg%imaxo_
+                  if (vf%VF(i,j,k).gt.0.0_WP) fs%U(i,j,k)=Uin
+               end do
+            end do
+         end do
          ! Apply all other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
          ! Compute MFR through all boundary conditions
@@ -200,7 +207,7 @@ contains
       ! Add Ensight output
       create_ensight: block
          ! Create Ensight output from cfg
-         ens_out=ensight(cfg=cfg,name='wake')
+         ens_out=ensight(cfg=cfg,name='flume')
          ! Create event for Ensight output
          ens_evt=event(time=time,name='Ensight output')
          call param_read('Ensight output period',ens_evt%tper)
@@ -208,7 +215,6 @@ contains
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('Pressure',fs%P)
-         call ens_out%add_scalar('curvature',vf%curv)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
