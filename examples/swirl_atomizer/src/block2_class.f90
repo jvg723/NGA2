@@ -200,7 +200,7 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         b%vf=vfs(cfg=b%cfg,reconstruction_method=art,name='VOF')
+         b%vf=vfs(cfg=b%cfg,reconstruction_method=lvira,name='VOF')
          ! Set full domain to gas
          do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
             do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
@@ -371,6 +371,7 @@ contains
          b%smesh%varname(4)='z_velocity'
          b%smesh%varname(5)='visc_l'
          b%smesh%varname(6)='SRmag'
+         b%smesh%varname(7)='film'
          ! Transfer polygons to smesh
          call b%vf%update_surfmesh(b%smesh)
          ! Also populate nplane variable
@@ -381,6 +382,7 @@ contains
          b%smesh%var(4,:)=0.0_WP
          b%smesh%var(5,:)=0.0_WP
          b%smesh%var(6,:)=0.0_WP
+         b%smesh%var(7,:)=0.0_WP
          np=0
          do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
             do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -394,6 +396,7 @@ contains
                         b%smesh%var(4,np)=b%Wi(i,j,k)
                         b%smesh%var(5,np)=b%nn%visc_p(i,j,k)
                         b%smesh%var(6,np)=b%nn%SRmag(i,j,k)
+                        b%smesh%var(7,np)=b%cc%film_thickness(i,j,k)
                      end if
                   end do
                end do
@@ -806,6 +809,7 @@ contains
             b%smesh%var(4,:)=0.0_WP
             b%smesh%var(5,:)=0.0_WP
             b%smesh%var(6,:)=0.0_WP
+            b%smesh%var(7,:)=0.0_WP
             np=0
             do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
                do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -819,6 +823,7 @@ contains
                            b%smesh%var(4,np)=b%Wi(i,j,k)
                            b%smesh%var(5,np)=b%nn%visc_p(i,j,k)
                            b%smesh%var(6,np)=b%nn%SRmag(i,j,k)
+                           b%smesh%var(7,np)=b%cc%film_thickness(i,j,k)
                         end if
                      end do
                   end do
