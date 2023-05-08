@@ -13,15 +13,15 @@ nz : 100 !240
 # Flow conditions
 Reynolds number :      100
 Weber number :         10
-Viscosity ratio :      50
+Viscosity ratio :      0
 Density ratio :        1000
 Target Re_lambda :     45
 Turbulence intensity : 0.1
 
 # Non-Newtonian modeling
 Carreau powerlaw :              0.5
-Polymer viscosity :             0
-Polymer relaxation time :       10
+Polymer viscosity ratio :       50
+Polymer relaxation time :       0.05
 Maximum polymer extensibility : 10
 
 # Time integration
