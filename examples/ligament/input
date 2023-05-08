@@ -19,9 +19,9 @@ Target Re_lambda :     45
 Turbulence intensity : 0.1
 
 # Non-Newtonian modeling
-Carreau powerlaw :              0.12
+Carreau powerlaw :              0.5
 Polymer viscosity :             0
-Polymer relaxation time :       0.1
+Polymer relaxation time :       10
 Maximum polymer extensibility : 10
 
 # Time integration
