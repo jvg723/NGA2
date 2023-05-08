@@ -333,7 +333,7 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=8,name='plic')
+         this%smesh=surfmesh(nvar=11,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='type'
          this%smesh%varname(3)='x_velocity'
@@ -342,6 +342,9 @@ contains
          this%smesh%varname(6)='visc'
          this%smesh%varname(7)='SRmag'
          this%smesh%varname(8)='film'
+         this%smesh%varname(9)='cxx'
+         this%smesh%varname(10)='cyy'
+         this%smesh%varname(11)='czz'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -354,6 +357,9 @@ contains
          this%smesh%var(6,:)=0.0_WP
          this%smesh%var(7,:)=0.0_WP
          this%smesh%var(8,:)=0.0_WP
+         this%smesh%var(9,:)=0.0_WP
+         this%smesh%var(10,:)=0.0_WP
+         this%smesh%var(11,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -368,6 +374,9 @@ contains
                         this%smesh%var(6,np)=this%nn%visc_p(i,j,k)
                         this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
                         this%smesh%var(8,np)=this%cc%film_thickness(i,j,k)
+                        this%smesh%var(9,np)=this%nn%SC(i,j,k,1)
+                        this%smesh%var(10,np)=this%nn%SC(i,j,k,4)
+                        this%smesh%var(11,np)=this%nn%SC(i,j,k,6)
                      end if
                   end do
                end do
@@ -784,6 +793,9 @@ contains
             this%smesh%var(6,:)=0.0_WP
             this%smesh%var(7,:)=0.0_WP
             this%smesh%var(8,:)=0.0_WP
+            this%smesh%var(9,:)=0.0_WP
+            this%smesh%var(10,:)=0.0_WP
+            this%smesh%var(11,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -798,6 +810,9 @@ contains
                            this%smesh%var(6,np)=this%fs%visc(i,j,k)
                            this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
                            this%smesh%var(8,np)=this%cc%film_thickness(i,j,k)
+                           this%smesh%var(9,np)=this%nn%SC(i,j,k,1)
+                           this%smesh%var(10,np)=this%nn%SC(i,j,k,4)
+                           this%smesh%var(11,np)=this%nn%SC(i,j,k,6)
                         end if
                      end do
                   end do
