@@ -8,8 +8,9 @@ USE_HYPRE = TRUE
 USE_LAPACK= TRUE
 USE_IRL   = TRUE
 USE_FFTW  = TRUE
+USE_ODRPACK=FALSE
 PROFILE   = FALSE
-DEBUG     = FALSE 
+DEBUG     = FALSE
 COMP      = gnu
 EXEBASE   = nga
 
@@ -29,7 +30,7 @@ VPATH_LOCATIONS   += $(Ulocs)
 include $(NGA_HOME)/tools/GNUMake/Make.defs
 
 # Include NGA base code
-Bdirs   := core two_phase data transform solver config grid libraries
+Bdirs   := particles constant_density data core transform solver config grid libraries
 Bpack   += $(foreach dir, $(Bdirs), $(NGA_HOME)/src/$(dir)/Make.package)
 include $(Bpack)
 

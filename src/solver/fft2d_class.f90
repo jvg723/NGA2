@@ -89,8 +89,8 @@ contains
       allocate(self%transformed_rhs(self%cfg%imin_:self%cfg%imax_,self%cfg%jmin_:self%cfg%jmax_,self%cfg%kmin_:self%cfg%kmax_))
       
       ! Create a rfourier object
-      self%dft=rfourier(self%cfg)
-
+      allocate(self%dft,source=rfourier(self%cfg))
+      
       ! Check FFT is only unavailable in one direction
       self%xdiag=.false.; if (self%cfg%nx.gt.1.and..not.self%dft%xfft_avail) self%xdiag=.true.
       self%ydiag=.false.; if (self%cfg%ny.gt.1.and..not.self%dft%yfft_avail) self%ydiag=.true.
@@ -124,7 +124,7 @@ contains
          if (count([this%stc(st,1),this%stc(st,2),this%stc(st,3)].ne.0).gt.1) call die('[fft2d init] 3D stencil must be a sum of 1D stencils')
       end do
       ! Create a diagonal solver now that we know the stencil
-      this%diagsolver=diag(this%cfg,name=this%name,n=2*maxval(abs(this%stc))+1)
+      allocate(this%diagsolver,source=diag(this%cfg,name=this%name,n=2*maxval(abs(this%stc))+1))
    end subroutine fft2d_init
    
    
