@@ -286,21 +286,21 @@ contains
       b%fs%Vold=b%fs%V
       b%fs%Wold=b%fs%W
 
-      ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
-      shear_thinning: block
-         integer :: i,j,k
-         real(WP), dimension(:,:,:,:), allocatable :: SR
-         ! Allocate SR array
-         allocate(SR(1:6,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
-         ! Calculate strain rate
-         call b%fs%get_strainrate(SR)
-         ! Update polymer viscosity using Carreau model
-         call b%nn%update_visc_p(SR)
-         ! Update total liquid viscosity
-         b%fs%visc=visc+b%nn%visc_p
-         ! Deallocate SR array
-         deallocate(SR)
-      end block shear_thinning
+      ! ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
+      ! shear_thinning: block
+      !    integer :: i,j,k
+      !    real(WP), dimension(:,:,:,:), allocatable :: SR
+      !    ! Allocate SR array
+      !    allocate(SR(1:6,b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+      !    ! Calculate strain rate
+      !    call b%fs%get_strainrate(SR)
+      !    ! Update polymer viscosity using Carreau model
+      !    call b%nn%update_visc_p(SR)
+      !    ! Update total liquid viscosity
+      !    b%fs%visc=visc+b%nn%visc_p
+      !    ! Deallocate SR array
+      !    deallocate(SR)
+      ! end block shear_thinning
          
       ! Turbulence modeling
       sgs_modeling: block
