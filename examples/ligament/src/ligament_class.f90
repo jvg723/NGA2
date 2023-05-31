@@ -52,6 +52,7 @@ module ligament_class
       type(monitor)  :: cflfile     !< CFL monitoring
       type(monitor)  :: scfile      !< Scalar monitoring
       type(monitor)  :: sprayfile   !< Spray monitoring file
+      type(monitor)  :: dropfile    !< Droplet monitoring file
       
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
@@ -80,6 +81,9 @@ module ligament_class
    real(WP) :: diam_over_filmthickness=1.0e+1_WP
    real(WP) :: max_eccentricity       =5.0e-1_WP
    real(WP) :: d_threshold            =1.0e-1_WP
+
+   !> Droplet d^3 mean, Sauter mean, and mass median diameters
+   real(WP) :: d30,d32,mmd
    
 
 contains
@@ -325,6 +329,9 @@ contains
          this%lp=lpt(cfg=this%cfg,name='spray')
          ! Get particle density from the flow solver
          this%lp%rho=this%fs%rho_l
+         ! Calculate spray stats
+         call spray_statistics_setup(this)
+         call spray_statistics(this)   
       end block create_lpt
    
 
@@ -492,6 +499,17 @@ contains
          call this%sprayfile%add_column(this%lp%dmax, 'dmax')
          call this%sprayfile%add_column(this%lp%dmean,'dmean')
          call this%sprayfile%write()
+         ! Create a droplet mean/median monitor
+         this%dropfile=monitor(amroot=this%lp%cfg%amRoot,name='dropstats')
+         call this%dropfile%add_column(this%time%n,'Timestep number')
+         call this%dropfile%add_column(this%time%t,'Time')
+         call this%dropfile%add_column(this%time%dt,'Timestep size')
+         call this%dropfile%add_column(this%lp%np,'Droplet number')
+         call this%dropfile%add_column(this%lp%dmean,'d10')
+         call this%dropfile%add_column(d30,'d30')
+         call this%dropfile%add_column(d32,'d32')
+         call this%dropfile%add_column(mmd,'MMD')
+         call this%dropfile%write() 
       end block create_monitor
 
       
@@ -539,83 +557,83 @@ contains
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
 
-         ! ============= SCALAR SOLVER =======================
+         ! ! ============= SCALAR SOLVER =======================
             
-         ! Reset interpolation metrics to QUICK scheme
-         call this%nn%metric_reset()
+         ! ! Reset interpolation metrics to QUICK scheme
+         ! call this%nn%metric_reset()
             
-         ! Build mid-time scalar
-         this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
+         ! ! Build mid-time scalar
+         ! this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
          
-         ! Explicit calculation of drhoSC/dt from scalar equation
-         call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! ! Explicit calculation of drhoSC/dt from scalar equation
+         ! call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
          
-         ! Perform bquick procedure
-         bquick: block
-            integer :: i,j,k
-            logical, dimension(:,:,:), allocatable :: flag
-            ! Allocate work array
-            allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            ! Assemble explicit residual
-            this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
-            ! Apply it to get explicit scalar prediction
-            this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
-            ! Check cells that require bquick
-            do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-               do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-                  do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-                     if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
-                     &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
-                        flag(i,j,k)=.true.
-                     else
-                        flag(i,j,k)=.false.
-                     end if
-                  end do
-               end do
-            end do
-            ! Adjust metrics
-            call this%nn%metric_adjust(this%SCtmp,flag)
-            ! Clean up
-            deallocate(flag)
-            ! Recompute drhoSC/dt
-            call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
-         end block bquick
+         ! ! Perform bquick procedure
+         ! bquick: block
+         !    integer :: i,j,k
+         !    logical, dimension(:,:,:), allocatable :: flag
+         !    ! Allocate work array
+         !    allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    ! Assemble explicit residual
+         !    this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
+         !    ! Apply it to get explicit scalar prediction
+         !    this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
+         !    ! Check cells that require bquick
+         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
+         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
+         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
+         !             if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
+         !             &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
+         !                flag(i,j,k)=.true.
+         !             else
+         !                flag(i,j,k)=.false.
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         !    ! Adjust metrics
+         !    call this%nn%metric_adjust(this%SCtmp,flag)
+         !    ! Clean up
+         !    deallocate(flag)
+         !    ! Recompute drhoSC/dt
+         !    call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! end block bquick
          
-         ! Add fene sources
-         call this%nn%addsrc_CgradU(this%gradU,this%resSC)
-         call this%nn%addsrc_relax(this%resSC,this%time%dt)
+         ! ! Add fene sources
+         ! call this%nn%addsrc_CgradU(this%gradU,this%resSC)
+         ! call this%nn%addsrc_relax(this%resSC,this%time%dt)
          
-         ! Assemble explicit residual
-         this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
+         ! ! Assemble explicit residual
+         ! this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
          
-         ! Form implicit residual
-         call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! ! Form implicit residual
+         ! call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
          
-         ! Update scalars
-         this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
+         ! ! Update scalars
+         ! this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
          
-         ! Force the gas scalar to identity
-         gas_scalar_forcing: block
-            integer :: i,j,k
-            do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-               do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-                  do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-                     if (this%nn%mask(i,j,k).eq.0) then
-                        this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-                        this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
-                        this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
-                        this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-                        this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
-                        this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-                     end if
-                  end do
-               end do
-            end do
-         end block gas_scalar_forcing
+         ! ! Force the gas scalar to identity
+         ! gas_scalar_forcing: block
+         !    integer :: i,j,k
+         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
+         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
+         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
+         !             if (this%nn%mask(i,j,k).eq.0) then
+         !                this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+         !                this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
+         !                this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
+         !                this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+         !                this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
+         !                this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         ! end block gas_scalar_forcing
 
-         ! Apply all other boundary conditions on the resulting field
-         call this%nn%apply_bcond(this%time%t,this%time%dt)
-         ! ===================================================
+         ! ! Apply all other boundary conditions on the resulting field
+         ! call this%nn%apply_bcond(this%time%t,this%time%dt)
+         ! ! ===================================================
          
          ! ============ VELOCITY SOLVER ======================
 
@@ -678,51 +696,51 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         ! Add polymer stress term
-         polymer_stress: block
-            integer :: i,j,k,n
-            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-            real(WP), dimension(:,:,:,:), allocatable :: stress
-            ! Allocate work arrays
-            allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-            allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            ! Calculate the polymer relaxation
-            stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
-            ! Build liquid stress tensor
-            do n=1,6
-               stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
-            end do
-            ! Interpolate tensor components to cell edges
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
-                     Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-                     Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-                     Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-                  end do
-               end do
-            end do
-            ! Add divergence of stress to residual
-            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-                     if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-                     &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-                     &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-                     if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-                     &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-                     &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-                     if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-                     &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-                     &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-                  end do
-               end do
-            end do
-            ! Clean up
-            deallocate(stress,Txy,Tyz,Tzx)
-         end block polymer_stress
+         ! ! Add polymer stress term
+         ! polymer_stress: block
+         !    integer :: i,j,k,n
+         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+         !    real(WP), dimension(:,:,:,:), allocatable :: stress
+         !    ! Allocate work arrays
+         !    allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+         !    allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    ! Calculate the polymer relaxation
+         !    stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
+         !    ! Build liquid stress tensor
+         !    do n=1,6
+         !       stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
+         !    end do
+         !    ! Interpolate tensor components to cell edges
+         !    do k=this%cfg%kmin_,this%cfg%kmax_+1
+         !       do j=this%cfg%jmin_,this%cfg%jmax_+1
+         !          do i=this%cfg%imin_,this%cfg%imax_+1
+         !             Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+         !             Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+         !             Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+         !          end do
+         !       end do
+         !    end do
+         !    ! Add divergence of stress to residual
+         !    do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+         !       do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+         !          do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+         !             if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+         !             &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+         !             &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+         !             if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+         !             &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+         !             &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+         !             if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+         !             &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+         !             &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+         !          end do
+         !       end do
+         !    end do
+         !    ! Clean up
+         !    deallocate(stress,Txy,Tyz,Tzx)
+         ! end block polymer_stress
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
@@ -766,6 +784,9 @@ contains
 
       ! Perform volume-fraction-to-droplet transfer
       call this%transfer_vf_to_drops()
+
+      ! Calculate spray statistics
+      call spray_statistics(this)
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -841,6 +862,7 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%sprayfile%write() 
+      call this%dropfile%write() 
       
       
    end subroutine step
@@ -1053,6 +1075,174 @@ contains
       call this%lp%sync()
       
    end subroutine transfer_vf_to_drops
+
+   !> Setup spray statistics folders
+   subroutine spray_statistics_setup(this)
+      use messager, only: die
+      use string,   only: str_medium
+      implicit none
+      character(len=str_medium) :: filename
+      integer :: iunit,ierr
+      class(ligament), intent(inout) :: this
+
+      ! Create directory
+      if (this%cfg%amroot) then
+         call execute_command_line('mkdir -p spray')
+         ! call mkdir('spray')
+         ! call mkdir('spray-all')
+         filename='spray/droplets'
+         open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+         if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+         ! Write the header
+         write(iunit,*) 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z '
+         ! Close the file
+         close(iunit)         
+      end if
+   end subroutine spray_statistics_setup
+
+   !> Output spray statistics (velocity vs. diameter, mean/median diameters)
+   subroutine spray_statistics(this)
+      use mpi_f08,  only: MPI_REDUCE,MPI_SUM,MPI_BARRIER,MPI_GATHERV
+      use messager, only: die
+      use parallel, only: MPI_REAL_WP
+      use string,   only: str_medium
+      implicit none
+      real(WP) :: buf,d0,d2,d3,d10
+      integer :: iunit,rank,i,ierr
+      character(len=str_medium) :: filename
+      integer, dimension(:), allocatable :: displacements
+      real(WP), dimension(:), allocatable :: vollist_,vollist
+      integer, parameter :: col_len=14
+      class(ligament), intent(inout) :: this
+      
+      ! Create safe np/d0
+      d0=real(max(this%lp%np,1),WP)
+      ! Initialize others
+      d2=0.0_WP;d3=0.0_WP;mmd=0.0_WP
+      ! Only output list of diameters and velocities when ensight outputs and there exist particles
+      if (this%ens_evt%occurs().and.this%lp%np.gt.0) then
+      ! if (lp%np.gt.0) then
+         ! Create new file for timestep
+         filename='spray/droplets.'
+         write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
+         ! Root write the header
+         if (this%cfg%amRoot) then
+            ! Open the file
+            ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
+            open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+            if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+            ! Write the header
+            write(iunit,*) 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z '
+            ! Close the file
+            close(iunit)
+         end if
+         ! Write the diameters and velocities
+         do rank=0,this%cfg%nproc-1
+            if (rank.eq.this%cfg%rank) then
+               ! Open the file
+               ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
+               open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+               if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+               ! Output diameters and velocities
+               do i=1,this%lp%np_
+                  write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3)  
+               end do
+               ! Close the file
+               close(iunit)
+            end if
+            ! Force synchronization
+            call MPI_BARRIER(this%cfg%comm,ierr)
+         end do
+      end if
+
+      ! Calculate diameter moments
+      ! d3 is used as total droplet volume
+      allocate(vollist_(1:this%lp%np_))
+      d2=0.0_WP
+      d3=0.0_WP
+      do i=1,this%lp%np_
+         d2=d2+this%lp%p(i)%d**2
+         d3=d3+this%lp%p(i)%d**3
+         vollist_(i)=this%lp%p(i)%d**3
+      end do
+      ! call MPI_ALLREDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d2=buf
+      ! call MPI_ALLREDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d3=buf
+      call MPI_REDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d2=buf
+      call MPI_REDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d3=buf
+
+      ! Gather droplet volumes
+      ! if (cfg%amroot) then
+         allocate(vollist(1:this%lp%np))
+         allocate(displacements(this%cfg%nproc)); displacements=0
+         do rank=1,this%cfg%nproc-1
+            displacements(rank+1)=displacements(rank)+this%lp%np_proc(rank)
+         end do
+      ! end if
+      call MPI_GATHERV(vollist_,this%lp%np_,MPI_REAL_WP,vollist,this%lp%np_proc,displacements,MPI_REAL_WP,0,this%cfg%comm,ierr)
+      
+      if (this%cfg%amroot) then
+         ! Sort volumes
+         call quick_sort(vollist)
+         ! Calculate d_30, d_32 (Sauter mean), and mass median diameters
+         if (d2.le.0.0_WP) then
+            d32=0.0_WP
+            d30=0.0_WP
+         else
+            d32=d3/d2
+            d30=(d3/d0)**(1.0_WP/3.0_WP)
+         end if
+         buf=0.0_WP
+         volloop: do i=1,this%lp%np
+            buf=buf+vollist(i)
+            if (buf.ge.0.5_WP*d3) then
+               mmd=vollist(i)**(1.0_WP/3.0_WP)
+               exit volloop
+            end if
+         end do volloop
+      end if
+   contains
+      ! Volume sorting
+      recursive subroutine quick_sort(vol)
+         implicit none
+         real(WP), dimension(:)   :: vol
+         integer :: imark
+         if (size(vol).gt.1) then
+            call quick_sort_partition(vol,imark)
+            call quick_sort(vol(     :imark-1))
+            call quick_sort(vol(imark:       ))
+         end if
+      end subroutine quick_sort
+      subroutine quick_sort_partition(vol,marker)
+         implicit none
+         real(WP), dimension(  :) :: vol
+         integer , intent(out)    :: marker
+         integer :: ii,jj
+         real(WP) :: dtmp,x
+         x=vol(1)
+         ii=0; jj=size(vol)+1
+         do
+            jj=jj-1
+            do
+               if (vol(jj).le.x) exit
+               jj=jj-1
+            end do
+            ii=ii+1
+            do
+               if (vol(ii).ge.x) exit
+               ii=ii+1
+            end do
+            if (ii.lt.jj) then
+               dtmp =vol(  ii); vol(  ii)=vol(  jj); vol(  jj)=dtmp
+            else if (ii.eq.jj) then
+               marker=ii+1
+               return
+            else
+               marker=ii
+               return
+            endif
+         end do
+      end subroutine quick_sort_partition
+   end subroutine spray_statistics
    
    
 end module ligament_class
