@@ -1,0 +1,41 @@
+# Parallelization
+Partition :	1 8 1
+
+# Mesh definition
+Lx :	0.208       ! 0.208
+Ly :	0.78        ! 0.78
+Lz :	0.00208       ! 0.208
+nx :	64          ! 64
+ny :	240         ! 240
+nz :	1          ! 64
+
+# Fluid properties
+Gravity :                     0 -9.81 0         # Case 1              Case 2
+Liquid dynamic viscosity :    0.82              # 2.8      (N*s/m^2)  0.82     (N*s/m^2) 
+Gas dynamic viscosity :       1.780e-5          # 1.780e-5 (N*s/m^2)  1.780e-5 (N*s/m^2) 
+Liquid density :              1314              # 1390     (kg/m^3)   1314     (kg/m^3)
+Gas density :                 1.226             # 1.226    (kg/m^3)   1.226    (kg/m^3)
+Surface tension coefficient : 0.0769            # 0.08     (N/m)      0.0769   (N/m)
+
+# Bubble definition
+# Bubble volume :   9300    # in mm^3
+Bubble diameter : 0.026
+Bubble position : 0 0.1 0
+
+# Non-Newtonian modeling                    # w=0.8 case    # w=0.3 case
+Carreau powerlaw :              0.6         # 0.33          # 0.57
+Polymer viscosity :             0           # 1.5122        # 0.096511
+Polymer relaxation time :       0.3         # 1.4           # 0.45
+Maximum polymer extensibility : 10
+
+# Time integration
+Max timestep size : 2e-4
+Max cfl number :    2
+Max time :          2
+
+# Pressure solver
+Pressure tolerance : 1e-4
+Pressure iteration : 100
+
+# Ensight output
+Ensight output period : 1e-2
