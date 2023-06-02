@@ -39,12 +39,13 @@ D      =search_str(path,'Bubble diameter')              # (m)       bubble diame
 Mo=(g*visc_l**4.0)/(rho_l*sigma**3.0)   # Morton number
 print('Mo=',Mo)
 #Terminal velocity correlation (Angelino 1965)
-const=133.0
-m=0.167*(1.0+0.34*const**0.24)
-K=25.0/(1.0+0.33*const**0.29)
-V=(4.0/3.0)*math.pi*(D/2.0)**3.0
-print('V=',V)
+m=0.167*(1.0+0.34*Mo**0.24)
+K=25.0/(1.0+0.33*Mo**0.29)
+V=(4.0/3.0)*math.pi*(D/2.0)**3.0*1e6
+print('Vol=',V)
+print
 vt=K*V**m
+vt=vt/100.0
 print('vt=',vt)
 Eo=(g*D**2.0*rho_l)/sigma               # Eotvos number
 print('Eo=',Eo)

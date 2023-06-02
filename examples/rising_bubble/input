@@ -4,22 +4,22 @@ Partition :	1 8 1
 # Mesh definition
 Lx :	0.208       ! 0.208
 Ly :	0.78        ! 0.78
-Lz :	0.00208       ! 0.208
+Lz :	0.00208     ! 0.208
 nx :	64          ! 64
 ny :	240         ! 240
-nz :	1          ! 64
+nz :	1           ! 64
 
 # Fluid properties
 Gravity :                     0 -9.81 0         # Case 1              Case 2
-Liquid dynamic viscosity :    0.82              # 2.8      (N*s/m^2)  0.82     (N*s/m^2) 
+Liquid dynamic viscosity :    2.800             # 2.8      (N*s/m^2)  1.314      (N*s/m^2) 
 Gas dynamic viscosity :       1.780e-5          # 1.780e-5 (N*s/m^2)  1.780e-5 (N*s/m^2) 
-Liquid density :              1314              # 1390     (kg/m^3)   1314     (kg/m^3)
+Liquid density :              1390              # 1390     (kg/m^3)   1390     (kg/m^3)
 Gas density :                 1.226             # 1.226    (kg/m^3)   1.226    (kg/m^3)
-Surface tension coefficient : 0.0769            # 0.08     (N/m)      0.0769   (N/m)
+Surface tension coefficient : 0.08              # 0.08     (N/m)      0.08     (N/m)
 
 # Bubble definition
 # Bubble volume :   9300    # in mm^3
-Bubble diameter : 0.026
+Bubble diameter : 0.02609
 Bubble position : 0 0.1 0
 
 # Non-Newtonian modeling                    # w=0.8 case    # w=0.3 case
