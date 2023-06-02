@@ -221,7 +221,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',nn%trelax)
          ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity',nn%visc)
+         call param_read('Polymer viscosity',nn%visc); nn%visc_p=nn%visc
          ! Powerlaw coefficient in Carreau model
          call param_read('Carreau powerlaw',nn%ncoeff)
          ! Configure implicit scalar solver
@@ -252,6 +252,7 @@ contains
          do nsc=1,nn%nscalar
             call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
          end do
+         call ens_out%add_scalar('visc_p',nn%visc_p)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
