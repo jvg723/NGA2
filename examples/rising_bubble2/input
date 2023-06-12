@@ -41,5 +41,5 @@ Ensight output period : 1e-2
 
 # Controller constants
 Proportional control : 3500
-Integral control     : 3500
-Derivative control   : 0.000001
+Integral control     : 35
+Derivative control   : 0.0000001
