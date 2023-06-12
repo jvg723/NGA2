@@ -40,6 +40,6 @@ Pressure iteration : 100
 Ensight output period : 1e-2
 
 # Controller constants
-Proportional control : 300
-Integral control     : 300
+Proportional control : 350
+Integral control     : 350
 Derivative control   : 0.00001
