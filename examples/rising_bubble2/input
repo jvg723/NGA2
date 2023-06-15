@@ -41,15 +41,6 @@ Pressure iteration : 100
 Ensight output period : 1e-2
 
 # Controller constants
-Proportional control : 3500
-# Integral control     : 0.0001 0.32
-# Integral control     : 0 0.3
-# Integral control     : 300 0.45
-# Integral control     : 3500 0.35
-# Integral control     : 35000 0.24
-Integral control     : 350 # 0.59
-# Integral control     : 35 0.45
-Derivative control   : 0
-# Proportional control : 3500
-# Integral control     : 0.01
-# Derivative control   : 0.0000001
+Controller gain:            10
+Integral reset time :       5
+Derivative time constant :  2e-4

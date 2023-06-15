@@ -40,9 +40,9 @@ module simulation
    !> Problem definition
    real(WP), dimension(3) :: center
    real(WP) :: radius,Vrise,Uin
-   real(WP) :: Xcent,Ycent,Zcent,Xcent_0,Ycent_0,Zcent_0
-   real(WP) :: KI,KD,KP
-   real(WP) :: et,et_total
+   real(WP) :: Ycent,Ycent_old,Ycent_0
+   real(WP) :: Kc,tau_i,tau_d
+   real(WP) :: ek,e_sum
    
 contains
 
@@ -80,86 +80,46 @@ contains
    end function ym_locator
    
    
-   !> Routine that computes rise velocity
+    !> Routine that computes rise velocity
    subroutine rise_vel()
       use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
       use parallel, only: MPI_REAL_WP
       implicit none
       integer :: i,j,k,ierr
-      real(WP) :: myVrise,myvol,bubble_vol
+      real(WP) :: myYcent,myVrise,myvol,bubble_vol
       myVrise=0.0_WP
       myvol=0.0_WP
       do k=vf%cfg%kmin_,vf%cfg%kmax_
          do j=vf%cfg%jmin_,vf%cfg%jmax_
             do i=vf%cfg%imin_,vf%cfg%imax_
+               myYcent=myYcent+vf%cfg%ym(j)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
                myVrise=myVrise+Vi(i,j,k)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
                myvol=myvol+(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
             end do
          end do
       end do
+      call MPI_ALLREDUCE(myYcent,Ycent     ,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
       call MPI_ALLREDUCE(myVrise,Vrise     ,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
       call MPI_ALLREDUCE(myvol  ,bubble_vol,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      Ycent=Ycent/bubble_vol
       Vrise=Vrise/bubble_vol
    end subroutine
 
-   !> Routine that computes x/y/z of bubble the bubble center
-   subroutine bubble_center() 
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
-      use parallel, only: MPI_REAL_WP
-      implicit none
-      integer :: i,j,k,ierr
-      real(WP) :: myXcent, myYcent,myZcent
-      real(WP) :: myvol,bubble_vol
-      myXcent=0.0_WP; myYcent=0.0_WP; myZcent=0.0_WP
-      myvol=0.0_WP; bubble_vol=0.0_WP
-      do k=vf%cfg%kmin_,vf%cfg%kmax_
-         do j=vf%cfg%jmin_,vf%cfg%jmax_
-            do i=vf%cfg%imin_,vf%cfg%imax_
-               myXcent=myXcent+vf%cfg%xm(i)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
-               myYcent=myYcent+vf%cfg%ym(j)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
-               myZcent=myZcent+vf%cfg%zm(k)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
-               myvol=myvol+(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
-            end do
-         end do
-      end do
-      call MPI_ALLREDUCE(myXcent,Xcent     ,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
-      call MPI_ALLREDUCE(myYcent,Ycent     ,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
-      call MPI_ALLREDUCE(myZcent,Zcent     ,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
-      call MPI_ALLREDUCE(myvol  ,bubble_vol,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
-      Xcent=Xcent/bubble_vol
-      Ycent=Ycent/bubble_vol
-      Zcent=Zcent/bubble_vol
-   end subroutine
-
-   !> Controller to calcualte inflow velocity to keep bubble y centroid constant
-   subroutine controller() 
-      implicit none
-      real(WP) :: u_past,u_present,u_future  ! Controller components 
-      real(WP) :: Ycent_old                  ! Y center at previous time step
-      
-      ! Tracking error
-      et=abs(Ycent_0-Ycent)
-      
-      ! Total error
-      et_total=et_total+et
-         
-      ! Integral control (past)
-      u_past=KI*et_total*time%dt
-         
-      ! Proportional control (present)
-      u_present=KP*et
-    
-      ! Derivative control (future)
-      u_future=KD*(Ycent-Ycent_old)/time%dt
-         
-      ! Total inflow
-      Uin=u_past+u_present-u_future
-
-      ! Keep set point at current time step
-      Ycent_old=Ycent
-
-   end subroutine
    
+   !> Controller to calcualte inflow velocity to keep bubble y centroid constant
+   function controller(ek,Kc,tau_i,e_sum,tau_d,PV,PV_old,dt) result(uk)
+      real(WP), intent(in) :: ek       !< Error at current time step
+      real(WP), intent(in) :: Kc       !< Controller gain
+      real(WP), intent(in) :: tau_i    !< Integral time constant
+      real(WP), intent(in) :: e_sum    !< Summation of error
+      real(WP), intent(in) :: tau_d    !< Derivative time constant
+      real(WP), intent(in) :: PV       !< Process variable at current time step
+      real(WP), intent(in) :: PV_old   !< Process variable at previous time step
+      real(WP), intent(in) :: dt       !< Current time step
+      real(WP) :: uk                   !< controller output at current time step
+      ! Controller output
+      uk=Kc*ek+(Kc/tau_i)*e_sum-Kc*tau_d*(Pv-PV_old)/dt
+   end function controller    
    
    !> Initialization of problem solver
    subroutine simulation_init
@@ -253,17 +213,19 @@ contains
          call vf%get_curvature()
          ! Reset moments to guarantee compatibility with interface reconstruction
          call vf%reset_volume_moments()
-         ! Get original bubble x/y/z centroid
-         call bubble_center()
-         Xcent_0=Xcent; Ycent_0=Ycent; Zcent_0=Zcent
+
       end block create_and_initialize_vof
 
-      ! Read in controller constants
+      ! Initialize controler
       control_variables: block
-         ! Controller constants
-         call param_read('Proportional control',KP)
-         call param_read('Integral control',KI)
-         call param_read('Derivative control',KD)
+         ! Controller gain
+         call param_read('Controller gain',Kc)
+         call param_read('Integral reset time',tau_i)
+         call param_read('Derivative time constant',tau_d)
+         ! Error terms
+         ek=0.0_WP; e_sum=0.0_WP
+         ! Get original bubble y centroid
+         call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
       end block control_variables 
       
       
@@ -299,8 +261,13 @@ contains
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
+         ! Error at current time step
+         ek=abs(Ycent_0-Ycent)
+         ! Sum errors up to current time
+         e_sum=e_sum+ek*time%dt
+         ! Inflow velocity
+         Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
          ! Setup inflow at top of domain
-         call controller()
          call fs%get_bcond('inflow',mybc)
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
@@ -381,15 +348,11 @@ contains
          call mfile%add_column(time%t,'Time')
          call mfile%add_column(time%dt,'Timestep size')
          call mfile%add_column(time%cfl,'Maximum CFL')
-         call mfile%add_column(Xcent,'X centroid')
          call mfile%add_column(Ycent_0,'Y0 centroid')
          call mfile%add_column(Ycent,'Y centroid')
-         call mfile%add_column(Ycent_0,'Y cent_init')
-         call mfile%add_column(Zcent,'Z centroid')
          call mfile%add_column(Vrise,'Rise velocity')
          call mfile%add_column(Uin,'Inflow velocity')
-         call mfile%add_column(et,'Controller errror')
-         call mfile%add_column(et_total,'Error sum')
+         call mfile%add_column(ek,'Controller errror')
          call mfile%add_column(fs%Umax,'Umax')
          call mfile%add_column(fs%Vmax,'Vmax')
          call mfile%add_column(fs%Wmax,'Wmax')
@@ -447,8 +410,13 @@ contains
             use tpns_class, only: bcond
             type(bcond), pointer :: mybc
             integer  :: n,i,j,k
-            ! Apply Uin at top of domain
-            call controller()
+            ! Error at current time step
+            ek=abs(Ycent_0-Ycent)
+            ! Sum errors up to current time
+            e_sum=e_sum+ek*time%dt
+            ! Inflow velocity
+            Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+            ! Setup inflow at top of domain
             call fs%get_bcond('inflow',mybc)
             do n=1,mybc%itr%no_
                i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
@@ -717,14 +685,16 @@ contains
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
 
-         ! Bubble centroid
-         call bubble_center()
+         ! Store old bubble y center
+         Ycent_old=Ycent
+         
+         ! Rise velocity and bubble center
+         call rise_vel()
          
          ! Perform and output monitoring
          call nn%get_max()
          call fs%get_max()
          call vf%get_max()
-         call rise_vel()
          call mfile%write()
          call cflfile%write()
          call scfile%write()
