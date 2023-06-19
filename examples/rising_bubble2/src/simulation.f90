@@ -27,7 +27,7 @@ module simulation
    type(event)    :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,scfile
+   type(monitor) :: mfile,cflfile,scfile,ctfile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -42,7 +42,7 @@ module simulation
    real(WP) :: radius,Vrise,Uin
    real(WP) :: Ycent,Ycent_old,Ycent_0
    real(WP) :: Kc,tau_i,tau_d
-   real(WP) :: ek,e_sum
+   real(WP) :: ek,e_sum,e_percent
    
 contains
 
@@ -119,7 +119,26 @@ contains
       real(WP) :: uk                   !< controller output at current time step
       ! Controller output
       uk=Kc*ek+(Kc/tau_i)*e_sum-Kc*tau_d*(Pv-PV_old)/dt
-   end function controller    
+   end function controller
+   
+   !> Specialized subroutine to plot controller error and controlled variable vs time
+   subroutine plotter()
+      use string,      only: str_medium
+      implicit none
+      integer :: iunit,ierr
+      character(len=str_medium) :: cont_file
+      character(len=str_medium), parameter :: plt_file='~/Builds/NGA2/examples/rising_bubble2/src/plot.gp'    
+      ! Plot from root processor
+      if (fs%cfg%amRoot) then
+         ! Store timestep and array naming for reading in gnuplot
+         open(newunit=iunit,file='./gp_input',form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Ly','Kc','tau_I','tau_D','SP'
+         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5)') fs%cfg%yL,Kc,tau_i,tau_d,Ycent_0
+         close(iunit)
+         ! Plot the curves using gnuplot
+         call execute_command_line('gnuplot ' // plt_file)
+      end if
+   end subroutine plotter
    
    !> Initialization of problem solver
    subroutine simulation_init
@@ -222,10 +241,10 @@ contains
          call param_read('Controller gain',Kc)
          call param_read('Integral reset time',tau_i)
          call param_read('Derivative time constant',tau_d)
-         ! Error terms
-         ek=0.0_WP; e_sum=0.0_WP
          ! Get original bubble y centroid
          call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
+         ! Error terms
+         ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)*100.0_WP
       end block control_variables 
       
       
@@ -387,7 +406,21 @@ contains
             call scfile%add_column(nn%SCmax(nsc),trim(nn%SCname(nsc))//'_max')
          end do
          call scfile%write()
+         ! Create simulation monitor
+         ctfile=monitor(fs%cfg%amRoot,'controller')
+         call ctfile%add_column(time%n,'Timestep number')
+         call ctfile%add_column(time%t,'Time')
+         call ctfile%add_column(time%dt,'Timestep size')
+         call ctfile%add_column(Ycent,'Y centroid')
+         call ctfile%add_column(e_percent,'Controller errror')
+         call ctfile%add_column(Uin,'Inflow velocity')
+         call ctfile%write()
       end block create_monitor
+
+      ! Plot controller
+      create_postproc: block
+         if (ens_evt%occurs()) call plotter()
+      end block create_postproc
       
       
    end subroutine simulation_init
@@ -414,6 +447,8 @@ contains
             ek=abs(Ycent_0-Ycent)
             ! Sum errors up to current time
             e_sum=e_sum+ek*time%dt
+            ! Percent error at current time step
+            e_percent=abs((Ycent_0-Ycent)/Ycent_0)*100.0_WP
             ! Inflow velocity
             Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
             ! Setup inflow at top of domain
@@ -698,6 +733,10 @@ contains
          call mfile%write()
          call cflfile%write()
          call scfile%write()
+         call ctfile%write()
+         
+         ! Specialized post-processing    
+         if (ens_evt%occurs()) call plotter()
          
       end do
       
