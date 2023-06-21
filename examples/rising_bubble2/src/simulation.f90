@@ -36,6 +36,7 @@ module simulation
    real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:), allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:), allocatable :: visc_s
    
    !> Problem definition
    real(WP), dimension(3) :: center
@@ -158,6 +159,7 @@ contains
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(visc_s(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -317,7 +319,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',nn%trelax)
          ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity',nn%visc); nn%visc_p=nn%visc
+         call param_read('Polymer viscosity',nn%visc); nn%visc_p=nn%visc; visc_s=fs%visc_l+nn%visc_p
          ! Powerlaw coefficient in Carreau model
          call param_read('Carreau powerlaw',nn%ncoeff)
          ! Configure implicit scalar solver
@@ -349,6 +351,7 @@ contains
             call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
          end do
          call ens_out%add_scalar('visc_p',nn%visc_p)
+         call ens_out%add_scalar('visc_s',visc_s)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -362,18 +365,12 @@ contains
          call fs%get_max()
          call vf%get_max()
          call nn%get_max()
-         call rise_vel()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
          call mfile%add_column(time%t,'Time')
          call mfile%add_column(time%dt,'Timestep size')
          call mfile%add_column(time%cfl,'Maximum CFL')
-         call mfile%add_column(Ycent_0,'Y0 centroid')
-         call mfile%add_column(Ycent,'Y centroid')
-         call mfile%add_column(Vrise,'Rise velocity')
-         call mfile%add_column(Uin,'Inflow velocity')
-         call mfile%add_column(ek,'Controller errror')
          call mfile%add_column(fs%Umax,'Umax')
          call mfile%add_column(fs%Vmax,'Vmax')
          call mfile%add_column(fs%Wmax,'Wmax')

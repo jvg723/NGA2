@@ -2,6 +2,8 @@
 module simulation
    use precision,         only: WP
    use geometry,          only: cfg,include_pipette,ypip,ripip
+   use hypre_uns_class,   only: hypre_uns
+   use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use timetracker_class, only: timetracker
@@ -12,6 +14,8 @@ module simulation
    private
    
    !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
+   type(hypre_uns),   public :: ps
+   type(ddadi),       public :: vs
    type(tpns),        public :: fs
    type(vfs),         public :: vf
    type(timetracker), public :: time
@@ -302,7 +306,7 @@ contains
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use tpns_class, only: clipped_neumann,dirichlet,bcond
-         use ils_class,  only: pcg_pfmg,pcg_amg
+         use hypre_uns_class, only: pcg_amg
          use mathtools,  only: Pi
          type(bcond), pointer :: mybc
          real(WP) :: Vpipette
@@ -333,14 +337,13 @@ contains
          call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          if (include_pipette) call fs%add_bcond(name='pipette',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=pipette)
          ! Configure pressure solver
-         call param_read('Pressure iteration',fs%psolv%maxit)
-         call param_read('Pressure tolerance',fs%psolv%rcvg)
+         ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+         call param_read('Pressure iteration',ps%maxit)
+         call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
-         call param_read('Implicit iteration',fs%implicit%maxit)
-         call param_read('Implicit tolerance',fs%implicit%rcvg)
+         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
          ! Setup the solver
-         fs%psolv%maxlevel=10
-         call fs%setup(pressure_ils=pcg_amg,implicit_ils=pcg_pfmg)
+         call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
          ! Apply Dirichlet at liquid pipette
