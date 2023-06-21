@@ -10,7 +10,7 @@ ny : 200
 nz : 100
 
 # Wall geometry
-#Include holes : .true.              <<< Provided in the command line
+Include holes : .true.              #<<< Provided in the command line
 Hole size  :    0.001
 Hole dist  :    0.002
 Hole depth :    0.02
@@ -20,7 +20,7 @@ Droplet radius :        6e-3
 Initial contact angle : 180
 
 # Pipette information
-#Include pipette :           .true.  <<< Provided in the command line
+Include pipette :           .true.  #<<< Provided in the command line
 Pipette height :            0.012
 Pipette inner radius :      0.70e-3
 Pipette outer radius :      1.46e-3
@@ -38,7 +38,7 @@ Liquid density : 997
 Gas density :    1.15
 
 Surface tension coefficient : 0.072
-#Static contact angle :        30    <<< Provided in the command line
+Static contact angle : 30.0   
 
 # Time integration
 Max timestep size : 1e-4
