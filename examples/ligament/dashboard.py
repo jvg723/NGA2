@@ -106,7 +106,7 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
 
     ''',mathjax=True),
     
-    # Imbibed volume over time
+    # Droplet size distribution - first row
     dcc.Markdown(f'''
     ---
     ## Droplet size distribution
@@ -115,7 +115,70 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
                  diameter, $d$, and probability density function, $\mathrm{{PDF}}(d)$, have been normalized by the ligament 
                  diameter, $D$. The slider allows for the $\mathrm{{PDF}}(d)$ to be viewed at different output times. 
     ''',mathjax=True),
-    dcc.Graph(id='drop_size',figure=fig1,mathjax=True) dcc.Markdown(f''' Test''')
+    
+    # Droplet size distribution - second row
+
+    html.Div(
+    [
+
+        html.Div(
+            [dcc.Graph(id="drop_size", figure=fig1,mathjax=True)],
+            style={"width": "65%", "float": "left", "display": "inline-block"},
+        ),
+
+        html.Div(
+            [
+                    dcc.Markdown(f'''
+                    ## Simulation parameters
+
+                    By analyzing the input file, we have detected the following parameters:
+                    - Reynolds number: $\mathrm{{Re}}$ = {Reynolds}
+                    - Weber number: $\mathrm{{We}}$ = {Weber}
+                    - Viscosity ratio: $\mu_l / \mu_g$ = {visc_r}
+                    - Density ratio: $\\rho_l / \\rho_g$ = {rho_r}
+                    - Taylor-scale Reynolds number: $\mathrm{{R}}_{{\lambda}}$ = {Re_lambda}
+                    - Turbulence intensity: $\mathrm{{TI}}$ = {TI}
+                    ''',mathjax=True),
+                # html.P(
+                #     "We can see that the distribution is right skewed. Many "
+                #     "players makes low or medium runs, while few players makes "
+                #     "lots of runs. The median of this distribution is 126 which "
+                #     "means that 50% of the players makes less than 126 runs and  "
+                #     "50% more than this. 406 is the 90th percentile, meaning 90% "
+                #     "of the players makes less than 406 runs. So, any players who "
+                #     "is making more than 400 runs in a season is really doing well. "
+                #     "They are in the top 10%."
+                # )
+            ],
+            style={
+                "width": "35%",
+                "display": "inline-block",
+                "margin-top": "60px",
+            },
+        ),
+
+    ],
+    style={"margin": "40px"},
+),
+    
+    # html.Div(children=[
+       
+    #     # first column of second row
+    #     html.Div(children=[
+
+    #         dcc.Graph(id='drop_size',figure=fig1,mathjax=True),
+
+    #     ], style={'display': 'inline-block', 'horizontal-align': 'top', 'margin-left': '3vw', 'margin-top': '3vw'}),
+        
+    #     # Second column of second row
+    #     html.Div(children=[
+
+    #         html.P(id='text-2',
+    #                children='Second paragraph'),
+
+    #     ]),
+
+    # ], className='row'),
     
     
 ])
