@@ -10,12 +10,21 @@ from dash import html
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
+import matplotlib.pyplot as plt
 import math
 import re
 import os
+import numpy as np
+from scipy import stats
 pd.options.plotting.backend = "plotly"
 
-# Process here the input file to obtain simulation parameters
+## Define functions
+
+# Log-normal curve
+def log_norm(x,mu,sigma):
+    return 1.0/(x*sigma*np.sqrt(2.0*np.pi))*np.exp(-(np.log(x)-mu)**2/(2*sigma**2))
+
+# Process the input file to obtain simulation parameters
 with open('input') as fobj:
     for line in fobj:
         line_data = re.split(':',line)
@@ -40,22 +49,30 @@ visc_g=1/Reynolds
 rho_l=rho_r
 # Liquid viscosity
 visc_l=visc_g*visc_r
+# Ligament diameter
+Diam=1.0
+
+# Directories
+case_dir='04_lig'                                                                         # case directory
+base_dir=os.getcwd()                                                                      # base directroy
+spray_dir='/Users/josephgiliberto/Builds/NGA2/examples/ligament/cases/'+case_dir+'/spray' # spray data directory
 
 # PDF of generated drops
-# df = pd.read_csv('monitor/dropinfo', delim_whitespace=True, header=None, skiprows=2, usecols=[1, 4, 5], names=['Time', 'Vtot', 'Vimb'])
-# df['Iper'] = 100*df['Vimb']/df['Vtot']
-# df['Tper'] = 100*df['Vtot']/df['Vtot']
-# df['NTime'] = df['Time']/Tref
+os.chdir(spray_dir)                                                                                        # move into spray directory
+sprayfile='droplets.005051'                                                                                # current timestep
+df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
+mean=np.mean(np.log(df['Diameter']))                                                                       # mean of ln(df[Diameter])
+std=np.std(np.log(df['Diameter']))                                                                         # standard deviation of ln(df[Diameter])
+df['PDF']=log_norm(df['Diameter'],mean,std)                                                                # pdf of drop_data
 
+
+# Plot PDF
+os.chdir(base_dir) # Move base to base directory
 fig1=go.Figure()
-# fig1.add_trace(go.Scatter(x=df['NTime'], y=df['Iper'], fill='tozeroy', mode='none', showlegend=False)) # fill down to xaxis
-# fig1.add_trace(go.Scatter(x=df['NTime'], y=df['Tper'], fill='tonexty', mode='none', showlegend=False)) # fill to trace0 y
+fig1.add_trace(go.Scatter(mode='markers',x=df['Diameter']/Diam, y=df['PDF']*Diam, showlegend=False))
 fig1.update_layout(width=800,height=600)
-#fig1.update_layout(title_text='Imbibition over time',title_font_size=36,title_x=0.5)
-fig1.update_xaxes(title_text='Normalized time',title_font_size=24,tickfont_size=24)
-fig1.update_yaxes(title_text='Percent imbibed',title_font_size=24,tickfont_size=24,range=[0,100])
-# fig1.add_annotation(x=1, y=90,text='Non-imbibed',showarrow=False, font_size=24, font_color='darkslategrey')
-# fig1.add_annotation(x=4, y=10,text='Imbibed'    ,showarrow=False, font_size=24, font_color='darkslategrey')
+fig1.update_xaxes(type='log',title_text='$d/D$',exponentformat="power",title_font_size=48,tickfont_size=24)
+fig1.update_yaxes(type='log',title_text='$\mathrm{{PDF}}(d)D$', exponentformat="power",title_font_size=48,tickfont_size=24)
 
 # This is where we define the dashboard layout
 app = dash.Dash(__name__)
@@ -63,7 +80,7 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
 
     # Title of doc
     dcc.Markdown('''# Break-up of a liquid ligament'''),
-    dcc.Markdown('''*NGA2 Dashboard written by J. Giliberto, last updated 06/21/2023*'''),
+    dcc.Markdown('''*NGA2 Dashboard written by J. Giliberto, last updated 06/22/2023*'''),
     
     # Intro
     dcc.Markdown('''
@@ -94,33 +111,34 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
     ---
     ## Droplet size distribution
     
-    The graph below shows the fraction of the droplet volume imbibed in the
-    perforated plate over time. Time has been normalized by the Rayleigh timescale.
-    '''),
-    dcc.Graph(id='Volume_imbibed',figure=fig1),
+    The graph below shows the probability density function of the drops generated during the break-up of a liquid liqament. The droplet 
+                 diameter, $d$, and probability density function, $\mathrm{{PDF}}(d)$, have been normalized by the ligament 
+                 diameter, $D$. The slider allows for the $\mathrm{{PDF}}(d)$ to be viewed at different output times. 
+    ''',mathjax=True),
+    dcc.Graph(id='drop_size',figure=fig1,mathjax=True) dcc.Markdown(f''' Test''')
     
     
 ])
 
-@app.callback(
-    dash.dependencies.Output('Radius-slider','figure'),
-    [dash.dependencies.Input('time-slider','value')])
-def update_figure(value):
-    myind=value
-    myrf=rf0.copy()
-    myrf['y']=rf['y']/Rinit
-    myrf['R']=rf[ftime[myind]]/Rinit
-    myrf=myrf[myrf['y']>=0]
-    myrf=myrf[myrf['R']>0]
+# @app.callback(
+#     dash.dependencies.Output('Radius-slider','figure'),
+#     [dash.dependencies.Input('time-slider','value')])
+# def update_figure(value):
+#     myind=value
+#     myrf=rf0.copy()
+#     myrf['y']=rf['y']/Rinit
+#     myrf['R']=rf[ftime[myind]]/Rinit
+#     myrf=myrf[myrf['y']>=0]
+#     myrf=myrf[myrf['R']>0]
 
-    fig2=go.Figure()
-    fig2.add_trace(go.Scatter(x=myrf['R'], y=myrf['y'], showlegend=False, mode='lines+markers', line_color='red', line_shape='spline'))
-    fig2.update_layout(width=700,height=800)
-    fig2.update_xaxes(title_text='Normalized distance from centerline axis of drop',title_font_size=24,tickfont_size=24,range=[0,2.5])
-    fig2.update_yaxes(title_text='Normalized height above plate',title_font_size=24,tickfont_size=24,range=[0,3])
-    fig2.add_annotation(x=1.5, y=2.75,text='Normalized time={:.3f}'.format(rtime[myind]/Tref),showarrow=False, font_size=24, font_color='darkslategrey')
+#     fig2=go.Figure()
+#     fig2.add_trace(go.Scatter(x=myrf['R'], y=myrf['y'], showlegend=False, mode='lines+markers', line_color='red', line_shape='spline'))
+#     fig2.update_layout(width=700,height=800)
+#     fig2.update_xaxes(title_text='Normalized distance from centerline axis of drop',title_font_size=24,tickfont_size=24,range=[0,2.5])
+#     fig2.update_yaxes(title_text='Normalized height above plate',title_font_size=24,tickfont_size=24,range=[0,3])
+#     fig2.add_annotation(x=1.5, y=2.75,text='Normalized time={:.3f}'.format(rtime[myind]/Tref),showarrow=False, font_size=24, font_color='darkslategrey')
 
-    return fig2
+#     return fig2
 
 
 if __name__ == '__main__':
