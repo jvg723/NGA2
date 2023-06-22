@@ -62,7 +62,9 @@ os.chdir(spray_dir)                                                             
 sprayfile='droplets.005051'                                                                                # current timestep
 df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
 mean=np.mean(np.log(df['Diameter']))                                                                       # mean of ln(df[Diameter])
+mean_print=np.mean(df['Diameter'])    
 std=np.std(np.log(df['Diameter']))                                                                         # standard deviation of ln(df[Diameter])
+std_print=np.std(df['Diameter'])                                                                        
 df['PDF']=log_norm(df['Diameter'],mean,std)                                                                # pdf of drop_data
 
 
@@ -91,18 +93,18 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
     ligament in a turbulent cross flow.
     '''),
     
-    # Parameters
+    # Simulation parameters
     dcc.Markdown(f'''
     ---
     ## Simulation parameters
 
     By analyzing the input file, we have detected the following parameters:
-    - Reynolds number: $\mathrm{{Re}}$ = {Reynolds}
-    - Weber number: $\mathrm{{We}}$ = {Weber}
-    - Viscosity ratio: $\mu_l / \mu_g$ = {visc_r}
-    - Density ratio: $\\rho_l / \\rho_g$ = {rho_r}
-    - Taylor-scale Reynolds number: $\mathrm{{R}}_{{\lambda}}$ = {Re_lambda}
-    - Turbulence intensity: $\mathrm{{TI}}$ = {TI}
+    - Reynolds number: $\mathrm{{Re}}$={Reynolds}
+    - Weber number: $\mathrm{{We}}$={Weber}
+    - Viscosity ratio: $\mu_l / \mu_g$={visc_r}
+    - Density ratio: $\\rho_l / \\rho_g$={rho_r}
+    - Taylor-scale Reynolds number: $\mathrm{{R}}_{{\lambda}}$={Re_lambda}
+    - Turbulence intensity: $\mathrm{{TI}}$={TI}
 
     ''',mathjax=True),
     
@@ -129,56 +131,24 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
         html.Div(
             [
                     dcc.Markdown(f'''
-                    ## Simulation parameters
+                    ## Statistical analysis
+                    - Log-normal probability density function:  
+                                 $\mathrm{{PDF}}(d)$ = $\\frac{'1'}{'x'} \exp(\\frac{1}{2})$              
+                    - Mean diameter: $\mu$ = {round(mean_print,4)}
+                    - Standard deviation of diameter: $\sigma$ = {round(std_print,4)}
+                    
+                    ## Export raw $\mathrm{{PDF}}(d)$ data
 
-                    By analyzing the input file, we have detected the following parameters:
-                    - Reynolds number: $\mathrm{{Re}}$ = {Reynolds}
-                    - Weber number: $\mathrm{{We}}$ = {Weber}
-                    - Viscosity ratio: $\mu_l / \mu_g$ = {visc_r}
-                    - Density ratio: $\\rho_l / \\rho_g$ = {rho_r}
-                    - Taylor-scale Reynolds number: $\mathrm{{R}}_{{\lambda}}$ = {Re_lambda}
-                    - Turbulence intensity: $\mathrm{{TI}}$ = {TI}
                     ''',mathjax=True),
-                # html.P(
-                #     "We can see that the distribution is right skewed. Many "
-                #     "players makes low or medium runs, while few players makes "
-                #     "lots of runs. The median of this distribution is 126 which "
-                #     "means that 50% of the players makes less than 126 runs and  "
-                #     "50% more than this. 406 is the 90th percentile, meaning 90% "
-                #     "of the players makes less than 406 runs. So, any players who "
-                #     "is making more than 400 runs in a season is really doing well. "
-                #     "They are in the top 10%."
-                # )
             ],
             style={
-                "width": "35%",
-                "display": "inline-block",
-                "margin-top": "60px",
+                "width": "35%","display": "inline-block", "margin-top": "60px",
             },
         ),
 
     ],
     style={"margin": "40px"},
 ),
-    
-    # html.Div(children=[
-       
-    #     # first column of second row
-    #     html.Div(children=[
-
-    #         dcc.Graph(id='drop_size',figure=fig1,mathjax=True),
-
-    #     ], style={'display': 'inline-block', 'horizontal-align': 'top', 'margin-left': '3vw', 'margin-top': '3vw'}),
-        
-    #     # Second column of second row
-    #     html.Div(children=[
-
-    #         html.P(id='text-2',
-    #                children='Second paragraph'),
-
-    #     ]),
-
-    # ], className='row'),
     
     
 ])
