@@ -282,7 +282,7 @@ contains
          ! Setup the solver
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
-         fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
+         fs%U=0.0_WP; fs%V=-0.251_WP; fs%W=0.0_WP
          ! Error at current time step
          ek=abs(Ycent_0-Ycent)
          ! Sum errors up to current time
