@@ -51,15 +51,19 @@ module block2_class
       procedure :: final                  !< Finalize block
    end type block2
 
-   !> Eccentricity threshold
-   real(WP) :: max_eccentricity=2.0_WP
+   ! !> Transfer model parameters
+   ! real(WP) :: filmthickness_over_dx  =5.0e-1_WP
+   ! real(WP) :: min_filmthickness      =1.0e-4_WP
+   ! real(WP) :: diam_over_filmthickness=1.0e+1_WP
+   ! real(WP) :: max_eccentricity       =5.0e-1_WP
+   ! real(WP) :: d_threshold            =1.0e-1_WP
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
 
-   !> Structure post processing 
-   real(WP) :: x_over_xL   !< Parameter to set location of collection along x-axis
-   real(WP) :: volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3,eccent
+   ! !> Structure post processing 
+   ! real(WP) :: x_over_xL   !< Parameter to set location of collection along x-axis
+   ! real(WP) :: volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3,eccent
 
 contains
    
@@ -193,14 +197,15 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,r2p,VFhi,VFlo,art
+         use vfs_class, only: lvira,r2p,VFhi,VFlo
          integer :: i,j,k,n,si,sj,sk
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         b%vf=vfs(cfg=b%cfg,reconstruction_method=lvira,name='VOF')
+         ! b%vf=vfs(cfg=b%cfg,reconstruction_method=r2p,name='VOF')
+         call b%vf%initialize(cfg=b%cfg,reconstruction_method=r2p,name='VOF')
          ! Set full domain to gas
          do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
             do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
@@ -261,8 +266,8 @@ contains
          b%vof_removal_layer=iterator(b%cfg,'VOF removal',vof_removal_layer_locator)
          b%vof_removed=0.0_WP
       end block create_iterator
-
       
+
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use tpns_class, only: dirichlet,clipped_neumann,slip
@@ -301,32 +306,32 @@ contains
 			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
 
-      ! Create a FENE model 
-      create_fene: block 
-         use multiscalar_class, only: bquick
-         use fene_class,        only: fenecr
-         integer :: i,j,k
-         ! Create FENE model solver
-         b%nn=fene(cfg=b%cfg,model=fenecr,scheme=bquick,name='FENE')
-         ! Assign unity density for simplicity
-         b%nn%rho=1.0_WP
-         ! Maximum extensibility of polymer chain
-         call param_read('Maximum polymer extensibility',b%nn%Lmax)
-         ! Relaxation time for polymer
-         call param_read('Polymer relaxation time',b%nn%trelax)
-         ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity',b%nn%visc); b%fs%visc=b%fs%visc_l+b%nn%visc
-         ! Powerlaw coefficient in Carreau model
-         call param_read('Carreau powerlaw',b%nn%ncoeff)
-         ! Configure implicit scalar solver
-         b%ss=ddadi(cfg=b%cfg,name='scalar',nst=13)
-         ! Setup the solver
-         call b%nn%setup(implicit_solver=b%ss)
-         ! Initialize conformation tensor to identity
-         b%nn%SC(:,:,:,1)=1.0_WP !< Cxx
-         b%nn%SC(:,:,:,4)=1.0_WP !< Cyy
-         b%nn%SC(:,:,:,6)=1.0_WP !< Czz
-      end block create_fene
+      ! ! Create a FENE model 
+      ! create_fene: block 
+      !    use multiscalar_class, only: bquick
+      !    use fene_class,        only: fenecr
+      !    integer :: i,j,k
+      !    ! Create FENE model solver
+      !    b%nn=fene(cfg=b%cfg,model=fenecr,scheme=bquick,name='FENE')
+      !    ! Assign unity density for simplicity
+      !    b%nn%rho=1.0_WP
+      !    ! Maximum extensibility of polymer chain
+      !    call param_read('Maximum polymer extensibility',b%nn%Lmax)
+      !    ! Relaxation time for polymer
+      !    call param_read('Polymer relaxation time',b%nn%trelax)
+      !    ! Polymer viscosity at zero strain rate
+      !    call param_read('Polymer viscosity',b%nn%visc); b%fs%visc=b%fs%visc_l+b%nn%visc
+      !    ! Powerlaw coefficient in Carreau model
+      !    call param_read('Carreau powerlaw',b%nn%ncoeff)
+      !    ! Configure implicit scalar solver
+      !    b%ss=ddadi(cfg=b%cfg,name='scalar',nst=13)
+      !    ! Setup the solver
+      !    call b%nn%setup(implicit_solver=b%ss)
+      !    ! Initialize conformation tensor to identity
+      !    b%nn%SC(:,:,:,1)=1.0_WP !< Cxx
+      !    b%nn%SC(:,:,:,4)=1.0_WP !< Cyy
+      !    b%nn%SC(:,:,:,6)=1.0_WP !< Czz
+      ! end block create_fene
       
       ! Initialize our velocity field 
       initialize_velocity: block
@@ -357,21 +362,19 @@ contains
          call b%cc%film_classify(Lbary=b%vf%Lbary,Gbary=b%vf%Gbary)
          call b%cc%deallocate_lists()
       end block create_and_initialize_ccl
-      
+
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         b%smesh=surfmesh(nvar=7,name='plic')
+         b%smesh=surfmesh(nvar=5,name='plic')
          b%smesh%varname(1)='nplane'
-         b%smesh%varname(2)='x_velocity'
-         b%smesh%varname(3)='y_velocity'
-         b%smesh%varname(4)='z_velocity'
-         b%smesh%varname(5)='visc_l'
-         b%smesh%varname(6)='SRmag'
-         b%smesh%varname(7)='film'
+         b%smesh%varname(2)='curv'
+         b%smesh%varname(3)='edge_sensor'
+         b%smesh%varname(4)='thin_sensor'
+         b%smesh%varname(5)='thickness'
          ! Transfer polygons to smesh
          call b%vf%update_surfmesh(b%smesh)
          ! Also populate nplane variable
@@ -381,8 +384,6 @@ contains
          b%smesh%var(3,:)=0.0_WP
          b%smesh%var(4,:)=0.0_WP
          b%smesh%var(5,:)=0.0_WP
-         b%smesh%var(6,:)=0.0_WP
-         b%smesh%var(7,:)=0.0_WP
          np=0
          do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
             do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -391,19 +392,17 @@ contains
                      if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1
                         b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-                        b%smesh%var(2,np)=b%Ui(i,j,k)
-                        b%smesh%var(3,np)=b%Vi(i,j,k)
-                        b%smesh%var(4,np)=b%Wi(i,j,k)
-                        b%smesh%var(5,np)=b%nn%visc_p(i,j,k)
-                        b%smesh%var(6,np)=b%nn%SRmag(i,j,k)
-                        b%smesh%var(7,np)=b%cc%film_thickness(i,j,k)
+                        b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
+                        b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
+                        b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
+                        b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                      end if
                   end do
                end do
             end do
          end do
       end block create_smesh
-      
+
       
       ! Add Ensight output
       create_ensight: block
@@ -419,15 +418,15 @@ contains
          call b%ens_out%add_scalar('Pressure',b%fs%P)
          call b%ens_out%add_scalar('curvature',b%vf%curv)
          call b%ens_out%add_surface('vofplic',b%smesh)
-         call b%ens_out%add_scalar('visc_l',b%nn%visc_p)
-         do nsc=1,b%nn%nscalar
-            call b%ens_out%add_scalar(trim(b%nn%SCname(nsc)),b%nn%SC(:,:,:,nsc))
-         end do
-         call b%ens_out%add_scalar('SRmag',b%nn%SRmag)
+         ! call b%ens_out%add_scalar('visc_l',b%nn%visc_p)
+         ! do nsc=1,b%nn%nscalar
+         !    call b%ens_out%add_scalar(trim(b%nn%SCname(nsc)),b%nn%SC(:,:,:,nsc))
+         ! end do
+         ! call b%ens_out%add_scalar('SRmag',b%nn%SRmag)
          ! Output to ensight
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
-      
+
       
       ! Create a monitor file
       create_monitor: block
@@ -466,15 +465,15 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
-         ! Create scalar monitor
-         b%scfile=monitor(b%nn%cfg%amRoot,'scalar')
-         call b%scfile%add_column(b%time%n,'Timestep number')
-         call b%scfile%add_column(b%time%t,'Time')
-         do nsc=1,b%nn%nscalar
-            call b%scfile%add_column(b%nn%SCmin(nsc),trim(b%nn%SCname(nsc))//'_min')
-            call b%scfile%add_column(b%nn%SCmax(nsc),trim(b%nn%SCname(nsc))//'_max')
-         end do
-         call b%scfile%write()
+         ! ! Create scalar monitor
+         ! b%scfile=monitor(b%nn%cfg%amRoot,'scalar')
+         ! call b%scfile%add_column(b%time%n,'Timestep number')
+         ! call b%scfile%add_column(b%time%t,'Time')
+         ! do nsc=1,b%nn%nscalar
+         !    call b%scfile%add_column(b%nn%SCmin(nsc),trim(b%nn%SCname(nsc))//'_min')
+         !    call b%scfile%add_column(b%nn%SCmax(nsc),trim(b%nn%SCname(nsc))//'_max')
+         ! end do
+         ! call b%scfile%write()
       end block create_monitor
 
       ! ! Create a specialized post-processing file
@@ -753,7 +752,8 @@ contains
          call b%fs%update_laplacian()
          call b%fs%correct_mfr()
          call b%fs%get_div()
-         call b%fs%add_surface_tension_jump(dt=b%time%dt,div=b%fs%div,vf=b%vf)
+         ! call b%fs%add_surface_tension_jump(dt=b%time%dt,div=b%fs%div,vf=b%vf)
+         call b%fs%add_surface_tension_jump_thin(dt=b%time%dt,div=b%fs%div,vf=b%vf)
          b%fs%psolv%rhs=-b%fs%cfg%vol*b%fs%div/b%time%dt
          b%fs%psolv%sol=0.0_WP
          call b%fs%psolv%solve()
@@ -808,8 +808,6 @@ contains
             b%smesh%var(3,:)=0.0_WP
             b%smesh%var(4,:)=0.0_WP
             b%smesh%var(5,:)=0.0_WP
-            b%smesh%var(6,:)=0.0_WP
-            b%smesh%var(7,:)=0.0_WP
             np=0
             do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
                do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -818,12 +816,10 @@ contains
                         if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1
                            b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-                           b%smesh%var(2,np)=b%Ui(i,j,k)
-                           b%smesh%var(3,np)=b%Vi(i,j,k)
-                           b%smesh%var(4,np)=b%Wi(i,j,k)
-                           b%smesh%var(5,np)=b%nn%visc_p(i,j,k)
-                           b%smesh%var(6,np)=b%nn%SRmag(i,j,k)
-                           b%smesh%var(7,np)=b%cc%film_thickness(i,j,k)
+                           b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
+                           b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
+                           b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
+                           b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                         end if
                      end do
                   end do
@@ -848,64 +844,64 @@ contains
       
    end subroutine step
 
-   !> Collect information about liquid structures
-   subroutine structure_identification(b)
-      implicit none
-      class(block2), intent(inout) :: b
+   ! !> Collect information about liquid structures
+   ! subroutine structure_identification(b)
+   !    implicit none
+   !    class(block2), intent(inout) :: b
       
-      ! Perform detailed CCL pass to identify structures
-      b%cc%max_interface_planes=2
-      call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
-      call b%cc%get_min_thickness()
-      call b%cc%sort_by_thickness()
+   !    ! Perform detailed CCL pass to identify structures
+   !    b%cc%max_interface_planes=2
+   !    call b%cc%build_lists(VF=b%vf%VF,poly=b%vf%interface_polygon,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+   !    call b%cc%get_min_thickness()
+   !    call b%cc%sort_by_thickness()
       
-      ! Loop through identified detached structs and sort by ligaments and particles
-      print_structures: block
-         integer :: m,n,i,j,k
+   !    ! Loop through identified detached structs and sort by ligaments and particles
+   !    print_structures: block
+   !       integer :: m,n,i,j,k
 
-         ! Loops over film segments contained locally
-         do m=1,b%cc%n_meta_struct
+   !       ! Loops over film segments contained locally
+   !       do m=1,b%cc%n_meta_struct
 
-            ! Check if structure x_cg .ge. x plane location
-            if (b%cc%meta_structures_list(m)%x.ge.x_over_xL*b%cfg%xL) then
+   !          ! Check if structure x_cg .ge. x plane location
+   !          if (b%cc%meta_structures_list(m)%x.ge.x_over_xL*b%cfg%xL) then
 
-               ! Call writting subroutine to output structure stats
-               call stats_writer(b,b%time%t,b%cc%meta_structures_list(m)%vol,b%cc%meta_structures_list(m)%x,b%cc%meta_structures_list(m)%y,b%cc%meta_structures_list(m)%z,b%cc%meta_structures_list(m)%u,b%cc%meta_structures_list(m)%v,b%cc%meta_structures_list(m)%w,b%cc%meta_structures_list(m)%lengths(1),b%cc%meta_structures_list(m)%lengths(2),b%cc%meta_structures_list(m)%lengths(3)) 
+   !             ! Call writting subroutine to output structure stats
+   !             call stats_writer(b,b%time%t,b%cc%meta_structures_list(m)%vol,b%cc%meta_structures_list(m)%x,b%cc%meta_structures_list(m)%y,b%cc%meta_structures_list(m)%z,b%cc%meta_structures_list(m)%u,b%cc%meta_structures_list(m)%v,b%cc%meta_structures_list(m)%w,b%cc%meta_structures_list(m)%lengths(1),b%cc%meta_structures_list(m)%lengths(2),b%cc%meta_structures_list(m)%lengths(3)) 
             
-            end if
+   !          end if
 
-         end do
+   !       end do
          
-      end block print_structures
+   !    end block print_structures
       
-      ! Clean up CCL
-      call b%cc%deallocate_lists()
+   !    ! Clean up CCL
+   !    call b%cc%deallocate_lists()
 
       
-   end subroutine structure_identification
+   ! end subroutine structure_identification
    
-   !> Specialized subroutine to print our stats of liquid structures
-   subroutine stats_writer(b,time,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3)
-      use string,      only: str_medium
-      implicit none
-      class(block2), intent(inout) :: b
-      real(WP) :: time,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3
-      integer  :: iunit,ierr
-      logical  :: exist
-      ! Print stats from root processor
-      if (b%cfg%amRoot) then
-         inquire(file='./stats/structure_stats',exist=exist)
-         if (exist) then
-            open(newunit=iunit,file='./stats/structure_stats',form='formatted',status='old',position='append',access='stream',iostat=ierr)
-         else
-            open(newunit=iunit,file='./stats/structure_stats',form='formatted',status='new',access='stream',iostat=ierr)
-            write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'time','volume','x_cg','y_cg','z_cg','U','V','W','length_1','length_2','length_3'
-         end if
-         ! Write Data
-         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5)') time,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3
-         close(iunit)
-      end if
-   end subroutine stats_writer
+   ! !> Specialized subroutine to print our stats of liquid structures
+   ! subroutine stats_writer(b,time,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3)
+   !    use string,      only: str_medium
+   !    implicit none
+   !    class(block2), intent(inout) :: b
+   !    real(WP) :: time,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3
+   !    integer  :: iunit,ierr
+   !    logical  :: exist
+   !    ! Print stats from root processor
+   !    if (b%cfg%amRoot) then
+   !       inquire(file='./stats/structure_stats',exist=exist)
+   !       if (exist) then
+   !          open(newunit=iunit,file='./stats/structure_stats',form='formatted',status='old',position='append',access='stream',iostat=ierr)
+   !       else
+   !          open(newunit=iunit,file='./stats/structure_stats',form='formatted',status='new',access='stream',iostat=ierr)
+   !          write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'time','volume','x_cg','y_cg','z_cg','U','V','W','length_1','length_2','length_3'
+   !       end if
+   !       ! Write Data
+   !       write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5)') time,volume,x_cg,y_cg,z_cg,U_vel,V_vel,W_vel,length_1,length_2,length_3
+   !       close(iunit)
+   !    end if
+   ! end subroutine stats_writer
    
    !> Finalize b2 simulation
    subroutine final(b)

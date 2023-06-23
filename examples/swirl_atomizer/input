@@ -1,6 +1,6 @@
 # Parallelization
-1 Partition : 8 1 1
-2 Partition : 8 1 1
+1 Partition : 1 1 1
+2 Partition : 1 1 1
 
 # Annular pipe domain definition
 1 Outer Pipe diameter : 1.2
@@ -25,24 +25,24 @@ Bulk theta velocity : 1.421
 Fluctuation amp  :    0.1
 
 # Fluid properties
-Liquid dynamic viscosity    : 0
+Liquid dynamic viscosity    : 2e-4
 Liquid density              : 1
 Gas dynamic viscosity       : 1e-5
 Gas density                 : 1e-3
-Surface tension coefficient : 0.002
+Surface tension coefficient : 0.001
 
 # Non-Newtonian modeling
-Carreau powerlaw :              0.5
-Polymer viscosity :             0.001
+Carreau powerlaw :              1.0
+Polymer viscosity :             0
 Polymer relaxation time :       1
 Maximum polymer extensibility : 10
 
 # Time integration
 1 Max timestep size : 0.01
-2 Max timestep size : 1e-4
+2 Max timestep size : 4e-3
 Max cfl number      : 0.5
-Max time            : 2
-Transistion         : 1
+Max time            : 40
+Transistion         : 100
 
 # Pressure solver
 Pressure tolerance : 1e-5
