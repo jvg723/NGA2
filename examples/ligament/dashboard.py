@@ -71,10 +71,10 @@ df['PDF']=log_norm(df['Diameter'],mean,std)                                     
 # Plot PDF
 os.chdir(base_dir) # Move base to base directory
 fig1=go.Figure()
-fig1.add_trace(go.Scatter(mode='markers',x=df['Diameter']/Diam, y=df['PDF']*Diam, showlegend=False))
+# fig1.add_trace(go.Scatter(mode='markers',x=df['Diameter']/Diam, y=df['PDF']*Diam, showlegend=False))
 fig1.update_layout(width=800,height=600)
-fig1.update_xaxes(type='log',title_text='$d/D$',exponentformat="power",title_font_size=48,tickfont_size=24)
-fig1.update_yaxes(type='log',title_text='$\mathrm{{PDF}}(d)D$', exponentformat="power",title_font_size=48,tickfont_size=24)
+fig1.update_xaxes(type='log',title_text='$\Large{d/D}$',exponentformat="power",title_font_size=48,tickfont_size=24)
+fig1.update_yaxes(type='log',title_text='$\Large{\mathrm{{PDF}}(d)D}$', exponentformat="power",title_font_size=48,tickfont_size=24)
 
 # This is where we define the dashboard layout
 app = dash.Dash(__name__)
@@ -132,12 +132,14 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
             [
                     dcc.Markdown(f'''
                     ## Statistical analysis
-                    - Log-normal probability density function:  
-                                 $\mathrm{{PDF}}(d)$ = $\\frac{'1'}{'x'} \exp(\\frac{1}{2})$              
-                    - Mean diameter: $\mu$ = {round(mean_print,4)}
-                    - Standard deviation of diameter: $\sigma$ = {round(std_print,4)}
+                    - Log-normal probability density function:
+                                     
+                    $\qquad \qquad \large{{\mathrm{{PDF}} = \\frac{{1}}{{x\sigma\sqrt{{2\pi}}}} \exp(-\\frac{{\ln x -\mu^2}}{{2\sigma^2}})}}$   
+                                 
+                    - Mean diameter: $\mu/D$ = {round(mean_print,4)}
+                    - Standard deviation of diameter: $\sigma/D$ = {round(std_print,4)}
                     
-                    ## Export raw $\mathrm{{PDF}}(d)$ data
+                    ## Export raw $\mathrm{{PDF}}$ data
 
                     ''',mathjax=True),
             ],
