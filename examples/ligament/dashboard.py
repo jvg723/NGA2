@@ -57,15 +57,32 @@ case_dir='04_lig'                                                               
 base_dir=os.getcwd()                                                                      # base directroy
 spray_dir='/Users/josephgiliberto/Builds/NGA2/examples/ligament/cases/'+case_dir+'/spray' # spray data directory
 
-# PDF of generated drops
+# Prepare PDF of generated drops
 os.chdir(spray_dir)                                                                                        # move into spray directory
 sprayfile='droplets.005051'                                                                                # current timestep
-df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
-mean=np.mean(np.log(df['Diameter']))                                                                       # mean of ln(df[Diameter])
-mean_print=np.mean(df['Diameter'])    
-std=np.std(np.log(df['Diameter']))                                                                         # standard deviation of ln(df[Diameter])
-std_print=np.std(df['Diameter'])                                                                        
-df['PDF']=log_norm(df['Diameter'],mean,std)                                                                # pdf of drop_data
+# df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
+df=pd.DataFrame(columns=['time','diameters','PDF','mean','std'])    # Empty struct
+print(df)
+# df0=df.copy()
+# dtime=[]
+for dropfile in os.listdir(spray_dir):
+    diam=pd.read_csv(dropfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter'])   # read in data file
+    mean=np.mean(np.log(diam['Diameter']))                                                                        # mean of ln(diameter)
+    mean_print=np.mean(diam['Diameter'])                                                                          # mean of diameter
+    std=np.std(np.log(diam['Diameter']))                                                                          # standard deviation of ln(diameter)
+    std_print=np.std(diam['Diameter'])                                                                            # standard deivation of diameter
+    time_stamp = re.split('\\.',dropfile)
+    # dtime.append(float(drop_name[1]))
+    df=df._append({'time':float(time_stamp[1]),'diameters':[np.array(diam)],'PDF':[],'mean':mean_print,'std':std_print}, ignore_index = True)
+    
+print(df)
+
+# dtime.sort()
+# mean=np.mean(np.log(df['Diameter']))                                                                       # mean of ln(df[Diameter])
+# mean_print=np.mean(df['Diameter'])    
+# std=np.std(np.log(df['Diameter']))                                                                         # standard deviation of ln(df[Diameter])
+# std_print=np.std(df['Diameter'])                                                                        
+# df['PDF']=log_norm(df['Diameter'],mean,std)                                                                # pdf of drop_data
 
 
 # Plot PDF
@@ -108,40 +125,44 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
 
     ''',mathjax=True),
     
-    # Droplet size distribution - first row
-    dcc.Markdown(f'''
-    ---
-    ## Droplet size distribution
-    
-    The graph below shows the probability density function of the drops generated during the break-up of a liquid liqament. The droplet 
-                 diameter, $d$, and probability density function, $\mathrm{{PDF}}(d)$, have been normalized by the ligament 
-                 diameter, $D$. The slider allows for the $\mathrm{{PDF}}(d)$ to be viewed at different output times. 
-    ''',mathjax=True),
-    
-    # Droplet size distribution - second row
+    # Droplet size distribution 
+    # first row
+    html.Div([
+            dcc.Markdown(f'''
+            ---
+            ## Droplet size distribution
+            
+            The graph below shows the probability density function of the drops generated during the break-up of a liquid liqament. The droplet 
+                        diameter, $d$, and probability density function, $\mathrm{{PDF}}(d)$, have been normalized by the ligament 
+                        diameter, $D$. The slider allows for the $\mathrm{{PDF}}(d)$ to be viewed at different output times. 
+            ''',mathjax=True),
 
+    ],className='row'),
+
+    
+    # second row
     html.Div(
     [
-
-        html.Div(
-            [dcc.Graph(id="drop_size", figure=fig1,mathjax=True)],
-            style={"width": "65%", "float": "left", "display": "inline-block"},
-        ),
-
+        # first column
         html.Div(
             [
-                    dcc.Markdown(f'''
-                    ## Statistical analysis
-                    - Log-normal probability density function:
-                                     
-                    $\qquad \qquad \large{{\mathrm{{PDF}} = \\frac{{1}}{{x\sigma\sqrt{{2\pi}}}} \exp(-\\frac{{\ln x -\mu^2}}{{2\sigma^2}})}}$   
+                dcc.Graph(id="drop_size", figure=fig1,mathjax=True)],
+            style={"width": "65%", "float": "left", "display": "inline-block"},
+        ),
+        # second column
+        html.Div(
+            [
+                dcc.Markdown(f'''
+                ## Statistical analysis
+                - Log-normal probability density function:
                                  
-                    - Mean diameter: $\mu/D$ = {round(mean_print,4)}
-                    - Standard deviation of diameter: $\sigma/D$ = {round(std_print,4)}
-                    
-                    ## Export raw $\mathrm{{PDF}}$ data
-
-                    ''',mathjax=True),
+                $\qquad \qquad \large{{\mathrm{{PDF}} = \\frac{{1}}{{x\sigma\sqrt{{2\pi}}}} \exp(-\\frac{{\ln x -\mu^2}}{{2\sigma^2}})}}$   
+                             
+                - Mean diameter: $\mu/D$ = {round(mean_print,4)}
+                - Standard deviation of diameter: $\sigma/D$ = {round(std_print,4)}
+                
+                ## Export raw $\mathrm{{PDF}}$ data
+                ''',mathjax=True),
             ],
             style={
                 "width": "35%","display": "inline-block", "margin-top": "60px",
@@ -149,11 +170,11 @@ app.layout = html.Div(style={"margin-left": "15px"},children=[
         ),
 
     ],
-    style={"margin": "40px"},
+    style={"margin": "40px"},className='row'
 ),
     
     
-])
+]) # End app
 
 # @app.callback(
 #     dash.dependencies.Output('Radius-slider','figure'),
