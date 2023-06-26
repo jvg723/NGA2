@@ -60,35 +60,33 @@ spray_dir='/Users/josephgiliberto/Builds/NGA2/examples/ligament/cases/'+case_dir
 # Prepare PDF of generated drops
 os.chdir(spray_dir)                                                                                        # move into spray directory
 sprayfile='droplets.005051'                                                                                # current timestep
-# df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
-df=pd.DataFrame(columns=['time','diameters','PDF','mean','std'])    # Empty struct
-print(df)
-# df0=df.copy()
-# dtime=[]
-for dropfile in os.listdir(spray_dir):
-    diam=pd.read_csv(dropfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter'])   # read in data file
-    mean=np.mean(np.log(diam['Diameter']))                                                                        # mean of ln(diameter)
-    mean_print=np.mean(diam['Diameter'])                                                                          # mean of diameter
-    std=np.std(np.log(diam['Diameter']))                                                                          # standard deviation of ln(diameter)
-    std_print=np.std(diam['Diameter'])                                                                            # standard deivation of diameter
-    time_stamp = re.split('\\.',dropfile)
-    # dtime.append(float(drop_name[1]))
-    df=df._append({'time':float(time_stamp[1]),'diameters':[np.array(diam)],'PDF':[],'mean':mean_print,'std':std_print}, ignore_index = True)
+df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
+# df=pd.DataFrame(columns=['time','diameters','PDF','mean','std'])    # Empty struct
+#Loop through output files 
+# for dropfile in os.listdir(spray_dir):
+#     diam=pd.read_csv(dropfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter'])   # read in data file
+#     mean=np.mean(np.log(diam['Diameter']))                                                                        # mean of ln(diameter)
+#     mean_print=np.mean(diam['Diameter'])                                                                          # mean of diameter
+#     std=np.std(np.log(diam['Diameter']))                                                                          # standard deviation of ln(diameter)
+#     std_print=np.std(diam['Diameter'])                                                                            # standard deivation of diameter
+#     diam['PDF']=log_norm(diam['Diameter'],mean,std)                                                               # pdf of drop_data
+#     time_stamp=re.split('s',dropfile)                                                                             # time stamp
+#     df=df._append({'time':float(time_stamp[1]),'diameters':[diam['Diameter']],'PDF':[diam['PDF']],'mean':mean_print,'std':std_print}, ignore_index = True)
     
-print(df)
+# df=df.sort_values('time')   # sort data frame by time
+# os.chdir(base_dir)          # move back to base director
 
-# dtime.sort()
-# mean=np.mean(np.log(df['Diameter']))                                                                       # mean of ln(df[Diameter])
-# mean_print=np.mean(df['Diameter'])    
-# std=np.std(np.log(df['Diameter']))                                                                         # standard deviation of ln(df[Diameter])
-# std_print=np.std(df['Diameter'])                                                                        
-# df['PDF']=log_norm(df['Diameter'],mean,std)                                                                # pdf of drop_data
+mean=np.mean(np.log(df['Diameter']))                                                                       # mean of ln(df[Diameter])
+mean_print=np.mean(df['Diameter'])    
+std=np.std(np.log(df['Diameter']))                                                                         # standard deviation of ln(df[Diameter])
+std_print=np.std(df['Diameter'])                                                                        
+df['PDF']=log_norm(df['Diameter'],mean,std)                                                                # pdf of drop_data
 
 
 # Plot PDF
-os.chdir(base_dir) # Move base to base directory
+os.chdir(base_dir)          # move back to base director
 fig1=go.Figure()
-# fig1.add_trace(go.Scatter(mode='markers',x=df['Diameter']/Diam, y=df['PDF']*Diam, showlegend=False))
+fig1.add_trace(go.Scatter(mode='markers',x=df['Diameter']/Diam, y=df['PDF']*Diam, showlegend=False))
 fig1.update_layout(width=800,height=600)
 fig1.update_xaxes(type='log',title_text='$\Large{d/D}$',exponentformat="power",title_font_size=48,tickfont_size=24)
 fig1.update_yaxes(type='log',title_text='$\Large{\mathrm{{PDF}}(d)D}$', exponentformat="power",title_font_size=48,tickfont_size=24)
