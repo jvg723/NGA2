@@ -831,12 +831,12 @@ contains
       end if
          
       ! Perform and output monitoring
-      call b%nn%get_max()
+      ! call b%nn%get_max()
       call b%fs%get_max()
       call b%vf%get_max()
       call b%mfile%write()
       call b%cflfile%write()
-      call b%scfile%write()
+      ! call b%scfile%write()
 
       ! ! Specialized post-processing
       ! call structure_identification(b)
