@@ -7,14 +7,12 @@ module ligament_class
    use surfmesh_class,    only: surfmesh
    use partmesh_class,    only: partmesh
    use hypre_str_class,   only: hypre_str
-   !use ddadi_class,       only: ddadi
+   use ddadi_class,       only: ddadi
    use vfs_class,         only: vfs
-   ! use film_vfs_class,    only: film_vfs
    use fene_class,        only: fene
    use ccl_class,         only: ccl
    use lpt_class,         only: lpt
    use tpns_class,        only: tpns
-   ! use film_tpns_class,   only: film_tpns
    use timetracker_class, only: timetracker
    use event_class,       only: event
    use monitor_class,     only: monitor
@@ -32,10 +30,9 @@ module ligament_class
       !> Flow solver
       type(vfs)         :: vf       !< Volume fraction solver
       type(tpns)        :: fs       !< Two-phase flow solver
-      ! type(film_vfs)    :: vf       !< Volume fraction solver
-      ! type(film_tpns)   :: fs       !< Two-phase flow solver
       type(hypre_str)   :: ps       !< Structured Hypre linear solver for pressure
-      type(ddadi)       :: vs,ss    !< DDADI solver for velocity and scalar
+      type(ddadi)       :: vs       !< DDADI solver for velocity 
+      type(ddadi)       :: ss       !< DDADI solver for scalar
       type(fene)        :: nn       !< FENE model for polymer stress
       type(ccl)         :: cc       !< Connected component labeling class
       type(lpt)         :: lp       !< Particle tracking
@@ -185,7 +182,6 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         !this%vf=vfs(cfg=this%cfg,reconstruction_method=r2p,name='VOF')
          call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,name='VOF')
          ! Initialize to a ligament
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
@@ -202,7 +198,7 @@ contains
                   end do
                   ! Call adaptive refinement code to get volume and barycenters recursively
                   vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_droplet,0.0_WP,amr_ref_lvl)
+                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_ligament,0.0_WP,amr_ref_lvl)
                   this%vf%VF(i,j,k)=vol/this%vf%cfg%vol(i,j,k)
                   if (this%vf%VF(i,j,k).ge.VFlo.and.this%vf%VF(i,j,k).le.VFhi) then
                      this%vf%Lbary(:,i,j,k)=v_cent
@@ -264,10 +260,10 @@ contains
          this%ps%maxlevel=16
          call param_read('Pressure iteration',this%ps%maxit)
          call param_read('Pressure tolerance',this%ps%rcvg)
-         ! Configure implicit velocity solver
-         !this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         ! ! Configure implicit velocity solver
+         ! this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps)!,implicit_solver=this%vs)
+         call this%fs%setup(pressure_solver=this%ps) !,implicit_solver=this%vs)
          ! Zero initial field
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
          ! Apply convective velocity
@@ -342,21 +338,21 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=11,name='plic')
+         this%smesh=surfmesh(nvar=14,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='curv'
          this%smesh%varname(3)='edge_sensor'
          this%smesh%varname(4)='thin_sensor'
          this%smesh%varname(5)='thickness'
-         this%smesh%varname(3)='x_velocity'
-         this%smesh%varname(4)='y_velocity'
-         this%smesh%varname(5)='z_velocity'
-         this%smesh%varname(6)='visc'
-         this%smesh%varname(7)='SRmag'
-         this%smesh%varname(8)='film'
-         this%smesh%varname(9)='cxx'
-         this%smesh%varname(10)='cyy'
-         this%smesh%varname(11)='czz'
+         this%smesh%varname(6)='x_velocity'
+         this%smesh%varname(7)='y_velocity'
+         this%smesh%varname(8)='z_velocity'
+         this%smesh%varname(9)='visc'
+         this%smesh%varname(10)='SRmag'
+         this%smesh%varname(11)='film'
+         this%smesh%varname(12)='cxx'
+         this%smesh%varname(13)='cyy'
+         this%smesh%varname(14)='czz'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -372,6 +368,9 @@ contains
          this%smesh%var(9,:)=0.0_WP
          this%smesh%var(10,:)=0.0_WP
          this%smesh%var(11,:)=0.0_WP
+         this%smesh%var(12,:)=0.0_WP
+         this%smesh%var(13,:)=0.0_WP
+         this%smesh%var(14,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -383,15 +382,15 @@ contains
                         this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
                         this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
                         this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                        this%smesh%var(3,np)=this%Ui(i,j,k)
-                        this%smesh%var(4,np)=this%Vi(i,j,k)
-                        this%smesh%var(5,np)=this%Wi(i,j,k)
-                        this%smesh%var(6,np)=this%nn%visc_p(i,j,k)
-                        this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
-                        this%smesh%var(8,np)=this%cc%film_thickness(i,j,k)
-                        this%smesh%var(9,np)=this%nn%SC(i,j,k,1)
-                        this%smesh%var(10,np)=this%nn%SC(i,j,k,4)
-                        this%smesh%var(11,np)=this%nn%SC(i,j,k,6)
+                        this%smesh%var(6,np)=this%Ui(i,j,k)
+                        this%smesh%var(7,np)=this%Vi(i,j,k)
+                        this%smesh%var(8,np)=this%Wi(i,j,k)
+                        this%smesh%var(9,np)=this%nn%visc_p(i,j,k)
+                        this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
+                        this%smesh%var(11,np)=this%cc%film_thickness(i,j,k)
+                        this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
+                        this%smesh%var(13,np)=this%nn%SC(i,j,k,4)
+                        this%smesh%var(14,np)=this%nn%SC(i,j,k,6)
                      end if
                   end do
                end do
@@ -828,6 +827,9 @@ contains
             this%smesh%var(9,:)=0.0_WP
             this%smesh%var(10,:)=0.0_WP
             this%smesh%var(11,:)=0.0_WP
+            this%smesh%var(12,:)=0.0_WP
+            this%smesh%var(13,:)=0.0_WP
+            this%smesh%var(14,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -839,15 +841,15 @@ contains
                            this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
                            this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
                            this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                           this%smesh%var(3,np)=this%Ui(i,j,k)
-                           this%smesh%var(4,np)=this%Vi(i,j,k)
-                           this%smesh%var(5,np)=this%Wi(i,j,k)
-                           this%smesh%var(6,np)=this%fs%visc(i,j,k)
-                           this%smesh%var(7,np)=this%nn%SRmag(i,j,k)
-                           this%smesh%var(8,np)=this%cc%film_thickness(i,j,k)
-                           this%smesh%var(9,np)=this%nn%SC(i,j,k,1)
-                           this%smesh%var(10,np)=this%nn%SC(i,j,k,4)
-                           this%smesh%var(11,np)=this%nn%SC(i,j,k,6)
+                           this%smesh%var(6,np)=this%Ui(i,j,k)
+                           this%smesh%var(7,np)=this%Vi(i,j,k)
+                           this%smesh%var(8,np)=this%Wi(i,j,k)
+                           this%smesh%var(9,np)=this%nn%visc_p(i,j,k)
+                           this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
+                           this%smesh%var(11,np)=this%cc%film_thickness(i,j,k)
+                           this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
+                           this%smesh%var(13,np)=this%nn%SC(i,j,k,4)
+                           this%smesh%var(14,np)=this%nn%SC(i,j,k,6)
                         end if
                      end do
                   end do
