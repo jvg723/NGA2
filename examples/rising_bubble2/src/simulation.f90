@@ -121,6 +121,26 @@ contains
       ! Controller output
       uk=Kc*ek+(Kc/tau_i)*e_sum-Kc*tau_d*(Pv-PV_old)/dt
    end function controller
+
+   !> Specialized subroutine to plot controller error and controlled variable vs time
+   subroutine plotter()
+      use string,      only: str_medium
+      implicit none
+      integer :: iunit,ierr
+      character(len=str_medium) :: cont_file
+      character(len=str_medium), parameter :: plt_file='~/Builds/NGA2/examples/rising_bubble2/src/plot.gp'    
+      ! Plot from root processor
+      if (fs%cfg%amRoot) then
+         ! Store timestep and array naming for reading in gnuplot
+         open(newunit=iunit,file='./gp_input',form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Ly','Kc','tau_I','tau_D','SP'
+         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5)') fs%cfg%yL,Kc,tau_i,tau_d,Ycent_0
+         close(iunit)
+         ! Plot the curves using gnuplot
+         ! call execute_command_line('gnuplot ' // plt_file)
+         call system('gnuplot -p ' // plt_file)
+      end if
+   end subroutine plotter
    
    !> Initialization of problem solver
    subroutine simulation_init
@@ -215,7 +235,6 @@ contains
          call vf%get_curvature()
          ! Reset moments to guarantee compatibility with interface reconstruction
          call vf%reset_volume_moments()
-
       end block create_and_initialize_vof
 
       ! Initialize controler
@@ -268,8 +287,8 @@ contains
          ! Sum errors up to current time
          e_sum=e_sum+ek*time%dt
          ! Inflow velocity
-         ! Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-         call param_read('Inflow velocity',Uin)
+         Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+         ! call param_read('Inflow velocity',Uin)
          ! Setup inflow at top of domain
          call fs%get_bcond('inflow',mybc)
          do n=1,mybc%itr%no_
@@ -395,6 +414,11 @@ contains
          call ctfile%add_column(Uin,'Inflow velocity')
          call ctfile%write()
       end block create_monitor
+
+      ! Plot controller
+      create_postproc: block
+         if (ens_evt%occurs()) call plotter()
+      end block create_postproc
       
       
    end subroutine simulation_init
@@ -424,7 +448,7 @@ contains
             ! Percent error at current time step
             e_percent=abs((Ycent_0-Ycent)/Ycent_0)*100.0_WP
             ! Inflow velocity
-            ! Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+            Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
             ! Setup inflow at top of domain
             call fs%get_bcond('inflow',mybc)
             do n=1,mybc%itr%no_
@@ -708,6 +732,9 @@ contains
          call cflfile%write()
          call scfile%write()
          call ctfile%write()
+
+         ! Specialized post-processing    
+         if (ens_evt%occurs()) call plotter()
          
       end do
       
