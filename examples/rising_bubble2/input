@@ -42,7 +42,7 @@ Pressure iteration : 100
 Ensight output period : 1e-2
 
 # Controller constants
-Controller gain:            114
-Integral reset time :       0.04
+Controller gain:            100
+Integral reset time :       10.0
 Derivative time constant :  0.0
 Error tolerance          :  5e-3

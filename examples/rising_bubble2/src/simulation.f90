@@ -173,21 +173,6 @@ contains
          time%itmax=2
       end block initialize_timetracker
       
-
-      ! Initialize controler
-      control_variables: block
-         ! Controller paramters
-         call param_read('Controller gain',Kc)
-         call param_read('Integral reset time',tau_i)
-         call param_read('Derivative time constant',tau_d)
-         call param_read('Error tolerance', e_tol)
-         ! Set point for bubble in the y is the middle of the doamin 
-         Ycent_0=0.5_WP*cfg%yL
-         ! Initial bububle position in y is e_tol off from set point
-         Ycent=Ycent_0/(1.0_WP+e_tol)
-         ! Error terms
-         ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)
-      end block control_variables  
       
       
       ! Initialize our VOF solver and field
@@ -204,8 +189,7 @@ contains
          !allocate(vf,source=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF'))
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF')
          ! Initialize a bubble
-         ! call param_read('Bubble position',center)
-         center=[0.0_WP,Ycent,0.0_WP]
+         call param_read('Bubble position',center)
          ! call param_read('Bubble volume',radius)
          ! radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)*0.001_WP
          call param_read('Bubble diameter',radius)
@@ -254,18 +238,18 @@ contains
          call vf%reset_volume_moments()
       end block create_and_initialize_vof
 
-      ! ! Initialize controler
-      ! control_variables: block
-      !    ! Controller paramters
-      !    call param_read('Controller gain',Kc)
-      !    call param_read('Integral reset time',tau_i)
-      !    call param_read('Derivative time constant',tau_d)
-      !    call param_read('Error tolerance', e_tol)
-      !    ! Get original bubble y centroid
-      !    call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
-      !    ! Error terms
-      !    ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)
-      ! end block control_variables 
+      ! Initialize controler
+      control_variables: block
+         ! Controller paramters
+         call param_read('Controller gain',Kc)
+         call param_read('Integral reset time',tau_i)
+         call param_read('Derivative time constant',tau_d)
+         call param_read('Error tolerance', e_tol)
+         ! Get original bubble y centroid
+         call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
+         ! Error terms
+         ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)
+      end block control_variables 
       
       
       ! Create a two-phase flow solver without bconds
@@ -311,7 +295,7 @@ contains
          call fs%get_bcond('inflow',mybc)
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=-Uin
+            fs%V(i,j,k)=Uin
          end do
          ! Apply other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
@@ -321,6 +305,7 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
+
 
       ! Create a FENE model 
       create_fene: block 
@@ -428,7 +413,8 @@ contains
          call ctfile%add_column(time%t,'Time')
          call ctfile%add_column(time%dt,'Timestep size')
          call ctfile%add_column(Ycent,'Y centroid')
-         call ctfile%add_column(e_percent,'Controller errror')
+         call ctfile%add_column(ek,'error timestep')
+         call ctfile%add_column(e_percent,'errror percent')
          call ctfile%add_column(Uin,'Inflow velocity')
          call ctfile%write()
       end block create_monitor
@@ -471,7 +457,7 @@ contains
             call fs%get_bcond('inflow',mybc)
             do n=1,mybc%itr%no_
                i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=-Uin
+               fs%V(i,j,k)=Uin
             end do
          end block reapply_dirichlet
          
@@ -751,8 +737,8 @@ contains
          call scfile%write()
          call ctfile%write()
 
-         ! Specialized post-processing    
-         if (ens_evt%occurs()) call plotter()
+         ! ! Specialized post-processing    
+         ! if (ens_evt%occurs()) call plotter()
          
       end do
       
