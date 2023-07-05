@@ -23,25 +23,27 @@ set multiplot layout 1,2 columnsfirst scale 1.0,0.8 title sprintf("K_c=%1.2f, {/
 
 # Plotting process variable
 set xlabel "Time"
-set xrange [0:integral_time]
+set xrange [0:10]
 set ylabel "Process Variable"
 set y2label "error (%)"
-set yrange [0:Ly]
+set yrange [0.35:0.45]
+# set y2range [0:1]
 set ytics nomirror
 set y2tics nomirror
-plot "controller" using 2:(SP) with points pointtype 7 ps 2 lc rgb "red"  title "SP" axis x1y1,\
-     "controller" using 2:4    with points pointtype 7 ps 2 lc rgb "blue" title "PV" axis x1y1,\
-     "controller" using 2:5    with points pointtype 7 ps 2 lc rgb "black" title "error" axis x1y2
+plot "controller" using 2:(SP)         with points pointtype 7 ps 2 lc rgb "red"  title "SP" axis x1y1,\
+     "controller" using 2:4            with points pointtype 7 ps 2 lc rgb "blue" title "PV" axis x1y1,\
+     "controller" using 2:($5*100.0)    with points pointtype 7 ps 2 lc rgb "black" title "error" axis x1y2
 unset xlabel
 unset xrange
 unset ylabel
 unset y2label
 unset yrange
+# unset y2range
 unset key
 
 # Plotting control variable
 set xlabel "Time"
-set xrange [0:integral_time]
+set xrange [0:10]
 set ylabel "Control Variable"
 plot "controller" using 2:6 with points pointtype 7 ps 2 lc rgb "green"
 unset xlabel

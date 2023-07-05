@@ -43,7 +43,7 @@ module simulation
    real(WP) :: radius,Vrise,Uin
    real(WP) :: Ycent,Ycent_old,Ycent_0
    real(WP) :: Kc,tau_i,tau_d
-   real(WP) :: ek,e_sum,e_percent
+   real(WP) :: ek,e_sum,e_percent,e_tol
    
 contains
 
@@ -173,6 +173,22 @@ contains
          time%itmax=2
       end block initialize_timetracker
       
+
+      ! Initialize controler
+      control_variables: block
+         ! Controller paramters
+         call param_read('Controller gain',Kc)
+         call param_read('Integral reset time',tau_i)
+         call param_read('Derivative time constant',tau_d)
+         call param_read('Error tolerance', e_tol)
+         ! Set point for bubble in the y is the middle of the doamin 
+         Ycent_0=0.5_WP*cfg%yL
+         ! Initial bububle position in y is e_tol off from set point
+         Ycent=Ycent_0/(1.0_WP+e_tol)
+         ! Error terms
+         ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)
+      end block control_variables  
+      
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
@@ -188,7 +204,8 @@ contains
          !allocate(vf,source=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF'))
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF')
          ! Initialize a bubble
-         call param_read('Bubble position',center)
+         ! call param_read('Bubble position',center)
+         center=[0.0_WP,Ycent,0.0_WP]
          ! call param_read('Bubble volume',radius)
          ! radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)*0.001_WP
          call param_read('Bubble diameter',radius)
@@ -237,17 +254,18 @@ contains
          call vf%reset_volume_moments()
       end block create_and_initialize_vof
 
-      ! Initialize controler
-      control_variables: block
-         ! Controller gain
-         call param_read('Controller gain',Kc)
-         call param_read('Integral reset time',tau_i)
-         call param_read('Derivative time constant',tau_d)
-         ! Get original bubble y centroid
-         call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
-         ! Error terms
-         ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)*100.0_WP
-      end block control_variables 
+      ! ! Initialize controler
+      ! control_variables: block
+      !    ! Controller paramters
+      !    call param_read('Controller gain',Kc)
+      !    call param_read('Integral reset time',tau_i)
+      !    call param_read('Derivative time constant',tau_d)
+      !    call param_read('Error tolerance', e_tol)
+      !    ! Get original bubble y centroid
+      !    call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
+      !    ! Error terms
+      !    ek=0.0_WP; e_sum=0.0_WP; e_percent=abs((Ycent_0-Ycent)/Ycent_0)
+      ! end block control_variables 
       
       
       ! Create a two-phase flow solver without bconds
@@ -283,7 +301,7 @@ contains
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
          ! Error at current time step
-         ek=abs(Ycent_0-Ycent)
+         ek=Ycent_0-Ycent
          ! Sum errors up to current time
          e_sum=e_sum+ek*time%dt
          ! Inflow velocity
@@ -442,11 +460,11 @@ contains
             type(bcond), pointer :: mybc
             integer  :: n,i,j,k
             ! Error at current time step
-            ek=abs(Ycent_0-Ycent)
+            ek=Ycent_0-Ycent
             ! Sum errors up to current time
             e_sum=e_sum+ek*time%dt
             ! Percent error at current time step
-            e_percent=abs((Ycent_0-Ycent)/Ycent_0)*100.0_WP
+            e_percent=abs((Ycent_0-Ycent)/Ycent_0)
             ! Inflow velocity
             Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
             ! Setup inflow at top of domain
