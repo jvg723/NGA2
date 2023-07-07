@@ -21,13 +21,6 @@ Surface tension coefficient : 0.08              # 0.08     (N/m)      0.08     (
 Bubble diameter : 0.02609
 #Bubble volume :   47    # in mm^3
 Bubble position : 0 0.39 0
-Inflow velocity : 0.251
-
-# Non-Newtonian modeling                    # w=0.8 case    # w=0.3 case
-Carreau powerlaw :              1.00        # 0.33          # 0.57
-Polymer viscosity :             0.0         # 1.5122        # 0.096511
-Polymer relaxation time :       1.580       # 1.4           # 0.45
-Maximum polymer extensibility : 10
 
 # Time integration
 Max timestep size : 2e-4
@@ -43,6 +36,5 @@ Ensight output period : 1e-2
 
 # Controller constants
 Controller gain:            100
-Integral reset time :       10.0
+Integral reset time :       0.01
 Derivative time constant :  0.0
-Error tolerance          :  5e-3
