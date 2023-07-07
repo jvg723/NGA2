@@ -430,6 +430,8 @@ contains
          call this%ens_out%add_scalar('curvature',this%vf%curv)
          call this%ens_out%add_scalar('pressure',this%fs%P)
          call this%ens_out%add_scalar('thin_sensor',this%vf%thin_sensor)
+         call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
+         call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
          call this%ens_out%add_scalar('viscosity',this%nn%visc_p)
          do nsc=1,this%nn%nscalar
@@ -462,6 +464,7 @@ contains
          call this%mfile%add_column(this%vf%VFmax,'VOF maximum')
          call this%mfile%add_column(this%vf%VFmin,'VOF minimum')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
+         call this%mfile%add_column(this%vf%flotsam_error,'Flotsam error')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
@@ -867,6 +870,10 @@ contains
                this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
             end do
          end block update_pmesh
+         ! Transfer edge normal data
+         this%resU=this%vf%edge_normal(1,:,:,:)
+         this%resV=this%vf%edge_normal(2,:,:,:)
+         this%resW=this%vf%edge_normal(3,:,:,:)
          ! Perform ensight output
          call this%ens_out%write_data(this%time%t)
       end if
