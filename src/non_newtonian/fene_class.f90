@@ -21,6 +21,7 @@ module fene_class
       ! Model parameters
       integer  :: model                                    !< Closure model of FENE
       real(WP) :: ncoeff                                   !< Carreau powerlaw coefficient
+      real(WP) :: alphacoeff                               !< Carreau characteristic timescale
       real(WP) :: trelax                                   !< Polymer relaxation timescale
       real(WP) :: visc                                     !< Polymer viscosity at zero strain rate
       real(WP) :: Lmax                                     !< Polymer maximum extensibility
@@ -83,7 +84,7 @@ contains
                ! Compute magnitude of strain rate tensor
                this%SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
                ! Compute polymer viscosity
-               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%trelax*this%SRmag(i,j,k))**2)**(0.5_WP*this%ncoeff-0.5_WP)
+               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%alphacoeff*this%SRmag(i,j,k))**2)**(0.5_WP*this%ncoeff-0.5_WP)
             end do
          end do
       end do
@@ -194,7 +195,7 @@ contains
                end do
             end do
          end do
-      case (oldroydb) ! Add relaxation source for FENE-CR ((C-I)/t_relax)
+      case (oldroydb) ! Add relaxation source for Oldroyd-B (1/t_relax)(C-I)
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
