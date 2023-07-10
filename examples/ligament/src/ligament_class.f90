@@ -54,6 +54,7 @@ module ligament_class
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
+      real(WP), dimension(:,:,:),     allocatable :: visc_total          !< Total liquid viscosity (visc_l+visc_p)
       real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU
       
@@ -159,14 +160,15 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(this%resU     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%resV     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%resW     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%Ui       (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%Vi       (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%Wi       (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%resSC    (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-         allocate(this%SCtmp    (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+         allocate(this%resU      (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%resV      (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%resW      (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%Ui        (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%Vi        (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%Wi        (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%visc_total(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%resSC     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+         allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
@@ -244,7 +246,6 @@ contains
          type(bcond), pointer :: mybc
          integer :: n,i,j,k      
          ! Create flow solver
-         ! this%fs=film_tpns(cfg=this%cfg,name='Two-phase NS')
          this%fs=tpns(cfg=this%cfg,name='Two-phase NS')
          ! Set fluid properties
          this%fs%rho_g=1.0_WP; call param_read('Density ratio',this%fs%rho_l)
@@ -260,10 +261,10 @@ contains
          this%ps%maxlevel=16
          call param_read('Pressure iteration',this%ps%maxit)
          call param_read('Pressure tolerance',this%ps%rcvg)
-         ! ! Configure implicit velocity solver
-         ! this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         ! Configure implicit velocity solver
+         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps) !,implicit_solver=this%vs)
+         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
          ! Zero initial field
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
          ! Apply convective velocity
@@ -306,6 +307,11 @@ contains
          this%nn%SC(:,:,:,6)=1.0_WP !< Czz
       end block create_fene
 
+      ! Total liquid viscosity
+      total_viscosity: block
+         this%visc_total=this%fs%visc_l+this%nn%visc_p
+      end block total_viscosity
+
       ! Create a connected-component labeling object
       create_and_initialize_ccl: block
          use vfs_class, only: VFlo
@@ -347,7 +353,7 @@ contains
          this%smesh%varname(6)='x_velocity'
          this%smesh%varname(7)='y_velocity'
          this%smesh%varname(8)='z_velocity'
-         this%smesh%varname(9)='visc'
+         this%smesh%varname(9)='visc_l'
          this%smesh%varname(10)='SRmag'
          this%smesh%varname(11)='film'
          this%smesh%varname(12)='cxx'
@@ -385,7 +391,7 @@ contains
                         this%smesh%var(6,np)=this%Ui(i,j,k)
                         this%smesh%var(7,np)=this%Vi(i,j,k)
                         this%smesh%var(8,np)=this%Wi(i,j,k)
-                        this%smesh%var(9,np)=this%nn%visc_p(i,j,k)
+                        this%smesh%var(9,np)=this%visc_total(i,j,k)
                         this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
                         this%smesh%var(11,np)=this%cc%film_thickness(i,j,k)
                         this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
@@ -433,7 +439,7 @@ contains
          call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
          call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
-         call this%ens_out%add_scalar('viscosity',this%nn%visc_p)
+         call this%ens_out%add_scalar('visc_l',this%visc_total)
          do nsc=1,this%nn%nscalar
             call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
          end do
@@ -451,6 +457,7 @@ contains
          call this%fs%get_max()
          call this%vf%get_max()
          call this%lp%get_max()
+         call this%nn%get_max()
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -465,7 +472,6 @@ contains
          call this%mfile%add_column(this%vf%VFmin,'VOF minimum')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
          call this%mfile%add_column(this%vf%flotsam_error,'Flotsam error')
-         call this%mfile%add_column(this%vf%thinstruct_error,'Film error')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
@@ -698,6 +704,8 @@ contains
                   end do
                end do
             end do
+            ! Total liquid viscosity
+            this%visc_total=this%fs%visc_l+this%nn%visc_p
             ! Deallocate SR array
             deallocate(SR)
          end block shear_thinning
@@ -760,7 +768,7 @@ contains
          this%resW=-2.0_WP*this%fs%rho_W*this%fs%W+(this%fs%rho_Wold+this%fs%rho_W)*this%fs%Wold+this%time%dt*this%resW   
          
          ! Form implicit residuals
-         !call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
+         call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
          
          ! Apply these residuals
          this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU/this%fs%rho_U
@@ -848,7 +856,7 @@ contains
                            this%smesh%var(6,np)=this%Ui(i,j,k)
                            this%smesh%var(7,np)=this%Vi(i,j,k)
                            this%smesh%var(8,np)=this%Wi(i,j,k)
-                           this%smesh%var(9,np)=this%nn%visc_p(i,j,k)
+                           this%smesh%var(9,np)=this%visc_total(i,j,k)
                            this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
                            this%smesh%var(11,np)=this%cc%film_thickness(i,j,k)
                            this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
@@ -883,6 +891,7 @@ contains
       call this%fs%get_max()
       call this%vf%get_max()
       call this%lp%get_max()
+      call this%nn%get_max()
       call this%mfile%write()
       call this%cflfile%write()
       call this%sprayfile%write() 
