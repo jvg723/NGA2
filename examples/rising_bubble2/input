@@ -25,8 +25,8 @@ Bubble position : 0 0.011 0
 # Non-Newtonian modeling                    # w=0.8 case (Pliz and Brenn)   w=0.8 case (Fraggedakis et al.)  
 Carreau powerlaw exponent :     0.33        # 0.33        (-)               0.33  (-)
 Carreau reference timescale :   1.40        # 1.40        (s)               1.40  (s)
-Polymer viscosity :             1.0       # 1.494       (N*s/m^2)         1.494 (N*s/m^2) 
-Polymer relaxation time :       0.05   # 0.207357    (s)               0.477 (s)  
+Polymer viscosity :             1.0         # 1.494       (N*s/m^2)         1.494 (N*s/m^2) 
+Polymer relaxation time :       0.5         # 0.207357    (s)               0.477 (s)  
 Maximum polymer extensibility : 10
 
 
