@@ -289,7 +289,7 @@ contains
          use fene_class,        only: fenecr,oldroydb
          integer :: i,j,k
          ! Create FENE model solver
-         nn=fene(cfg=cfg,model=oldroydb,scheme=bquick,name='FENE')
+         nn=fene(cfg=cfg,model=fenecr,scheme=bquick,name='FENE')
          ! Assign unity density for simplicity
          nn%rho=1.0_WP
          ! Maximum extensibility of polymer chain
@@ -388,7 +388,7 @@ contains
          call ctfile%add_column(ek,'Error')
          call ctfile%add_column(Uin,'Inflow velocity')
          call ctfile%write()
-                  ! Create scalar monitor
+         ! Create scalar monitor
          scfile=monitor(nn%cfg%amRoot,'scalar')
          call scfile%add_column(time%n,'Timestep number')
          call scfile%add_column(time%t,'Time')
@@ -444,6 +444,9 @@ contains
          fs%Uold=fs%U
          fs%Vold=fs%V
          fs%Wold=fs%W
+
+         ! Remember old scalars
+         nn%SCold=nn%SC
 
          ! Prepare old staggered density (at n)
          call fs%get_olddensity(vf=vf)

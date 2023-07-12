@@ -3,10 +3,10 @@ Partition :	1 8 1
 
 # Mesh definition
 Lx : 0.022
-Ly : 0.088
+Ly : 0.044
 Lz : 0.00022
 nx : 92
-ny : 368
+ny : 184
 nz : 1
 
 # Fluid properties                              #  (Pliz and Brenn)           (Owkes and Desjardins 2016)
@@ -20,7 +20,7 @@ Surface tension coefficient : 0.07555           #   0.07555   (N/m)           0.
 # Case description
 #Bubble diameter : 0.02609
 Bubble volume :   45.8    # in mm^3
-Bubble position : 0 0.066 0
+Bubble position : 0 0.022 0
 
 # Non-Newtonian modeling                    # w=0.8 case (Pliz and Brenn)   w=0.8 case (Fraggedakis et al.)  
 Carreau powerlaw exponent :     0.33        # 0.33        (-)               0.33  (-)
