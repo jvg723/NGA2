@@ -53,13 +53,14 @@ visc_l=visc_g*visc_r
 Diam=1.0
 
 # Directories
-case_dir='04_lig'                                                                         # case directory
+case_dir='02_lig'                                                                         # case directory
 base_dir=os.getcwd()                                                                      # base directroy
-spray_dir='/Users/josephgiliberto/Builds/NGA2/examples/ligament/cases/'+case_dir+'/spray' # spray data directory
+spray_dir='/Users/josephgiliberto/Builds/NGA2/examples/ligament/cases/'+case_dir+'/spray' # spray data directory (local)
+spray_dir='/home/fs01/jvg36/Builds/NGA2/examples/ligament/cases/'+case_dir+'/spray' # spray data directory (remote)
 
 # Prepare PDF of generated drops
 os.chdir(spray_dir)                                                                                        # move into spray directory
-sprayfile='droplets.005051'                                                                                # current timestep
+sprayfile='droplets.002991'                                                                                # current timestep
 df=pd.read_csv(sprayfile, delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter']) # Load data
 # df=pd.DataFrame(columns=['time','diameters','PDF','mean','std'])    # Empty struct
 #Loop through output files 

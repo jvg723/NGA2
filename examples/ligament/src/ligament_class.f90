@@ -31,7 +31,7 @@ module ligament_class
       type(vfs)         :: vf       !< Volume fraction solver
       type(tpns)        :: fs       !< Two-phase flow solver
       type(hypre_str)   :: ps       !< Structured Hypre linear solver for pressure
-      type(ddadi)       :: vs       !< DDADI solver for velocity 
+      ! type(ddadi)       :: vs       !< DDADI solver for velocity 
       type(ddadi)       :: ss       !< DDADI solver for scalar
       type(fene)        :: nn       !< FENE model for polymer stress
       type(ccl)         :: cc       !< Connected component labeling class
@@ -262,9 +262,9 @@ contains
          call param_read('Pressure iteration',this%ps%maxit)
          call param_read('Pressure tolerance',this%ps%rcvg)
          ! Configure implicit velocity solver
-         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         ! this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
+         call this%fs%setup(pressure_solver=this%ps) !,implicit_solver=this%vs)
          ! Zero initial field
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
          ! Apply convective velocity
@@ -767,8 +767,8 @@ contains
          this%resV=-2.0_WP*this%fs%rho_V*this%fs%V+(this%fs%rho_Vold+this%fs%rho_V)*this%fs%Vold+this%time%dt*this%resV
          this%resW=-2.0_WP*this%fs%rho_W*this%fs%W+(this%fs%rho_Wold+this%fs%rho_W)*this%fs%Wold+this%time%dt*this%resW   
          
-         ! Form implicit residuals
-         call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
+         ! ! Form implicit residuals
+         ! call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
          
          ! Apply these residuals
          this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU/this%fs%rho_U
