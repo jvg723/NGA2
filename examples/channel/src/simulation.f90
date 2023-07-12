@@ -2,7 +2,7 @@
 module simulation
    use precision,         only: WP
    use geometry,          only: cfg
-   use hypre_str_class,   only: hypre_str
+   use fftxyz_class,      only: fftxyz
    use ddadi_class,       only: ddadi
    use incomp_class,      only: incomp
    use fene_class,        only: fene
@@ -16,10 +16,10 @@ module simulation
    
    !> Single-phase incompressible flow solver, fene model,sgs model and corresponding time tracker
    type(incomp),      public :: fs
-   type(fene),        public :: fm
+   type(fene),        public :: nn
    type(timetracker), public :: time
    type(sgsmodel),    public :: sgs         
-   type(hypre_str),   public :: ps
+   type(fftxyz),      public :: ps
    type(ddadi),       public :: vs,ss
 
 
@@ -35,31 +35,19 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),   allocatable :: SR
-   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_
-   real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
-   real(WP), dimension(:,:,:,:,:), allocatable :: gradu      
-
-   
-   !> Fluid viscosity (solvent,polymer,total)
-   real(WP) :: visc_s,visc_p,visc_0
-
-   !> Artifical diffusivity for conformation tensor
-   real(WP) :: stress_diff
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:,:), allocatable :: gradU 
 
    !> Channel forcing
    real(WP) :: Ubulk,Wbulk
    real(WP) :: meanU,meanW
    real(WP) :: H,Q,px
 
+   !> Viscosity
+   real(WP) :: visc_s
+
    !> Event for post-processing
    type(event) :: ppevt    
-   
-   !> FENE-P model parameters
-   real(WP) :: Lmax,lambda,Beta
-
-   !> CFL numbers
-   real(WP) :: cflc,cflp
 
 contains
    
@@ -214,7 +202,7 @@ contains
          ! Store timestep and array naming for reading in gnuplot
          open(newunit=iunit,file='./plots/gp_input',form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a16,5x,a16)') 'timestep','beta','Uc','H','visc_0','vel_file','strs_file'
-         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,a16,5x,a16)') time%t,beta,Ubulk,fs%cfg%yL,visc_s+visc_p,vel_file,strs_file
+         write(iunit,'(es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,es12.5,5x,a16,5x,a16)') time%t,beta,Ubulk,fs%cfg%yL,visc_s+nn%visc,vel_file,strs_file
          close(iunit)
          ! Plot the curves using gnuplot
          call execute_command_line('gnuplot ' // plt_file)
@@ -261,19 +249,16 @@ contains
       ! Allocate work arrays
       allocate_work_arrays: block
          ! Flow solver
-         allocate(resU (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui   (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi   (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi   (    cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(SR   (6,  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(gradu(3,3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         ! Scalar solver
-         allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
-         allocate(SC_   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
-         allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
-         allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
+         allocate(resU (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi   (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(SR   (6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
 
@@ -300,10 +285,7 @@ contains
          ! Assign constant density
          call param_read('Density',fs%rho)
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
-         ps%maxlevel=10
-         call param_read('Pressure iteration',ps%maxit)
-         call param_read('Pressure tolerance',ps%rcvg)
+         ps=fftxyz(cfg=cfg,name='Pressure',nst=7)
          ! Configure implicit velocity solver
          vs=ddadi(cfg=cfg,name='Velocity',nst=7)
          ! Setup the solver
@@ -337,43 +319,36 @@ contains
       ! Create a FENE model 
       create_fene: block 
          use multiscalar_class, only: bquick
-         use fene_class,        only: FENEP
+         use fene_class,        only: fenep
+         integer :: i,j,k
          ! Create FENE model solver
-         fm=fene(cfg=cfg,model=FENEP,scheme=bquick,name='FENE')
-         ! Assign aritifical stress diffusivisty
-         call param_read('Stress diffusivisty',stress_diff)
-         fm%diff=stress_diff
-         ! Assign constant density
-         fm%rho=fs%rho
+         nn=fene(cfg=cfg,model=fenep,scheme=bquick,name='FENE')
+         ! Assign unity density for simplicity
+         nn%rho=1.0_WP
          ! Maximum extensibility of polymer chain
-         call param_read('Maximum extension of polymer chain',Lmax)
+         call param_read('Maximum polymer extensibility',nn%Lmax)
          ! Relaxation time for polymer
-         call param_read('Polymer Relaxation Time',lambda)
-         ! Solvent/polymer viscosity ratio
-         call param_read('Beta',Beta)
-         ! Polymer viscosity
-         visc_p=visc_s*((1.00_WP-Beta)/Beta)
-         ! Configure the scalar solver
-         ss=ddadi(cfg=cfg,name='Scalar',nst=13)
+         call param_read('Polymer relaxation time',nn%trelax)
+         ! Polymer viscosity at zero strain rate
+         call param_read('Polymer viscosity',nn%visc)
+         ! Powerlaw coefficient in Carreau model
+         call param_read('Carreau powerlaw exponent',nn%ncoeff)
+         ! Reference time scale in in Carreau model
+         call param_read('Carreau reference timescale',nn%alphacoeff)
+         ! Configure implicit scalar solver
+         ss=ddadi(cfg=cfg,name='scalar',nst=13)
          ! Setup the solver
-         call fm%setup(implicit_solver=ss)
-         ! Intalize conformation tensor to identity matrix
-         fm%SC(:,:,:,1)=1.00_WP !Cxx
-         fm%SC(:,:,:,2)=0.00_WP !Cyx
-         fm%SC(:,:,:,3)=0.00_WP !Czx
-         fm%SC(:,:,:,4)=1.00_WP !Cyy
-         fm%SC(:,:,:,5)=0.00_WP !Czy
-         fm%SC(:,:,:,6)=1.00_WP !Czz
-         ! Calculate the relaxation function
-         call fm%get_relaxationFunction(fR,Lmax)
-         ! Build stress tensor
-         fm%T=(visc_p/lambda)*fR   
+         call nn%setup(implicit_solver=ss)
+         ! Initialize conformation tensor to identity
+         nn%SC(:,:,:,1)=1.0_WP !< Cxx
+         nn%SC(:,:,:,4)=1.0_WP !< Cyy
+         nn%SC(:,:,:,6)=1.0_WP !< Czz
       end block create_fene
 
       ! Pressure gradient to drive periodic flow
       pressure_grad: block
          ! Total dynamic viscosity (solvent+polymer)
-         visc_0=visc_s+visc_p  
+         visc_0=visc_s+nn%visc
          ! Channel height
          H=fs%cfg%yL
          ! Flow rate through the channel
@@ -393,19 +368,9 @@ contains
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('viscosity',fs%visc)
          call ens_out%add_scalar('visc_t',sgs%visc)
-         call ens_out%add_scalar('trC',fm%trC)
-         call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
-         call ens_out%add_scalar('Cxy',fm%SC(:,:,:,2))
-         call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
-         call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
-         call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
-         call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
-         call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
-         call ens_out%add_scalar('Txy',fm%T (:,:,:,2))
-         call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
-         call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
-         call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
-         call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
+         do nsc=1,nn%nscalar
+            call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
+         end do
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -414,10 +379,8 @@ contains
       create_monitor: block
          ! Prepare some info about fields
          call fs%get_cfl(time%dt,cflc)
-         call fm%get_cfl(time%dt,fs%rho,lambda,visc_p,cflp)
-         time%cfl=cflc
          call fs%get_max()
-         call fm%get_max()
+         call nn%get_max()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -438,15 +401,13 @@ contains
          cflfile=monitor(fs%cfg%amRoot,'cfl')
          call cflfile%add_column(time%n,'Timestep number')
          call cflfile%add_column(time%t,'Time')
+         call cflfile%add_column(fs%CFLst,'STension CFL')
          call cflfile%add_column(fs%CFLc_x,'Convective xCFL')
          call cflfile%add_column(fs%CFLc_y,'Convective yCFL')
          call cflfile%add_column(fs%CFLc_z,'Convective zCFL')
          call cflfile%add_column(fs%CFLv_x,'Viscous xCFL')
          call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
          call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
-         call cflfile%add_column(fm%CFLp_x,'Polymer Stress xCFL')
-         call cflfile%add_column(fm%CFLp_y,'Polymer Stress yCFL')
-         call cflfile%add_column(fm%CFLp_z,'Polymer Stress zCFL')
          call cflfile%write()
          ! Create forcing monitor
          forcefile=monitor(fs%cfg%amRoot,'forcing')
@@ -455,6 +416,15 @@ contains
          call forcefile%add_column(meanU,'Bulk U')
          call forcefile%add_column(meanW,'Bulk W')
          call forcefile%write()
+         ! Create scalar monitor
+         scfile=monitor(nn%cfg%amRoot,'scalar')
+         call scfile%add_column(time%n,'Timestep number')
+         call scfile%add_column(time%t,'Time')
+         do nsc=1,nn%nscalar
+            call scfile%add_column(nn%SCmin(nsc),trim(nn%SCname(nsc))//'_min')
+            call scfile%add_column(nn%SCmax(nsc),trim(nn%SCname(nsc))//'_max')
+         end do
+         call scfile%write()
       end block create_monitor
 
       ! Theory solution for 2D FENE-P channel flow from D.O.A. Cruz et al. (2005)
@@ -473,8 +443,8 @@ contains
          eps=1.00_WP/((b2+5.00_WP))
          lam=((b2+2.00_WP)/(b2+5.00_WP))*lambda
          ! Constant coefficents 
-         A=(visc_p**2.00_WP/(6.00_WP*eps*lam**2.00_WP))*(1.00_WP+visc_p/visc_s)
-         C=(visc_p**2.00_WP/(4.00_WP*eps*lam**2.00_WP))*(visc_p/visc_s)*px 
+         A=(nn%visc**2.00_WP/(6.00_WP*eps*lam**2.00_WP))*(1.00_WP+nn%visc/visc_s)
+         C=(nn%visc**2.00_WP/(4.00_WP*eps*lam**2.00_WP))*(nn%visc/visc_s)*px 
          ! Loop over channel height to calculate velocity and stress
             do j=fs%cfg%jmin,fs%cfg%jmax
                ! Position dependent coefficent being solved for in cubic equation
@@ -482,7 +452,7 @@ contains
                ! Shear stress
                Txy(j)=(B+sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP)-abs(B-sqrt(A**3.00_WP+B**2.00_WP))**(1.00_WP/3.00_WP) 
                ! Normal stress
-               Txx(j)=2.00_WP*(lam/visc_p)*Txy(j)**2.00_WP
+               Txx(j)=2.00_WP*(lam/nn%visc)*Txy(j)**2.00_WP
                !> Velocity curve parameters
                if (fs%cfg%ym(j).lt.0.00_WP) then
                   ! @ -H/2
@@ -548,12 +518,8 @@ contains
       ! Perform time integration
       do while (.not.time%done())
          
-         ! Calcualte CFL numbers
-         call fs%get_cfl(time%dt,cflc)                        !> Connvective CFL
-         call fm%get_cfl(time%dt,fs%rho,lambda,visc_p,cflp)   !> Polymer stress CFL
-         time%cfl=cflc
-         
          ! Increment time
+         call fs%get_cfl(time%dt,time%cfl)
          call time%adjust_dt()
          call time%increment()
          
@@ -692,7 +658,7 @@ contains
                ! Calculate the relaxation function
                call fm%get_relaxationFunction(fR,Lmax)
                ! Build stress tensor
-               fm%T=(visc_p/lambda)*fR   
+               fm%T=(nn%visc/lambda)*fR   
                ! Get its divergence 
                call fm%get_divT(fs) 
                ! Add divT to momentum equation
