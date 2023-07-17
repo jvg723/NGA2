@@ -82,7 +82,7 @@ contains
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Compute magnitude of strain rate tensor
-               this%SRmag(i,j,k)=sqrt(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2))
+               this%SRmag(i,j,k)=sqrt(2.0_WP*(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2)))
                ! Compute polymer viscosity
                this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%alphacoeff*this%SRmag(i,j,k))**2)**(0.5_WP*this%ncoeff-0.5_WP)
             end do
@@ -142,7 +142,7 @@ contains
                   if (this%mask(i,j,k).ne.0) cycle                            !< Skip non-solved cells
                   coeff=(this%Lmax**2-3.00_WP)/(this%Lmax**2-(this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6)))
                   coeff=coeff/this%trelax                                     !< Divide by relaxation time scale
-                  resSC(i,j,k,1)=resSC(i,j,k,1)-coeff*this%SC(i,j,k,1)+1.0_WP !< xx tensor component
+                  resSC(i,j,k,1)=resSC(i,j,k,1)-coeff*this%SC(i,j,k,1)-1.0_WP !< xx tensor component
                   resSC(i,j,k,2)=resSC(i,j,k,2)-coeff*this%SC(i,j,k,2)        !< xy tensor component
                   resSC(i,j,k,3)=resSC(i,j,k,3)-coeff*this%SC(i,j,k,3)        !< xz tensor component
                   resSC(i,j,k,4)=resSC(i,j,k,4)-coeff*this%SC(i,j,k,4)-1.0_WP !< yy tensor component
