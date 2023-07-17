@@ -168,13 +168,11 @@ contains
          ! Create a VOF solver
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF')
          ! Initialize a bubble
-         ! call param_read('Bubble position',center)
-         ! call param_read('Bubble volume',radius)
-         ! radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)*0.001_WP
+         call param_read('Bubble position',center)
+         call param_read('Bubble volume',radius)
+         radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)*0.001_WP
          ! call param_read('Bubble diameter',radius)
          ! radius=0.5_WP*radius
-         center=[0.0_WP,0.025_WP,0.0_WP]
-         radius=0.005_WP
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -291,7 +289,7 @@ contains
          use fene_class,        only: fenecr,oldroydb
          integer :: i,j,k
          ! Create FENE model solver
-         nn=fene(cfg=cfg,model=fenecr,scheme=bquick,name='FENE')
+         nn=fene(cfg=cfg,model=oldroydb,scheme=bquick,name='FENE')
          ! Assign unity density for simplicity
          nn%rho=1.0_WP
          ! Maximum extensibility of polymer chain
@@ -625,11 +623,11 @@ contains
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                ! Calculate the polymer relaxation
                stress=0.0_WP; call nn%addsrc_relax(stress,time%dt)
-               ! ! Build liquid stress tensor (shear thinning)
+               ! Build liquid stress tensor (shear thinning)
                do n=1,6
                   stress(:,:,:,n)=-nn%visc_p(:,:,:)*vf%VF*stress(:,:,:,n)
                end do
-               ! ! Build liquid stress tensor (constant polymer viscosity)
+               ! Build liquid stress tensor (constant polymer viscosity)
                ! do n=1,6
                !    stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)
                ! end do
