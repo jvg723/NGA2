@@ -48,9 +48,9 @@ ny    =search_str(path,'ny')                                 # Number of grid po
 visc_s=search_str(path,'Solvent dynamic viscosity')          # Solvent viscosity
 rho   =search_str(path,'Density')                            # Fluid density
 Uc    =search_str(path,'Ubulk')                              # Average channel flow
-L     =search_str(path,'Maximum extension of polymer chain') # Maximum extension of polymer
-lam   =search_str(path,'Polymer Relaxation Time')            # Polymer relaxation time
-beta  =search_str(path,'Beta')                               # Viscosity ratio
+L     =search_str(path,'Maximum polymer extensibility')      # Maximum extension of polymer
+lam   =search_str(path,'Polymer relaxation time')            # Polymer relaxation time
+visc_p=search_str(path,'Polymer viscosity')                  # Polymer viscosity 
 
 # Generate grid
 y=np.linspace(-H/2.0,H/2.0,int(ny)+1)
@@ -67,9 +67,9 @@ epsilon=1.0/(3.0*(b+5.0))
 lam=((b+2.0)/(b+5.0))*lam
 
 # Fluid viscosity
-visc_p=visc_s*(1.0-beta)/beta
+beta=visc_s/(visc_s+visc_p)
 visc  =visc_s+visc_p
-print('visc_p=',visc_p)
+print('beta=',beta)
 
 # Pressure gradient
 px=-12.0*(visc/H**3.0)*Q
