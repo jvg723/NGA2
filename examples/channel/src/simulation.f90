@@ -598,7 +598,7 @@ contains
                ! Polymer relaxation forcing 
                fR=0.0_WP;     call nn%addsrc_relax(fR,time%dt)       
                ! Add source terms to calculated residual
-               resSC=resSC+(CgradU+(fR/nn%trelax))*time%dt
+               resSC=resSC+(CgradU+fR)*time%dt
             end block fene_src
             
             ! Form implicit residual
@@ -668,7 +668,7 @@ contains
                stress=0.0_WP; call nn%addsrc_relax(stress,time%dt)
                ! Build liquid stress tensor (constant polymer viscosity)
                do n=1,6
-                  stress(:,:,:,n)=-(nn%visc/nn%trelax)*stress(:,:,:,n)
+                  stress(:,:,:,n)=-nn%visc*stress(:,:,:,n)
                end do
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1

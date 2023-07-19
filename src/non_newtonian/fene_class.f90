@@ -135,19 +135,18 @@ contains
       real(WP) :: coeff
       real(WP), parameter :: safety_margin=10.0_WP
       select case (this%model)
-      case (fenep) ! Add relaxation source for FENE-P (f(r)*C-I)
+      case (fenep) ! Add relaxation source for FENE-P (1/lambda)(f(r)*C-I)
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
                   coeff=(this%Lmax**2-3.00_WP)/(this%Lmax**2-(this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6)))
-                  ! coeff=coeff/this%trelax                                       !< Divide by relaxation time scale
-                  resSC(i,j,k,1)=resSC(i,j,k,1)-(coeff*this%SC(i,j,k,1)-1.0_WP) !< xx tensor component
-                  resSC(i,j,k,2)=resSC(i,j,k,2)-(coeff*this%SC(i,j,k,2)+0.0_WP) !< xy tensor component
-                  resSC(i,j,k,3)=resSC(i,j,k,3)-(coeff*this%SC(i,j,k,3)+0.0_WP) !< xz tensor component
-                  resSC(i,j,k,4)=resSC(i,j,k,4)-(coeff*this%SC(i,j,k,4)-1.0_WP) !< yy tensor component
-                  resSC(i,j,k,5)=resSC(i,j,k,5)-(coeff*this%SC(i,j,k,5)-0.0_WP) !< yz tensor component
-                  resSC(i,j,k,6)=resSC(i,j,k,6)-(coeff*this%SC(i,j,k,6)-1.0_WP) !< zz tensor component
+                  resSC(i,j,k,1)=resSC(i,j,k,1)-((coeff*this%SC(i,j,k,1)-1.0_WP)/this%trelax) !< xx tensor component
+                  resSC(i,j,k,2)=resSC(i,j,k,2)-((coeff*this%SC(i,j,k,2)+0.0_WP)/this%trelax) !< xy tensor component
+                  resSC(i,j,k,3)=resSC(i,j,k,3)-((coeff*this%SC(i,j,k,3)+0.0_WP)/this%trelax) !< xz tensor component
+                  resSC(i,j,k,4)=resSC(i,j,k,4)-((coeff*this%SC(i,j,k,4)-1.0_WP)/this%trelax) !< yy tensor component
+                  resSC(i,j,k,5)=resSC(i,j,k,5)-((coeff*this%SC(i,j,k,5)-0.0_WP)/this%trelax) !< yz tensor component
+                  resSC(i,j,k,6)=resSC(i,j,k,6)-((coeff*this%SC(i,j,k,6)-1.0_WP)/this%trelax) !< zz tensor component
                end do
             end do
          end do
