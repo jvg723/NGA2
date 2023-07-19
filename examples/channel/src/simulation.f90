@@ -6,7 +6,6 @@ module simulation
    use ddadi_class,       only: ddadi
    use incomp_class,      only: incomp
    use fene_class,        only: fene
-   use sgsmodel_class,    only: sgsmodel
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use event_class,       only: event
@@ -14,11 +13,10 @@ module simulation
    implicit none
    private
    
-   !> Single-phase incompressible flow solver, fene model,sgs model and corresponding time tracker
+   !> Single-phase incompressible flow solver, fene model and corresponding time tracker
    type(incomp),      public :: fs
    type(fene),        public :: nn
-   type(timetracker), public :: time
-   type(sgsmodel),    public :: sgs         
+   type(timetracker), public :: time      
    type(hypre_str),   public :: ps
    type(ddadi),       public :: vs,ss
 
@@ -36,6 +34,7 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
    real(WP), dimension(:,:,:,:),   allocatable :: stress
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU 
 
@@ -260,6 +259,8 @@ contains
          allocate(SCtmp (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU (1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
+         allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
       end block allocate_work_arrays
       
 
@@ -368,7 +369,6 @@ contains
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('viscosity',fs%visc)
-         call ens_out%add_scalar('visc_t',sgs%visc)
          do nsc=1,nn%nscalar
             call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
          end do
@@ -584,12 +584,22 @@ contains
                call nn%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
             end block bquick
             
-            ! Add fene sources
-            call nn%addsrc_CgradU(gradU,resSC)
-            call nn%addsrc_relax(resSC,time%dt)
+            ! ! Add fene sources
+            ! call nn%addsrc_CgradU(gradU,resSC)
+            ! call nn%addsrc_relax(resSC,time%dt)
             
             ! Assemble explicit residual
             resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
+
+            ! Add FENE source terms
+            fene_src: block
+               ! Streching and distortion forcing
+               CgradU=0.0_WP; call nn%addsrc_CgradU(gradU,CgradU)
+               ! Polymer relaxation forcing 
+               fR=0.0_WP;     call nn%addsrc_relax(fR,time%dt)       
+               ! Add source terms to calculated residual
+               resSC=resSC+(CgradU+(fR/nn%trelax))*time%dt
+            end block fene_src
             
             ! Form implicit residual
             call nn%solve_implicit(time%dt,resSC,fs%Uold,fs%Vold,fs%Wold)
@@ -658,7 +668,7 @@ contains
                stress=0.0_WP; call nn%addsrc_relax(stress,time%dt)
                ! Build liquid stress tensor (constant polymer viscosity)
                do n=1,6
-                  stress(:,:,:,n)=-nn%visc*stress(:,:,:,n)
+                  stress(:,:,:,n)=-(nn%visc/nn%trelax)*stress(:,:,:,n)
                end do
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1
