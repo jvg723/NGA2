@@ -34,7 +34,6 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
-   real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
    real(WP), dimension(:,:,:,:),   allocatable :: stress
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU 
 
@@ -259,8 +258,6 @@ contains
          allocate(SCtmp (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU (1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
-         allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
       end block allocate_work_arrays
       
 
@@ -584,22 +581,12 @@ contains
                call nn%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
             end block bquick
             
-            ! ! Add fene sources
-            ! call nn%addsrc_CgradU(gradU,resSC)
-            ! call nn%addsrc_relax(resSC,time%dt)
+            ! Add fene sources
+            call nn%addsrc_CgradU(gradU,resSC)
+            call nn%addsrc_relax(resSC,time%dt)
             
             ! Assemble explicit residual
             resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
-
-            ! Add FENE source terms
-            fene_src: block
-               ! Streching and distortion forcing
-               CgradU=0.0_WP; call nn%addsrc_CgradU(gradU,CgradU)
-               ! Polymer relaxation forcing 
-               fR=0.0_WP;     call nn%addsrc_relax(fR,time%dt)       
-               ! Add source terms to calculated residual
-               resSC=resSC+(CgradU+fR)*time%dt
-            end block fene_src
             
             ! Form implicit residual
             call nn%solve_implicit(time%dt,resSC,fs%Uold,fs%Vold,fs%Wold)
