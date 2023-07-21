@@ -2,11 +2,11 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.022
-Ly :	0.044
-Lz :	0.00022
-nx :	92
-ny :	184
+Lx :	0.036
+Ly :	0.036
+Lz :	0.00036
+nx :	150
+ny :	150
 nz :	1
 
 # Fluid properties                              #  (Pliz and Brenn)           (Owkes and Desjardins 2016)
@@ -20,10 +20,10 @@ Surface tension coefficient : 0.07555           #   0.07555   (N/m)           0.
 # Case description
 Bubble diameter : 0.004439
 #Bubble volume :   45.8    # in mm^3
-Bubble position : 0 0.022 0
+Bubble position : 0 0.018 0
 
 # Non-Newtonian modeling                    # w=0.8 case (Pliz and Brenn)   w=0.8 case (Fraggedakis et al.)  
-Carreau powerlaw exponent :     1.0         # 0.33        (-)               0.33  (-)
+Carreau powerlaw exponent :     0.33        # 0.33        (-)               0.33  (-)
 Carreau reference timescale :   1.40        # 1.40        (s)               1.40  (s)
 Polymer viscosity :             1.512       # 1.512       (N*s/m^2)         1.494 (N*s/m^2) 
 Polymer relaxation time :       1.40        # 0.207357    (s)               0.477 (s)  
