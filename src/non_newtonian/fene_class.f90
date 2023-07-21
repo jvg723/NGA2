@@ -150,20 +150,22 @@ contains
                end do
             end do
          end do
-      case (fenecr) ! Add relaxation source for FENE-CR (f(r)*(C-I))
+      case (fenecr) ! Add relaxation source for FENE-CR (f(r)/lambda*(C-I))
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
-                  coeff=1.0_WP-(this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6))/this%Lmax**2
-                  coeff=max(epsilon(1.0_WP),min(coeff,1.0_WP))*this%trelax      !< Build a safe adjusted relaxation time scale
-                  coeff=max(coeff,safety_margin*dt)                             !< Further clip based on current time step size for stability
-                  coeff=1.0_WP/coeff                                            !< Inverse coeff
+                  ! coeff=1.0_WP-(this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6))/this%Lmax**2
+                  ! coeff=max(epsilon(1.0_WP),min(coeff,1.0_WP))*this%trelax      !< Build a safe adjusted relaxation time scale
+                  ! coeff=max(coeff,safety_margin*dt)                             !< Further clip based on current time step size for stability
+                  ! coeff=1.0_WP/coeff                                            !< Inverse coeff
+                  coeff=this%Lmax**2/(this%Lmax**2-(this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6)))
+                  coeff=coeff/this%trelax                   !< Divide by relaxation time scale
                   resSC(i,j,k,1)=resSC(i,j,k,1)-coeff*(this%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-                  resSC(i,j,k,2)=resSC(i,j,k,2)-coeff* this%SC(i,j,k,2)         !> xy tensor component
-                  resSC(i,j,k,3)=resSC(i,j,k,3)-coeff* this%SC(i,j,k,3)         !> xz tensor component
+                  resSC(i,j,k,2)=resSC(i,j,k,2)-coeff*(this%SC(i,j,k,2)-0.0_WP) !> xy tensor component
+                  resSC(i,j,k,3)=resSC(i,j,k,3)-coeff*(this%SC(i,j,k,3)-0.0_WP) !> xz tensor component
                   resSC(i,j,k,4)=resSC(i,j,k,4)-coeff*(this%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-                  resSC(i,j,k,5)=resSC(i,j,k,5)-coeff* this%SC(i,j,k,5)         !> yz tensor component
+                  resSC(i,j,k,5)=resSC(i,j,k,5)-coeff*(this%SC(i,j,k,5)-0.0_WP) !> yz tensor component
                   resSC(i,j,k,6)=resSC(i,j,k,6)-coeff*(this%SC(i,j,k,6)-1.0_WP) !> zz tensor component
                end do
             end do

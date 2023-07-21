@@ -3,11 +3,11 @@ getValue(row,col,filename)=system('awk ''{if (NR == '.row.') print $'.col.'}'' '
 # Setting terminal
 set terminal pngcairo enhanced size 1200,800 
 # Set output of file
-# set output "/Users/josephgiliberto/Builds/NGA2/examples/rising_bubble2/monitor/controller.png"
-set output "/home/fs01/jvg36/Builds/NGA2/examples/rising_bubble2/cases/22_rb2/monitor/controller.png"
+set output "/Users/josephgiliberto/Builds/NGA2/examples/rising_bubble2/monitor/controller.png"
+# set output "/home/fs01/jvg36/Builds/NGA2/examples/rising_bubble2/cases/22_rb2/monitor/controller.png"
 # Load paths to velocity and stress data
-# set loadpath "/Users/josephgiliberto/Builds/NGA2/examples/rising_bubble2/monitor"
-set loadpath "/home/fs01/jvg36/Builds/NGA2/examples/rising_bubble2/cases/22_rb2/monitor"
+set loadpath "/Users/josephgiliberto/Builds/NGA2/examples/rising_bubble2/monitor"
+# set loadpath "/home/fs01/jvg36/Builds/NGA2/examples/rising_bubble2/cases/22_rb2/monitor"
 # Height of domain in y
 # Ly=getValue(2,1,"./gp_input")+0
 Ly=0.011
@@ -30,10 +30,10 @@ set multiplot layout 1,2 columnsfirst scale 1.0,0.8 title sprintf("K_c=%1.2f, {/
 
 # Plotting process variable
 set xlabel "Time"
-set xrange [0:10]
+set xrange [0:5]
 set ylabel "Process Variable"
 set y2label "error"
-set yrange [0.0:0.05]
+set yrange [0.0:0.022]
 # set y2range [0:1]
 set ytics nomirror
 set y2tics nomirror
@@ -50,7 +50,7 @@ unset key
 
 # Plotting control variable
 set xlabel "Time"
-set xrange [0:10]
+set xrange [0:5]
 set ylabel "Control Variable"
 plot "controller" using 2:6 with points pointtype 7 ps 2 lc rgb "green"
 unset xlabel

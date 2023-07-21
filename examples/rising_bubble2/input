@@ -3,37 +3,37 @@ Partition :	1 8 1
 
 # Mesh definition
 Lx :	0.05
-Ly :	0.05
-Lz :	0.05
-nx :	50
-ny :	50
-nz :	50
+Ly :	0.1
+Lz :	0.0005
+nx :	100
+ny :	200
+nz :	1
 
 # Fluid properties                              #  (Pliz and Brenn)           (Owkes and Desjardins 2016)
 Gravity :                     0 -9.81 0         #   w=0.8 %                   Case 1              Case 2
-Liquid dynamic viscosity :    1.0             #   0.018     (N*s/m^2)       2.8      (N*s/m^2)  1.314    (N*s/m^2) 
+Liquid dynamic viscosity :    1.000             #   0.018     (N*s/m^2)       2.8      (N*s/m^2)  1.314    (N*s/m^2) 
 Gas dynamic viscosity :       1.780e-5          #   1.780e-5  (N*s/m^2)       1.780e-5 (N*s/m^2)  1.780e-5 (N*s/m^2) 
-Liquid density :              1000.9            #   1000.9    (kg/m^3)        1390     (kg/m^3)   1390     (kg/m^3)
+Liquid density :              1000.0            #   1000.9    (kg/m^3)        1390     (kg/m^3)   1390     (kg/m^3)
 Gas density :                 1.226             #   1.226     (kg/m^3)        1.226    (kg/m^3)   1.226    (kg/m^3)
 Surface tension coefficient : 0.07555           #   0.07555   (N/m)           0.08     (N/m)      0.08     (N/m)
 
 # Case description
-#Bubble diameter : 0.02609
+# Bubble diameter : 0.01
 Bubble volume :   45.8    # in mm^3
-Bubble position : 0 0.011 0
+Bubble position : 0 0.05 0
 
 # Non-Newtonian modeling                    # w=0.8 case (Pliz and Brenn)   w=0.8 case (Fraggedakis et al.)  
-Carreau powerlaw exponent :     0.33        # 0.33        (-)               0.33  (-)
+Carreau powerlaw exponent :     1.0         # 0.33        (-)               0.33  (-)
 Carreau reference timescale :   1.40        # 1.40        (s)               1.40  (s)
-Polymer viscosity :             1.0         # 1.494       (N*s/m^2)         1.494 (N*s/m^2) 
-Polymer relaxation time :       0.5         # 0.207357    (s)               0.477 (s)  
-Maximum polymer extensibility : 10
+Polymer viscosity :             1.000       # 1.512       (N*s/m^2)         1.494 (N*s/m^2) 
+Polymer relaxation time :       0.05        # 0.207357    (s)               0.477 (s)  
+Maximum polymer extensibility : 0
 
 
 # Time integration
 Max timestep size : 1e-4
 Max cfl number :    0.9
-Max time :          5
+Max time :          50
 
 # Pressure solver
 Pressure tolerance : 1e-4
