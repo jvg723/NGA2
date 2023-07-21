@@ -18,8 +18,8 @@ Gas density :                 1.226             #   1.226     (kg/m^3)        1.
 Surface tension coefficient : 0.07555           #   0.07555   (N/m)           0.08     (N/m)      0.08     (N/m)
 
 # Case description
-# Bubble diameter : 0.01
-Bubble volume :   45.8    # in mm^3
+Bubble diameter : 0.01
+#Bubble volume :   45.8    # in mm^3
 Bubble position : 0 0.05 0
 
 # Non-Newtonian modeling                    # w=0.8 case (Pliz and Brenn)   w=0.8 case (Fraggedakis et al.)  
