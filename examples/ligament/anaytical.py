@@ -40,6 +40,7 @@ sigma=1.0/Weg
 
 #Ohnesorge number for case
 Oh=visc_l/math.sqrt(rho_l*sigma*D)
+print('Oh=',Oh)
 
-lambda_RT=D*math.sqrt((6.0*math.pi**3.0*rho_l)/(Cd*(rho_l-rho_g)))*Weg**-0.5
-print(lambda_RT)
+# lambda_RT=D*math.sqrt((6.0*math.pi**3.0*rho_l)/(Cd*(rho_l-rho_g)))*Weg**-0.5
+# print(lambda_RT)
