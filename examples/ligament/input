@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	2 2 2
+Partition :	1 1 8
 
 # Mesh definition
 X ligament : 2
@@ -13,15 +13,15 @@ nz : 100 !240
 # Flow conditions
 Reynolds number :      100
 Weber number :         20 
-Viscosity ratio :      50
+Viscosity ratio :      0
 Density ratio :        1000
 Target Re_lambda :     45
 Turbulence intensity : 0.1
 
 # Non-Newtonian modeling
-Carreau powerlaw :              1.0
-Polymer viscosity ratio :       0
-Polymer relaxation time :       0
+Carreau powerlaw :              0.5
+Polymer viscosity ratio :       500
+Polymer relaxation time :       1.0
 Maximum polymer extensibility : 10
 
 # Time integration

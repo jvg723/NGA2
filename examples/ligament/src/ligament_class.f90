@@ -575,83 +575,83 @@ contains
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
 
-         ! ! ============= SCALAR SOLVER =======================
+         ! ============= SCALAR SOLVER =======================
             
-         ! ! Reset interpolation metrics to QUICK scheme
-         ! call this%nn%metric_reset()
+         ! Reset interpolation metrics to QUICK scheme
+         call this%nn%metric_reset()
             
-         ! ! Build mid-time scalar
-         ! this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
+         ! Build mid-time scalar
+         this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
          
-         ! ! Explicit calculation of drhoSC/dt from scalar equation
-         ! call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! Explicit calculation of drhoSC/dt from scalar equation
+         call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
          
-         ! ! Perform bquick procedure
-         ! bquick: block
-         !    integer :: i,j,k
-         !    logical, dimension(:,:,:), allocatable :: flag
-         !    ! Allocate work array
-         !    allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    ! Assemble explicit residual
-         !    this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
-         !    ! Apply it to get explicit scalar prediction
-         !    this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
-         !    ! Check cells that require bquick
-         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-         !             if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
-         !             &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
-         !                flag(i,j,k)=.true.
-         !             else
-         !                flag(i,j,k)=.false.
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         !    ! Adjust metrics
-         !    call this%nn%metric_adjust(this%SCtmp,flag)
-         !    ! Clean up
-         !    deallocate(flag)
-         !    ! Recompute drhoSC/dt
-         !    call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
-         ! end block bquick
+         ! Perform bquick procedure
+         bquick: block
+            integer :: i,j,k
+            logical, dimension(:,:,:), allocatable :: flag
+            ! Allocate work array
+            allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            ! Assemble explicit residual
+            this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
+            ! Apply it to get explicit scalar prediction
+            this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
+            ! Check cells that require bquick
+            do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
+               do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
+                  do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
+                     if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
+                     &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
+                        flag(i,j,k)=.true.
+                     else
+                        flag(i,j,k)=.false.
+                     end if
+                  end do
+               end do
+            end do
+            ! Adjust metrics
+            call this%nn%metric_adjust(this%SCtmp,flag)
+            ! Clean up
+            deallocate(flag)
+            ! Recompute drhoSC/dt
+            call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         end block bquick
          
-         ! ! Add fene sources
-         ! call this%nn%addsrc_CgradU(this%gradU,this%resSC)
-         ! call this%nn%addsrc_relax(this%resSC,this%time%dt)
+         ! Add fene sources
+         call this%nn%addsrc_CgradU(this%gradU,this%resSC)
+         call this%nn%addsrc_relax(this%resSC,this%time%dt)
          
-         ! ! Assemble explicit residual
-         ! this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
+         ! Assemble explicit residual
+         this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
          
-         ! ! Form implicit residual
-         ! call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! Form implicit residual
+         call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
          
-         ! ! Update scalars
-         ! this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
+         ! Update scalars
+         this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
          
-         ! ! Force the gas scalar to identity
-         ! gas_scalar_forcing: block
-         !    integer :: i,j,k
-         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-         !             if (this%nn%mask(i,j,k).eq.0) then
-         !                this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-         !                this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
-         !                this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
-         !                this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-         !                this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
-         !                this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         ! end block gas_scalar_forcing
+         ! Force the gas scalar to identity
+         gas_scalar_forcing: block
+            integer :: i,j,k
+            do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
+               do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
+                  do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
+                     if (this%nn%mask(i,j,k).eq.0) then
+                        this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+                        this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
+                        this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
+                        this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+                        this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
+                        this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+                     end if
+                  end do
+               end do
+            end do
+         end block gas_scalar_forcing
 
-         ! ! Apply all other boundary conditions on the resulting field
-         ! call this%nn%apply_bcond(this%time%t,this%time%dt)
-         ! ! ===================================================
+         ! Apply all other boundary conditions on the resulting field
+         call this%nn%apply_bcond(this%time%t,this%time%dt)
+         ! ===================================================
          
          ! ============ VELOCITY SOLVER ======================
 
@@ -716,51 +716,51 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         ! ! Add polymer stress term
-         ! polymer_stress: block
-         !    integer :: i,j,k,n
-         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-         !    real(WP), dimension(:,:,:,:), allocatable :: stress
-         !    ! Allocate work arrays
-         !    allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-         !    allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    ! Calculate the polymer relaxation
-         !    stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
-         !    ! Build liquid stress tensor
-         !    do n=1,6
-         !       stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
-         !    end do
-         !    ! Interpolate tensor components to cell edges
-         !    do k=this%cfg%kmin_,this%cfg%kmax_+1
-         !       do j=this%cfg%jmin_,this%cfg%jmax_+1
-         !          do i=this%cfg%imin_,this%cfg%imax_+1
-         !             Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-         !             Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-         !             Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-         !          end do
-         !       end do
-         !    end do
-         !    ! Add divergence of stress to residual
-         !    do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-         !       do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-         !          do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-         !             if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-         !             &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-         !             &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-         !             if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-         !             &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-         !             &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-         !             if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-         !             &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-         !             &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-         !          end do
-         !       end do
-         !    end do
-         !    ! Clean up
-         !    deallocate(stress,Txy,Tyz,Tzx)
-         ! end block polymer_stress
+         ! Add polymer stress term
+         polymer_stress: block
+            integer :: i,j,k,n
+            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+            real(WP), dimension(:,:,:,:), allocatable :: stress
+            ! Allocate work arrays
+            allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+            allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            ! Calculate the polymer relaxation
+            stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
+            ! Build liquid stress tensor
+            do n=1,6
+               stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
+            end do
+            ! Interpolate tensor components to cell edges
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+                     Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+                     Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+                  end do
+               end do
+            end do
+            ! Add divergence of stress to residual
+            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+                     if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                     &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+                     &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+                     if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                     &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+                     &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+                     if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                     &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+                     &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+                  end do
+               end do
+            end do
+            ! Clean up
+            deallocate(stress,Txy,Tyz,Tzx)
+         end block polymer_stress
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
