@@ -155,7 +155,7 @@ contains
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
          !this%vf=vfs(cfg=this%cfg,reconstruction_method=r2p,name='VOF')
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=elvira,name='VOF')
          ! Initialize to a ligament
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
@@ -256,12 +256,8 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=5,name='plic')
+         this%smesh=surfmesh(nvar=1,name='plic')
          this%smesh%varname(1)='nplane'
-         this%smesh%varname(2)='curv'
-         this%smesh%varname(3)='edge_sensor'
-         this%smesh%varname(4)='thin_sensor'
-         this%smesh%varname(5)='thickness'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -273,10 +269,6 @@ contains
                   do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                        this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
-                        this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
-                        this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
-                        this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
                      end if
                   end do
                end do
@@ -296,11 +288,7 @@ contains
          ! Add variables to output
          call this%ens_out%add_vector('velocity',this%Ui,this%Vi,this%Wi)
          call this%ens_out%add_scalar('VOF',this%vf%VF)
-         call this%ens_out%add_scalar('curvature',this%vf%curv)
          call this%ens_out%add_scalar('pressure',this%fs%P)
-         call this%ens_out%add_scalar('thin_sensor',this%vf%thin_sensor)
-         call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
-         call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
@@ -326,7 +314,6 @@ contains
          call this%mfile%add_column(this%vf%VFmax,'VOF maximum')
          call this%mfile%add_column(this%vf%VFmin,'VOF minimum')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
-         call this%mfile%add_column(this%vf%flotsam_error,'Flotsam error')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
@@ -409,8 +396,8 @@ contains
          !call this%fs%update_laplacian(pinpoint=[this%fs%cfg%imin,this%fs%cfg%jmin,this%fs%cfg%kmin])
          call this%fs%correct_mfr()
          call this%fs%get_div()
-         !call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
-         call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
          this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
          !if (this%cfg%amRoot) this%fs%psolv%rhs(this%cfg%imin,this%cfg%jmin,this%cfg%kmin)=0.0_WP
          this%fs%psolv%sol=0.0_WP
@@ -432,7 +419,6 @@ contains
       ! Recompute interpolated velocity and divergence
       call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       call this%fs%get_div()
-      
       ! Remove VOF at edge of domain
       remove_vof: block
          integer :: n
@@ -458,20 +444,12 @@ contains
                      do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                           this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
-                           this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
-                           this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
-                           this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
                         end if
                      end do
                   end do
                end do
             end do
          end block update_smesh
-         ! Transfer edge normal data
-         this%resU=this%vf%edge_normal(1,:,:,:)
-         this%resV=this%vf%edge_normal(2,:,:,:)
-         this%resW=this%vf%edge_normal(3,:,:,:)
          ! Perform ensight output
          call this%ens_out%write_data(this%time%t)
       end if
