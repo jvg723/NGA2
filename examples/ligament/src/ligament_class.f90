@@ -770,10 +770,14 @@ contains
          ! Form implicit residuals
          call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
          
-         ! Apply these residuals
-         this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU/this%fs%rho_U
-         this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV/this%fs%rho_V
-         this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW/this%fs%rho_W
+         ! Apply these residuals - if running implicitly 
+         this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU
+         this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV
+         this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW
+         ! Apply these residuals - if running explicitly
+         ! this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU/this%fs%rho_U
+         ! this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV/this%fs%rho_V
+         ! this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW/this%fs%rho_W
          
          ! Solve Poisson equation
          call this%fs%update_laplacian()
