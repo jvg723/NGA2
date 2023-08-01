@@ -86,6 +86,10 @@ mean=np.mean(np.log(df_13_lig['Diameter']))                                     
 std=np.std(np.log(df_13_lig['Diameter']))                                                                         # standard deviation of ln(df[Diameter])                                                                     
 df_13_lig['PDF']=log_norm(df_13_lig['Diameter'],mean,std) 
 
+#15_lig files
+os.chdir('/home/fs01/jvg36/Builds/NGA2/examples/ligament/cases/15_lig/spray')
+df_13_lig=pd.read_csv('droplets.017289', delim_whitespace=True, header=None, skiprows=1, usecols=[0], names=['Diameter'])
+
 os.chdir(base_dir)          
 
 # Plot fonts

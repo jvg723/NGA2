@@ -297,6 +297,8 @@ contains
          call param_read('Polymer viscosity ratio',this%nn%visc); this%nn%visc=this%fs%visc_g*this%nn%visc; this%nn%visc_p=this%nn%visc
          ! Powerlaw coefficient in Carreau model
          call param_read('Carreau powerlaw',this%nn%ncoeff)
+         ! Reference time scale in in Carreau model
+         call param_read('Carreau reference timescale',this%nn%alphacoeff)
          ! Configure implicit scalar solver
          this%ss=ddadi(cfg=this%cfg,name='scalar',nst=13)
          ! Setup the solver
