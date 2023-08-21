@@ -50,6 +50,7 @@ module ligament_class
       type(monitor)  :: scfile      !< Scalar monitoring
       type(monitor)  :: sprayfile   !< Spray monitoring file
       type(monitor)  :: dropfile    !< Droplet monitoring file
+      type(monitor)  :: filmfile    !< Film thickness monitoring file
       
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
@@ -67,6 +68,7 @@ module ligament_class
       procedure :: step                    !< Advance nozzle simulation by one time step
       procedure :: final                   !< Finalize nozzle simulation
       procedure :: transfer_vf_to_drops    !< Convert VOF to particles
+      ! procedure :: bag_droplet_gamma       !< Converting film to drops
    end type ligament
    
    
@@ -79,10 +81,13 @@ module ligament_class
    real(WP) :: diam_over_filmthickness=1.0e+1_WP
    real(WP) :: max_eccentricity       =5.0e-1_WP
    real(WP) :: d_threshold            =1.0e-1_WP
+   ! real(WP) :: volume_to_convert
 
    !> Droplet d^3 mean, Sauter mean, and mass median diameters
    real(WP) :: d30,d32,mmd
-   
+
+   ! !> Film monitor file output
+   ! real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
 
 contains
    
@@ -327,6 +332,14 @@ contains
          call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
          call this%cc%film_classify(Lbary=this%vf%Lbary,Gbary=this%vf%Gbary)
          call this%cc%deallocate_lists()
+         ! min_thickness=0.0_WP
+         ! film_volume=0.0_WP
+         ! film_ratio=0.0_WP
+         ! converted_volume=0.0_WP
+         ! my_converted_volume=0.0_WP
+         ! volume_to_convert=0.0_WP
+         ! ! Film stats setup
+         ! call film_statistics_setup(this)
       end block create_and_initialize_ccl
 
       ! Create a Lagrangian spray tracker
@@ -529,7 +542,16 @@ contains
          call this%dropfile%add_column(d30,'d30')
          call this%dropfile%add_column(d32,'d32')
          call this%dropfile%add_column(mmd,'MMD')
-         call this%dropfile%write() 
+         call this%dropfile%write()
+         ! ! Create film thickness monitor
+         ! this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
+         ! call this%filmfile%add_column(this%time%n,'Timestep number')
+         ! call this%filmfile%add_column(this%time%t,'Time')
+         ! call this%filmfile%add_column(min_thickness,'Min thickness')
+         ! call this%filmfile%add_column(film_volume,'Largest Film volume')
+         ! call this%filmfile%add_column(film_ratio,'Vb/V0')
+         ! call this%filmfile%add_column(converted_volume,'VOF-LPT Converted volume')
+         ! call this%filmfile%write()   
       end block create_monitor
 
       
@@ -577,83 +599,83 @@ contains
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
 
-         ! ============= SCALAR SOLVER =======================
+         ! ! ============= SCALAR SOLVER =======================
             
-         ! Reset interpolation metrics to QUICK scheme
-         call this%nn%metric_reset()
+         ! ! Reset interpolation metrics to QUICK scheme
+         ! call this%nn%metric_reset()
             
-         ! Build mid-time scalar
-         this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
+         ! ! Build mid-time scalar
+         ! this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
          
-         ! Explicit calculation of drhoSC/dt from scalar equation
-         call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! ! Explicit calculation of drhoSC/dt from scalar equation
+         ! call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
          
-         ! Perform bquick procedure
-         bquick: block
-            integer :: i,j,k
-            logical, dimension(:,:,:), allocatable :: flag
-            ! Allocate work array
-            allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            ! Assemble explicit residual
-            this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
-            ! Apply it to get explicit scalar prediction
-            this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
-            ! Check cells that require bquick
-            do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-               do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-                  do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-                     if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
-                     &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
-                        flag(i,j,k)=.true.
-                     else
-                        flag(i,j,k)=.false.
-                     end if
-                  end do
-               end do
-            end do
-            ! Adjust metrics
-            call this%nn%metric_adjust(this%SCtmp,flag)
-            ! Clean up
-            deallocate(flag)
-            ! Recompute drhoSC/dt
-            call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
-         end block bquick
+         ! ! Perform bquick procedure
+         ! bquick: block
+         !    integer :: i,j,k
+         !    logical, dimension(:,:,:), allocatable :: flag
+         !    ! Allocate work array
+         !    allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    ! Assemble explicit residual
+         !    this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
+         !    ! Apply it to get explicit scalar prediction
+         !    this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
+         !    ! Check cells that require bquick
+         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
+         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
+         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
+         !             if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
+         !             &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
+         !                flag(i,j,k)=.true.
+         !             else
+         !                flag(i,j,k)=.false.
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         !    ! Adjust metrics
+         !    call this%nn%metric_adjust(this%SCtmp,flag)
+         !    ! Clean up
+         !    deallocate(flag)
+         !    ! Recompute drhoSC/dt
+         !    call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! end block bquick
          
-         ! Add fene sources
-         call this%nn%addsrc_CgradU(this%gradU,this%resSC)
-         call this%nn%addsrc_relax(this%resSC,this%time%dt)
+         ! ! Add fene sources
+         ! call this%nn%addsrc_CgradU(this%gradU,this%resSC)
+         ! call this%nn%addsrc_relax(this%resSC,this%time%dt)
          
-         ! Assemble explicit residual
-         this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
+         ! ! Assemble explicit residual
+         ! this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
          
-         ! Form implicit residual
-         call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
+         ! ! Form implicit residual
+         ! call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
          
-         ! Update scalars
-         this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
+         ! ! Update scalars
+         ! this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
          
-         ! Force the gas scalar to identity
-         gas_scalar_forcing: block
-            integer :: i,j,k
-            do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-               do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-                  do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-                     if (this%nn%mask(i,j,k).eq.0) then
-                        this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-                        this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
-                        this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
-                        this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-                        this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
-                        this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-                     end if
-                  end do
-               end do
-            end do
-         end block gas_scalar_forcing
+         ! ! Force the gas scalar to identity
+         ! gas_scalar_forcing: block
+         !    integer :: i,j,k
+         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
+         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
+         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
+         !             if (this%nn%mask(i,j,k).eq.0) then
+         !                this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+         !                this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
+         !                this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
+         !                this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+         !                this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
+         !                this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         ! end block gas_scalar_forcing
 
-         ! Apply all other boundary conditions on the resulting field
-         call this%nn%apply_bcond(this%time%t,this%time%dt)
-         ! ===================================================
+         ! ! Apply all other boundary conditions on the resulting field
+         ! call this%nn%apply_bcond(this%time%t,this%time%dt)
+         ! ! ===================================================
          
          ! ============ VELOCITY SOLVER ======================
 
@@ -718,51 +740,51 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         ! Add polymer stress term
-         polymer_stress: block
-            integer :: i,j,k,n
-            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-            real(WP), dimension(:,:,:,:), allocatable :: stress
-            ! Allocate work arrays
-            allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-            allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            ! Calculate the polymer relaxation
-            stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
-            ! Build liquid stress tensor
-            do n=1,6
-               stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
-            end do
-            ! Interpolate tensor components to cell edges
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
-                     Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-                     Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-                     Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-                  end do
-               end do
-            end do
-            ! Add divergence of stress to residual
-            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-                     if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-                     &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-                     &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-                     if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-                     &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-                     &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-                     if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-                     &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-                     &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-                  end do
-               end do
-            end do
-            ! Clean up
-            deallocate(stress,Txy,Tyz,Tzx)
-         end block polymer_stress
+         ! ! Add polymer stress term
+         ! polymer_stress: block
+         !    integer :: i,j,k,n
+         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+         !    real(WP), dimension(:,:,:,:), allocatable :: stress
+         !    ! Allocate work arrays
+         !    allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+         !    allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    ! Calculate the polymer relaxation
+         !    stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
+         !    ! Build liquid stress tensor
+         !    do n=1,6
+         !       stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
+         !    end do
+         !    ! Interpolate tensor components to cell edges
+         !    do k=this%cfg%kmin_,this%cfg%kmax_+1
+         !       do j=this%cfg%jmin_,this%cfg%jmax_+1
+         !          do i=this%cfg%imin_,this%cfg%imax_+1
+         !             Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+         !             Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+         !             Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+         !          end do
+         !       end do
+         !    end do
+         !    ! Add divergence of stress to residual
+         !    do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+         !       do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+         !          do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+         !             if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+         !             &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+         !             &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+         !             if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+         !             &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+         !             &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+         !             if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+         !             &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+         !             &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+         !          end do
+         !       end do
+         !    end do
+         !    ! Clean up
+         !    deallocate(stress,Txy,Tyz,Tzx)
+         ! end block polymer_stress
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
@@ -903,12 +925,13 @@ contains
       call this%scfile%write()
       call this%sprayfile%write() 
       call this%dropfile%write() 
+      ! call this%filmfile%write()
       
       
    end subroutine step
    
 
-   !> Finalize nozzle simulation
+   !> Finalize ligament simulation
    subroutine final(this)
       implicit none
       class(ligament), intent(inout) :: this
@@ -1024,37 +1047,83 @@ contains
       ! Perform more detailed CCL in a second pass
       this%cc%max_interface_planes=2
       call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      ! Determine id of largest film
+      ! call get_min_thickness(min_thickness,film_volume,id_largest_film)
       call this%cc%get_min_thickness()
       call this%cc%sort_by_thickness()
       
       ! Loop through identified films and remove those that are thin enough
       remove_film: block
-         use mathtools, only: pi
-         integer :: m,n,i,j,k,np,ip,np_old
-         real(WP) :: Vt,Vl,Hl,Vd
-         
+         use mathtools, only: pi,normalize,cross_product
+         use random,    only: random_uniform
+         use myrandom,  only: random_gamma
+         use irl_fortran_interface
+         integer :: m,n,l,i,j,k,np,ip,np_old,np_start
+         real(WP) :: Vt,Vl,Hl,Vd !,d0
+         ! real(WP), dimension(3) :: nref,tref,sref
+         ! Conversion model
+         ! real(WP) :: alpha, beta, curv_sum, ncurv
+
+         ! call this%vf%get_max()
          ! Loops over film segments contained locally
+         ! np_start=this%lp%np_  ! Remember old number of particles
+         ! d0=1.0_WP
          do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
             
             ! Skip non-liquid films
             if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
-            
+            ! print *,'ts',this%time%n,'rank',this%cfg%rank,'post skip non-liquid films'
             ! Skip films that are still thick enough
             if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.min_filmthickness) cycle
-            
+            ! print *,'ts',this%time%n,'rank',this%cfg%rank,'post skip thick films'
             ! We are still here: transfer the film to drops
-            Vt=0.0_WP      ! Transferred volume
-            Vl=0.0_WP      ! We will keep track incrementally of the liquid volume to transfer to ensure conservation
+            ! i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
+            ! j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
+            ! k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
+            ! ! Compute cell-averaged curvature for cell containing thinnest film segment
+            ! curv_sum=0.0_WP; ncurv=0.0_WP
+            ! do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+            !    if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
+            !       curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
+            !       ncurv=ncurv+1.0_WP
+            !    end if
+            ! end do
+            ! ! Determine gamma distribution parameters                        
+            ! call this%bag_droplet_gamma(this%cc%film_thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)
+            Vt=0.0_WP           ! Transferred volume
+            Vl=0.0_WP           ! We will keep track incrementally of the liquid volume to transfer to ensure conservation
             np_old=this%lp%np_  ! Remember old number of particles
+            ! Vd=pi/6.0_WP*(random_gamma(alpha,.true.)*beta*d0)**3
             do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
                i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
                j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
                k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
+               ! ! Get local coordinate system
+               ! nref=calculateNormal(this%vf%interface_polygon(1,i,j,k))
+               ! select case (maxloc(abs(nref),1))
+               ! case (1)
+               !    tref=normalize([+nref(2),-nref(1),0.0_WP])
+               ! case (2)
+               !    tref=normalize([0.0_WP,+nref(3),-nref(2)])
+               ! case (3)
+               !    tref=normalize([-nref(3),0.0_WP,+nref(1)])
+               ! end select
+               ! sref=cross_product(nref,tref)
                ! Increment liquid volume to remove
                Vl=Vl+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
                ! Estimate drop size based on local film thickness in current cell
                Hl=max(this%cc%film_thickness(i,j,k),min_filmthickness)
                Vd=pi/6.0_WP*(diam_over_filmthickness*Hl)**3
+               ! ! Compute cell-averaged curvature
+               ! curv_sum=0.0_WP; ncurv=0.0_WP
+               ! do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+               !    if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
+               !       curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
+               !       ncurv=ncurv+1.0_WP
+               !    end if
+               ! end do
+               ! ! Determine gamma distribution parameters
+               ! call this%bag_droplet_gamma(this%cc%film_thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)     
                ! Create drops from available liquid volume
                do while (Vl-Vd.gt.0.0_WP)
                   ! Make room for new drop
@@ -1066,6 +1135,7 @@ contains
                   this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
                   this%lp%p(np)%d   =(6.0_WP*Vd/pi)**(1.0_WP/3.0_WP)            !< Assign diameter from model above
                   this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
+                  ! this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*tref+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*sref
                   this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
                   this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
                   this%lp%p(np)%flag=0                                          !< Activate it
@@ -1074,6 +1144,8 @@ contains
                   ! Update tracked volumes
                   Vl=Vl-Vd
                   Vt=Vt+Vd
+                  ! ! Generate new droplet volume
+                  ! Vd=pi/6.0_WP*(random_gamma(alpha,.true.)*beta*d0)**3
                end do
                ! Remove liquid in that cell
                this%vf%VF(i,j,k)=0.0_WP
@@ -1115,6 +1187,47 @@ contains
       call this%lp%sync()
       
    end subroutine transfer_vf_to_drops
+
+   !> Generate a Gamma distribution for bag droplet formation
+   !> where the number PDF is in the form
+   !> p_n(x=d;alpha,beta)=x**(alpha-1)*exp(-x/beta)/beta**alpha/gamma(alpha)
+   !> Adapted from Jackiw and Ashgriz 2022, JFM
+   ! subroutine bag_droplet_gamma(this,h,R,alpha,beta)
+   !    use myrandom, only: random_gamma
+   !    implicit none
+   !    real(WP), intent(in) :: h,R
+   !    real(WP), intent(out) :: alpha,beta
+   !    real(WP) :: d0,Utc,ac,b,lambda_rr,dr,ds,Oh
+   !    real(WP) :: mean, stdev
+   !    class(ligament), intent(inout) :: this
+      
+   !    ! assert h,R != 0
+   !    ! Ligament diameter
+   !    d0=1.0_WP
+   !    ! Retraction speed
+   !    Utc=sqrt(2.0_WP*this%fs%sigma/this%fs%rho_l/h)
+   !    ! Centripetal acceleration
+   !    ac=Utc**2/R
+   !    ! Rim diameter
+   !    b=sqrt(this%fs%sigma/this%fs%rho_l/ac)
+   !    ! Receding rim wavelength
+   !    lambda_rr=4.5_WP*b
+   !    ! RP droplet diameter
+   !    dr=1.89_WP*b
+   !    ! Rim Ohnesorge number
+   !    Oh=this%fs%visc_l/sqrt(this%fs%rho_l*b**3*this%fs%sigma)
+   !    ! Satellite droplet diameter
+   !    ds=dr/sqrt(2.0_WP+3.0_WP*Oh/sqrt(2.0_WP))
+   !    ! Mean and standard deviation of diameter of all modes, normalized by drop diameter
+   !    mean=0.25_WP*(h+b+dr+ds)/d0
+   !    stdev=sqrt(0.25_WP*sum(([h,b,dr,ds]/d0-mean)**2))
+   !    ! Gamma distribution parameters
+   !    alpha=(mean/stdev)**2
+   !    beta=stdev**2/mean
+   !    ! alpha=2.4_WP; beta=0.021_WP
+   !    ! alpha=0.94_WP; beta=0.02_WP
+   !    ! print *,'rank',cfg%rank,'R',R,'rim Oh',Oh,'h,b,dr,ds',h,b,dr,ds,'mean,stdev',mean,stdev,'alpha,beta',alpha,beta,'random_gamma',random_gamma(alpha,.true.)*beta
+   ! end subroutine bag_droplet_gamma
 
    !> Setup spray statistics folders
    subroutine spray_statistics_setup(this)
@@ -1283,6 +1396,77 @@ contains
          end do
       end subroutine quick_sort_partition
    end subroutine spray_statistics
+
+   ! !> Setup film statistics folders
+   ! subroutine film_statistics_setup(this)
+   !    use string,   only: str_medium
+   !    implicit none
+   !    character(len=str_medium) :: filename
+   !    class(ligament), intent(inout) :: this
+
+   !    ! Create directory
+   !    if (this%cfg%amroot) then
+   !       call execute_command_line('mkdir -p film')
+   !    end if
+   ! end subroutine film_statistics_setup
+
+   ! !> Output film statistics (thickness per cell, position, maybe normal or velocity)
+   ! subroutine film_statistics(this,id_largest_film)
+   !    use mpi_f08,  only: MPI_BARRIER
+   !    use messager, only: die
+   !    use string,   only: str_medium
+   !    use irl_fortran_interface
+   !    implicit none
+   !    integer, intent(in) :: id_largest_film
+   !    real(WP) :: buf
+   !    integer :: iunit,rank,i,j,k,ierr,m,n,id
+   !    character(len=str_medium) :: filename
+   !    integer, dimension(:), allocatable :: displacements
+   !    real(WP), dimension(:), allocatable :: vollist_,vollist
+   !    integer, parameter :: col_len=14
+   !    class(ligament), intent(inout) :: this
+
+   !    ! Only output list of thicknesses and positions when ensight outputs and there exist film cells
+   !    if (this%ens_evt%occurs().and.this%cc%n_film_max.gt.0) then
+   !       ! Create new file for timestep
+   !       filename='film/cells.'
+   !       write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
+   !       ! Root write the header
+   !       if (this%cfg%amRoot) then
+   !          ! Open the file
+   !          ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
+   !          open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+   !          if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+   !          ! Write the header
+   !          write(iunit,*) 'ID ','ID min thickness ','Thickness ','Volume ','X ','Y ','Z '
+   !          ! Close the file
+   !          close(iunit)
+   !       end if
+   !       ! Write the thicknesses and positions
+   !       do rank=0,this%cfg%nproc-1
+   !          if (rank.eq.this%cfg%rank) then
+   !             ! Open the file
+   !             open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+   !             if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+   !             ! Output thicknesses and positions
+   !             do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film ! Loops over film segments contained locally
+   !                id=this%cc%film_list(this%cc%film_map_(m))%parent
+   !                do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
+   !                   i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
+   !                   j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
+   !                   k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
+   !                   write(iunit,*) id, this%cc%film_list(this%cc%film_map_(m))%min_thickness, this%cc%film_thickness(i,j,k), this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k), calculateCentroid(this%vf%interface_polygon(1,i,j,k))
+   !                end do
+   !             end do
+   !             ! Close the file
+   !             close(iunit)
+   !          end if
+   !          ! Force synchronization
+   !          call MPI_BARRIER(this%cfg%comm,ierr)
+   !       end do
+   !    end if
+
+   ! end subroutine film_statistics
    
    
 end module ligament_class
