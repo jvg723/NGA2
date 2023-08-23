@@ -6,28 +6,28 @@ X ligament : 2
 Lx : 20  !40
 Ly : 10  !20
 Lz : 10  !20
-nx : 320 !512
-ny : 160 !256
-nz : 160 !256
+nx : 64 !512
+ny : 32 !256
+nz : 32 !256
 
 # Flow conditions
 Reynolds number :      100
 Weber number :         20 
-Viscosity ratio :      0
+Viscosity ratio :      50
 Density ratio :        1000
 Target Re_lambda :     45
 Turbulence intensity : 0.1
 
 # Non-Newtonian modeling
-Carreau powerlaw :              0.5
-Carreau reference timescale :   1.00
-Polymer viscosity ratio :       500
-Polymer relaxation time :       0.01
-Maximum polymer extensibility : 10
+Carreau powerlaw :              1.0
+Carreau reference timescale :   0.0
+Polymer viscosity ratio :       0
+Polymer relaxation time :       0
+Maximum polymer extensibility : 0
 
 # Time integration
-Max timestep size : 5e-3
-Max cfl number :    0.5
+Max timestep size : 2.5e-2
+Max cfl number :    0.9
 Max time :          800
 
 # Pressure solver

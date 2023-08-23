@@ -1,21 +1,21 @@
 !> Definition for a ligament atomization class
 module ligament_class
-   use precision,         only: WP
-   use config_class,      only: config
-   use iterator_class,    only: iterator
-   use ensight_class,     only: ensight
-   use surfmesh_class,    only: surfmesh
-   use partmesh_class,    only: partmesh
-   use hypre_str_class,   only: hypre_str
-   use ddadi_class,       only: ddadi
-   use vfs_class,         only: vfs
-   use fene_class,        only: fene
-   use ccl_class,         only: ccl
-   use lpt_class,         only: lpt
-   use tpns_class,        only: tpns
-   use timetracker_class, only: timetracker
-   use event_class,       only: event
-   use monitor_class,     only: monitor
+   use precision,           only: WP
+   use config_class,        only: config
+   use iterator_class,      only: iterator
+   use ensight_class,       only: ensight
+   use surfmesh_class,      only: surfmesh
+   use partmesh_class,      only: partmesh
+   use hypre_str_class,     only: hypre_str
+   use ddadi_class,         only: ddadi
+   use vfs_class,           only: vfs
+   use fene_class,          only: fene
+   use lpt_class,           only: lpt
+   use tpns_class,          only: tpns
+   use timetracker_class,   only: timetracker
+   use event_class,         only: event
+   use monitor_class,       only: monitor
+   use transfermodel_class, only: transfermodels
    implicit none
    private
    
@@ -28,15 +28,15 @@ module ligament_class
       type(config) :: cfg
       
       !> Flow solver
-      type(vfs)         :: vf       !< Volume fraction solver
-      type(tpns)        :: fs       !< Two-phase flow solver
-      type(hypre_str)   :: ps       !< Structured Hypre linear solver for pressure
-      type(ddadi)       :: vs       !< DDADI solver for velocity 
-      type(ddadi)       :: ss       !< DDADI solver for scalar
-      type(fene)        :: nn       !< FENE model for polymer stress
-      type(ccl)         :: cc       !< Connected component labeling class
-      type(lpt)         :: lp       !< Particle tracking
-      type(timetracker) :: time     !< Time info
+      type(vfs)            :: vf       !< Volume fraction solver
+      type(tpns)           :: fs       !< Two-phase flow solver
+      type(hypre_str)      :: ps       !< Structured Hypre linear solver for pressure
+      type(ddadi)          :: vs       !< DDADI solver for velocity 
+      type(ddadi)          :: ss       !< DDADI solver for scalar
+      type(fene)           :: nn       !< FENE model for polymer stress
+      type(lpt)            :: lp       !< Particle tracking
+      type(timetracker)    :: time     !< Time info
+      type(transfermodels) :: tm
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
@@ -62,32 +62,20 @@ module ligament_class
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
       
-      
    contains
       procedure :: init                    !< Initialize nozzle simulation
       procedure :: step                    !< Advance nozzle simulation by one time step
       procedure :: final                   !< Finalize nozzle simulation
-      procedure :: transfer_vf_to_drops    !< Convert VOF to particles
-      ! procedure :: bag_droplet_gamma       !< Converting film to drops
    end type ligament
-   
-   
+
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=5
-
-   !> Transfer model parameters
-   real(WP) :: filmthickness_over_dx  =5.0e-1_WP
-   real(WP) :: min_filmthickness      =1.0e-4_WP
-   real(WP) :: diam_over_filmthickness=1.0e+1_WP
-   real(WP) :: max_eccentricity       =5.0e-1_WP
-   real(WP) :: d_threshold            =1.0e-1_WP
-   ! real(WP) :: volume_to_convert
 
    !> Droplet d^3 mean, Sauter mean, and mass median diameters
    real(WP) :: d30,d32,mmd
 
-   ! !> Film monitor file output
-   ! real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
+   !> Film monitor file output
+   real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
 
 contains
    
@@ -319,40 +307,25 @@ contains
          this%visc_total=this%fs%visc_l+this%nn%visc_p
       end block total_viscosity
 
-      ! Create a connected-component labeling object
-      create_and_initialize_ccl: block
-         use vfs_class, only: VFlo
-         ! Create the CCL object
-         this%cc=ccl(cfg=this%cfg,name='CCL')
-         this%cc%max_interface_planes=2
-         this%cc%VFlo=VFlo
-         this%cc%dot_threshold=-0.5_WP
-         this%cc%thickness_cutoff=filmthickness_over_dx
-         ! Perform CCL step
-         call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-         call this%cc%film_classify(Lbary=this%vf%Lbary,Gbary=this%vf%Gbary)
-         call this%cc%deallocate_lists()
-         ! min_thickness=0.0_WP
-         ! film_volume=0.0_WP
-         ! film_ratio=0.0_WP
-         ! converted_volume=0.0_WP
-         ! my_converted_volume=0.0_WP
-         ! volume_to_convert=0.0_WP
-         ! ! Film stats setup
-         ! call film_statistics_setup(this)
-      end block create_and_initialize_ccl
-
       ! Create a Lagrangian spray tracker
       create_lpt: block
          ! Create the solver
          this%lp=lpt(cfg=this%cfg,name='spray')
          ! Get particle density from the flow solver
          this%lp%rho=this%fs%rho_l
-         ! Calculate spray stats
-         call spray_statistics_setup(this)
-         call spray_statistics(this)   
+         ! Initialize with zero particles
+         call this%lp%resize(0)
+         ! Get initial particle volume fraction
+         call this%lp%update_VF()  
+         ! ! Calculate spray stats
+         ! call spray_statistics_setup(this)
+         ! call spray_statistics(this)   
       end block create_lpt
-   
+
+      ! Create a transfer model object
+      create_transfermodel: block
+         call this%tm%initialize(cfg=this%cfg,vf=this%vf,fs=this%fs,lp=this%lp)
+      end block create_transfermodel
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -408,7 +381,7 @@ contains
                         this%smesh%var(8,np)=this%Wi(i,j,k)
                         this%smesh%var(9,np)=this%visc_total(i,j,k)
                         this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
-                        this%smesh%var(11,np)=this%cc%film_thickness(i,j,k)
+                        this%smesh%var(11,np)=this%tm%cc%film_thickness(i,j,k)
                         this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
                         this%smesh%var(13,np)=this%nn%SC(i,j,k,4)
                         this%smesh%var(14,np)=this%nn%SC(i,j,k,6)
@@ -532,17 +505,17 @@ contains
          call this%sprayfile%add_column(this%lp%dmax, 'dmax')
          call this%sprayfile%add_column(this%lp%dmean,'dmean')
          call this%sprayfile%write()
-         ! Create a droplet mean/median monitor
-         this%dropfile=monitor(amroot=this%lp%cfg%amRoot,name='dropstats')
-         call this%dropfile%add_column(this%time%n,'Timestep number')
-         call this%dropfile%add_column(this%time%t,'Time')
-         call this%dropfile%add_column(this%time%dt,'Timestep size')
-         call this%dropfile%add_column(this%lp%np,'Droplet number')
-         call this%dropfile%add_column(this%lp%dmean,'d10')
-         call this%dropfile%add_column(d30,'d30')
-         call this%dropfile%add_column(d32,'d32')
-         call this%dropfile%add_column(mmd,'MMD')
-         call this%dropfile%write()
+         ! ! Create a droplet mean/median monitor
+         ! this%dropfile=monitor(amroot=this%lp%cfg%amRoot,name='dropstats')
+         ! call this%dropfile%add_column(this%time%n,'Timestep number')
+         ! call this%dropfile%add_column(this%time%t,'Time')
+         ! call this%dropfile%add_column(this%time%dt,'Timestep size')
+         ! call this%dropfile%add_column(this%lp%np,'Droplet number')
+         ! call this%dropfile%add_column(this%lp%dmean,'d10')
+         ! call this%dropfile%add_column(d30,'d30')
+         ! call this%dropfile%add_column(d32,'d32')
+         ! call this%dropfile%add_column(mmd,'MMD')
+         ! call this%dropfile%write()
          ! ! Create film thickness monitor
          ! this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
          ! call this%filmfile%add_column(this%time%n,'Timestep number')
@@ -833,10 +806,10 @@ contains
       call this%fs%get_div()
 
       ! Perform volume-fraction-to-droplet transfer
-      call this%transfer_vf_to_drops()
+      call this%tm%transfer_vf_to_drops()
 
-      ! Calculate spray statistics
-      call spray_statistics(this)
+      ! ! Calculate spray statistics
+      ! call spray_statistics(this)
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -886,7 +859,7 @@ contains
                            this%smesh%var(8,np)=this%Wi(i,j,k)
                            this%smesh%var(9,np)=this%visc_total(i,j,k)
                            this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
-                           this%smesh%var(11,np)=this%cc%film_thickness(i,j,k)
+                           this%smesh%var(11,np)=this%tm%cc%film_thickness(i,j,k)
                            this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
                            this%smesh%var(13,np)=this%nn%SC(i,j,k,4)
                            this%smesh%var(14,np)=this%nn%SC(i,j,k,6)
@@ -923,8 +896,8 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()
-      call this%sprayfile%write() 
-      call this%dropfile%write() 
+      ! call this%sprayfile%write() 
+      ! call this%dropfile%write() 
       ! call this%filmfile%write()
       
       
@@ -974,428 +947,173 @@ contains
       if (i.ge.pg%imax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
-   !> Transfer vf to drops
-   subroutine transfer_vf_to_drops(this)
-      implicit none
-      class(ligament), intent(inout) :: this
-      
-      ! Perform a first pass with simplest CCL
-      call this%cc%build_lists(VF=this%vf%VF,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-      
-      ! Loop through identified detached structs and remove those that are spherical enough
-      remove_struct: block
-         use mathtools, only: pi
-         integer :: m,n,l,i,j,k,np
-         real(WP) :: lmin,lmax,eccentricity,diam
-         
-         ! Loops over film segments contained locally
-         do m=1,this%cc%n_meta_struct
-            
-            ! Test if sphericity is compatible with transfer
-            lmin=this%cc%meta_structures_list(m)%lengths(3)
-            if (lmin.eq.0.0_WP) lmin=this%cc%meta_structures_list(m)%lengths(2) ! Handle 2D case
-            lmax=this%cc%meta_structures_list(m)%lengths(1)
-            eccentricity=sqrt(1.0_WP-lmin**2/lmax**2)
-            if (eccentricity.gt.max_eccentricity) cycle
-            
-            ! Test if diameter is compatible with transfer
-            diam=(6.0_WP*this%cc%meta_structures_list(m)%vol/pi)**(1.0_WP/3.0_WP)
-            if (diam.eq.0.0_WP.or.diam.gt.d_threshold) cycle
-            
-            ! Create drop from available liquid volume - only one root does that
-            if (this%cc%cfg%amRoot) then
-               ! Make room for new drop
-               np=this%lp%np_+1; call this%lp%resize(np)
-               ! Add the drop
-               this%lp%p(np)%id  =int(1,8)                                                                                 !< Give id (maybe based on break-up model?)
-               this%lp%p(np)%dt  =0.0_WP                                                                                   !< Let the drop find it own integration time
-               this%lp%p(np)%Acol=0.0_WP                                                                                   !< Give zero collision force (axial)
-               this%lp%p(np)%Tcol=0.0_WP                                                                                   !< Give zero collision force (tangential)
-               this%lp%p(np)%d   =diam                                                                                     !< Assign diameter to account for full volume
-               this%lp%p(np)%pos =[this%cc%meta_structures_list(m)%x,this%cc%meta_structures_list(m)%y,this%cc%meta_structures_list(m)%z] !< Place the drop at the liquid barycenter
-               this%lp%p(np)%vel =[this%cc%meta_structures_list(m)%u,this%cc%meta_structures_list(m)%v,this%cc%meta_structures_list(m)%w] !< Assign mean structure velocity as drop velocity
-               this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])                !< Place the drop in the proper cell for the this%lp%cfg
-               this%lp%p(np)%flag=0                                                                                        !< Activate it
-               ! Increment particle counter
-               this%lp%np_=np
-            end if
-            
-            ! Find local structs with matching id
-            do n=this%cc%sync_offset+1,this%cc%sync_offset+this%cc%n_struct
-               if (this%cc%struct_list(this%cc%struct_map_(n))%parent.ne.this%cc%meta_structures_list(m)%id) cycle
-               ! Remove liquid in meta-structure cells
-               do l=1,this%cc%struct_list(this%cc%struct_map_(n))%nnode ! Loops over cells within local
-                  i=this%cc%struct_list(this%cc%struct_map_(n))%node(1,l)
-                  j=this%cc%struct_list(this%cc%struct_map_(n))%node(2,l)
-                  k=this%cc%struct_list(this%cc%struct_map_(n))%node(3,l)
-                  ! Remove liquid in that cell
-                  this%vf%VF(i,j,k)=0.0_WP
-               end do
-            end do
-            
-         end do
-         
-      end block remove_struct
-      
-      ! Sync VF and clean up IRL and band
-      call this%vf%cfg%sync(this%vf%VF)
-      call this%vf%clean_irl_and_band()
-      
-      ! Clean up CCL
-      call this%cc%deallocate_lists()
-      
-      ! Perform more detailed CCL in a second pass
-      this%cc%max_interface_planes=2
-      call this%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-      ! Determine id of largest film
-      ! call get_min_thickness(min_thickness,film_volume,id_largest_film)
-      call this%cc%get_min_thickness()
-      call this%cc%sort_by_thickness()
-      
-      ! Loop through identified films and remove those that are thin enough
-      remove_film: block
-         use mathtools, only: pi,normalize,cross_product
-         use random,    only: random_uniform
-         use myrandom,  only: random_gamma
-         use irl_fortran_interface
-         integer :: m,n,l,i,j,k,np,ip,np_old,np_start
-         real(WP) :: Vt,Vl,Hl,Vd !,d0
-         ! real(WP), dimension(3) :: nref,tref,sref
-         ! Conversion model
-         ! real(WP) :: alpha, beta, curv_sum, ncurv
-
-         ! call this%vf%get_max()
-         ! Loops over film segments contained locally
-         ! np_start=this%lp%np_  ! Remember old number of particles
-         ! d0=1.0_WP
-         do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
-            
-            ! Skip non-liquid films
-            if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
-            ! print *,'ts',this%time%n,'rank',this%cfg%rank,'post skip non-liquid films'
-            ! Skip films that are still thick enough
-            if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.min_filmthickness) cycle
-            ! print *,'ts',this%time%n,'rank',this%cfg%rank,'post skip thick films'
-            ! We are still here: transfer the film to drops
-            ! i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
-            ! j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
-            ! k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
-            ! ! Compute cell-averaged curvature for cell containing thinnest film segment
-            ! curv_sum=0.0_WP; ncurv=0.0_WP
-            ! do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-            !    if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
-            !       curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
-            !       ncurv=ncurv+1.0_WP
-            !    end if
-            ! end do
-            ! ! Determine gamma distribution parameters                        
-            ! call this%bag_droplet_gamma(this%cc%film_thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)
-            Vt=0.0_WP           ! Transferred volume
-            Vl=0.0_WP           ! We will keep track incrementally of the liquid volume to transfer to ensure conservation
-            np_old=this%lp%np_  ! Remember old number of particles
-            ! Vd=pi/6.0_WP*(random_gamma(alpha,.true.)*beta*d0)**3
-            do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
-               i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
-               j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
-               k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
-               ! ! Get local coordinate system
-               ! nref=calculateNormal(this%vf%interface_polygon(1,i,j,k))
-               ! select case (maxloc(abs(nref),1))
-               ! case (1)
-               !    tref=normalize([+nref(2),-nref(1),0.0_WP])
-               ! case (2)
-               !    tref=normalize([0.0_WP,+nref(3),-nref(2)])
-               ! case (3)
-               !    tref=normalize([-nref(3),0.0_WP,+nref(1)])
-               ! end select
-               ! sref=cross_product(nref,tref)
-               ! Increment liquid volume to remove
-               Vl=Vl+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
-               ! Estimate drop size based on local film thickness in current cell
-               Hl=max(this%cc%film_thickness(i,j,k),min_filmthickness)
-               Vd=pi/6.0_WP*(diam_over_filmthickness*Hl)**3
-               ! ! Compute cell-averaged curvature
-               ! curv_sum=0.0_WP; ncurv=0.0_WP
-               ! do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-               !    if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
-               !       curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
-               !       ncurv=ncurv+1.0_WP
-               !    end if
-               ! end do
-               ! ! Determine gamma distribution parameters
-               ! call this%bag_droplet_gamma(this%cc%film_thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)     
-               ! Create drops from available liquid volume
-               do while (Vl-Vd.gt.0.0_WP)
-                  ! Make room for new drop
-                  np=this%lp%np_+1; call this%lp%resize(np)
-                  ! Add the drop
-                  this%lp%p(np)%id  =int(1,8)                                   !< Give id (maybe based on break-up model?)
-                  this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
-                  this%lp%p(np)%Acol=0.0_WP                                     !< Give zero collision force (axial)
-                  this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
-                  this%lp%p(np)%d   =(6.0_WP*Vd/pi)**(1.0_WP/3.0_WP)            !< Assign diameter from model above
-                  this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
-                  ! this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*tref+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*sref
-                  this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
-                  this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
-                  this%lp%p(np)%flag=0                                          !< Activate it
-                  ! Increment particle counter
-                  this%lp%np_=np
-                  ! Update tracked volumes
-                  Vl=Vl-Vd
-                  Vt=Vt+Vd
-                  ! ! Generate new droplet volume
-                  ! Vd=pi/6.0_WP*(random_gamma(alpha,.true.)*beta*d0)**3
-               end do
-               ! Remove liquid in that cell
-               this%vf%VF(i,j,k)=0.0_WP
-            end do
-            
-            ! Based on how many particles were created, decide what to do with left-over volume
-            if (Vt.eq.0.0_WP) then ! No particle was created, we need one...
-               ! Add one last drop for remaining liquid volume
-               np=this%lp%np_+1; call this%lp%resize(np)
-               ! Add the drop
-               this%lp%p(np)%id  =int(1,8)                                   !< Give id (maybe based on break-up model?)
-               this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
-               this%lp%p(np)%Acol=0.0_WP                                     !< Give zero collision force (axial)
-               this%lp%p(np)%Tcol=0.0_WP                                     !< Give zero collision force (tangential)
-               this%lp%p(np)%d   =(6.0_WP*Vl/pi)**(1.0_WP/3.0_WP)            !< Assign diameter based on remaining liquid volume
-               this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
-               this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
-               this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
-               this%lp%p(np)%flag=0                                          !< Activate it
-               ! Increment particle counter
-               this%lp%np_=np
-            else ! Some particles were created, make them all larger
-               do ip=np_old+1,this%lp%np_
-                  this%lp%p(ip)%d=this%lp%p(ip)%d*((Vt+Vl)/Vt)**(1.0_WP/3.0_WP)
-               end do
-            end if
-         end do
-         
-      end block remove_film
-      
-      ! Sync VF and clean up IRL and band
-      call this%vf%cfg%sync(this%vf%VF)
-      call this%vf%clean_irl_and_band()
-      
-      ! Clean up CCL
-      call this%cc%deallocate_lists()
-      
-      ! Resync the spray
-      call this%lp%sync()
-      
-   end subroutine transfer_vf_to_drops
-
-   !> Generate a Gamma distribution for bag droplet formation
-   !> where the number PDF is in the form
-   !> p_n(x=d;alpha,beta)=x**(alpha-1)*exp(-x/beta)/beta**alpha/gamma(alpha)
-   !> Adapted from Jackiw and Ashgriz 2022, JFM
-   ! subroutine bag_droplet_gamma(this,h,R,alpha,beta)
-   !    use myrandom, only: random_gamma
+   ! !> Setup spray statistics folders
+   ! subroutine spray_statistics_setup(this)
+   !    use messager, only: die
+   !    use string,   only: str_medium
    !    implicit none
-   !    real(WP), intent(in) :: h,R
-   !    real(WP), intent(out) :: alpha,beta
-   !    real(WP) :: d0,Utc,ac,b,lambda_rr,dr,ds,Oh
-   !    real(WP) :: mean, stdev
+   !    character(len=str_medium) :: filename
+   !    integer :: iunit,ierr
+   !    class(ligament), intent(inout) :: this
+
+   !    ! Create directory
+   !    if (this%cfg%amroot) then
+   !       call execute_command_line('mkdir -p spray')
+   !       ! call mkdir('spray')
+   !       ! call mkdir('spray-all')
+   !       filename='spray/droplets'
+   !       open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+   !       if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+   !       ! Write the header
+   !       write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','total_vel','X ','Y ','Z '
+   !       ! Close the file
+   !       close(iunit)         
+   !    end if
+   ! end subroutine spray_statistics_setup
+
+   ! !> Output spray statistics (velocity vs. diameter, mean/median diameters)
+   ! subroutine spray_statistics(this)
+   !    use mpi_f08,  only: MPI_REDUCE,MPI_SUM,MPI_BARRIER,MPI_GATHERV
+   !    use messager, only: die
+   !    use parallel, only: MPI_REAL_WP
+   !    use string,   only: str_medium
+   !    implicit none
+   !    real(WP) :: buf,d0,d2,d3,d10
+   !    integer :: iunit,rank,i,ierr
+   !    character(len=str_medium) :: filename
+   !    integer, dimension(:), allocatable :: displacements
+   !    real(WP), dimension(:), allocatable :: vollist_,vollist
+   !    integer, parameter :: col_len=14
    !    class(ligament), intent(inout) :: this
       
-   !    ! assert h,R != 0
-   !    ! Ligament diameter
-   !    d0=1.0_WP
-   !    ! Retraction speed
-   !    Utc=sqrt(2.0_WP*this%fs%sigma/this%fs%rho_l/h)
-   !    ! Centripetal acceleration
-   !    ac=Utc**2/R
-   !    ! Rim diameter
-   !    b=sqrt(this%fs%sigma/this%fs%rho_l/ac)
-   !    ! Receding rim wavelength
-   !    lambda_rr=4.5_WP*b
-   !    ! RP droplet diameter
-   !    dr=1.89_WP*b
-   !    ! Rim Ohnesorge number
-   !    Oh=this%fs%visc_l/sqrt(this%fs%rho_l*b**3*this%fs%sigma)
-   !    ! Satellite droplet diameter
-   !    ds=dr/sqrt(2.0_WP+3.0_WP*Oh/sqrt(2.0_WP))
-   !    ! Mean and standard deviation of diameter of all modes, normalized by drop diameter
-   !    mean=0.25_WP*(h+b+dr+ds)/d0
-   !    stdev=sqrt(0.25_WP*sum(([h,b,dr,ds]/d0-mean)**2))
-   !    ! Gamma distribution parameters
-   !    alpha=(mean/stdev)**2
-   !    beta=stdev**2/mean
-   !    ! alpha=2.4_WP; beta=0.021_WP
-   !    ! alpha=0.94_WP; beta=0.02_WP
-   !    ! print *,'rank',cfg%rank,'R',R,'rim Oh',Oh,'h,b,dr,ds',h,b,dr,ds,'mean,stdev',mean,stdev,'alpha,beta',alpha,beta,'random_gamma',random_gamma(alpha,.true.)*beta
-   ! end subroutine bag_droplet_gamma
+   !    ! Create safe np/d0
+   !    d0=real(max(this%lp%np,1),WP)
+   !    ! Initialize others
+   !    d2=0.0_WP;d3=0.0_WP;mmd=0.0_WP
+   !    ! Only output list of diameters and velocities when ensight outputs and there exist particles
+   !    if (this%ens_evt%occurs().and.this%lp%np.gt.0) then
+   !    ! if (lp%np.gt.0) then
+   !       ! Create new file for timestep
+   !       filename='spray/droplets.'
+   !       write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
+   !       ! Root write the header
+   !       if (this%cfg%amRoot) then
+   !          ! Open the file
+   !          ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
+   !          open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+   !          if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+   !          ! Write the header
+   !          write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z '
+   !          ! Close the file
+   !          close(iunit)
+   !       end if
+   !       ! Write the diameters and velocities
+   !       do rank=0,this%cfg%nproc-1
+   !          if (rank.eq.this%cfg%rank) then
+   !             ! Open the file
+   !             ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
+   !             open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+   !             if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+   !             ! Output diameters and velocities
+   !             do i=1,this%lp%np_
+   !                write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3)  
+   !             end do
+   !             ! Close the file
+   !             close(iunit)
+   !          end if
+   !          ! Force synchronization
+   !          call MPI_BARRIER(this%cfg%comm,ierr)
+   !       end do
+   !    end if
 
-   !> Setup spray statistics folders
-   subroutine spray_statistics_setup(this)
-      use messager, only: die
-      use string,   only: str_medium
-      implicit none
-      character(len=str_medium) :: filename
-      integer :: iunit,ierr
-      class(ligament), intent(inout) :: this
+   !    ! Calculate diameter moments
+   !    ! d3 is used as total droplet volume
+   !    allocate(vollist_(1:this%lp%np_))
+   !    d2=0.0_WP
+   !    d3=0.0_WP
+   !    do i=1,this%lp%np_
+   !       d2=d2+this%lp%p(i)%d**2
+   !       d3=d3+this%lp%p(i)%d**3
+   !       vollist_(i)=this%lp%p(i)%d**3
+   !    end do
+   !    ! call MPI_ALLREDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d2=buf
+   !    ! call MPI_ALLREDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d3=buf
+   !    call MPI_REDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d2=buf
+   !    call MPI_REDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d3=buf
 
-      ! Create directory
-      if (this%cfg%amroot) then
-         call execute_command_line('mkdir -p spray')
-         ! call mkdir('spray')
-         ! call mkdir('spray-all')
-         filename='spray/droplets'
-         open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
-         if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-         ! Write the header
-         write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','total_vel','X ','Y ','Z '
-         ! Close the file
-         close(iunit)         
-      end if
-   end subroutine spray_statistics_setup
-
-   !> Output spray statistics (velocity vs. diameter, mean/median diameters)
-   subroutine spray_statistics(this)
-      use mpi_f08,  only: MPI_REDUCE,MPI_SUM,MPI_BARRIER,MPI_GATHERV
-      use messager, only: die
-      use parallel, only: MPI_REAL_WP
-      use string,   only: str_medium
-      implicit none
-      real(WP) :: buf,d0,d2,d3,d10
-      integer :: iunit,rank,i,ierr
-      character(len=str_medium) :: filename
-      integer, dimension(:), allocatable :: displacements
-      real(WP), dimension(:), allocatable :: vollist_,vollist
-      integer, parameter :: col_len=14
-      class(ligament), intent(inout) :: this
+   !    ! Gather droplet volumes
+   !    ! if (cfg%amroot) then
+   !       allocate(vollist(1:this%lp%np))
+   !       allocate(displacements(this%cfg%nproc)); displacements=0
+   !       do rank=1,this%cfg%nproc-1
+   !          displacements(rank+1)=displacements(rank)+this%lp%np_proc(rank)
+   !       end do
+   !    ! end if
+   !    call MPI_GATHERV(vollist_,this%lp%np_,MPI_REAL_WP,vollist,this%lp%np_proc,displacements,MPI_REAL_WP,0,this%cfg%comm,ierr)
       
-      ! Create safe np/d0
-      d0=real(max(this%lp%np,1),WP)
-      ! Initialize others
-      d2=0.0_WP;d3=0.0_WP;mmd=0.0_WP
-      ! Only output list of diameters and velocities when ensight outputs and there exist particles
-      if (this%ens_evt%occurs().and.this%lp%np.gt.0) then
-      ! if (lp%np.gt.0) then
-         ! Create new file for timestep
-         filename='spray/droplets.'
-         write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
-         ! Root write the header
-         if (this%cfg%amRoot) then
-            ! Open the file
-            ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
-            open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
-            if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-            ! Write the header
-            write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z '
-            ! Close the file
-            close(iunit)
-         end if
-         ! Write the diameters and velocities
-         do rank=0,this%cfg%nproc-1
-            if (rank.eq.this%cfg%rank) then
-               ! Open the file
-               ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
-               open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
-               if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-               ! Output diameters and velocities
-               do i=1,this%lp%np_
-                  write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3)  
-               end do
-               ! Close the file
-               close(iunit)
-            end if
-            ! Force synchronization
-            call MPI_BARRIER(this%cfg%comm,ierr)
-         end do
-      end if
-
-      ! Calculate diameter moments
-      ! d3 is used as total droplet volume
-      allocate(vollist_(1:this%lp%np_))
-      d2=0.0_WP
-      d3=0.0_WP
-      do i=1,this%lp%np_
-         d2=d2+this%lp%p(i)%d**2
-         d3=d3+this%lp%p(i)%d**3
-         vollist_(i)=this%lp%p(i)%d**3
-      end do
-      ! call MPI_ALLREDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d2=buf
-      ! call MPI_ALLREDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d3=buf
-      call MPI_REDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d2=buf
-      call MPI_REDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d3=buf
-
-      ! Gather droplet volumes
-      ! if (cfg%amroot) then
-         allocate(vollist(1:this%lp%np))
-         allocate(displacements(this%cfg%nproc)); displacements=0
-         do rank=1,this%cfg%nproc-1
-            displacements(rank+1)=displacements(rank)+this%lp%np_proc(rank)
-         end do
-      ! end if
-      call MPI_GATHERV(vollist_,this%lp%np_,MPI_REAL_WP,vollist,this%lp%np_proc,displacements,MPI_REAL_WP,0,this%cfg%comm,ierr)
-      
-      if (this%cfg%amroot) then
-         ! Sort volumes
-         call quick_sort(vollist)
-         ! Calculate d_30, d_32 (Sauter mean), and mass median diameters
-         if (d2.le.0.0_WP) then
-            d32=0.0_WP
-            d30=0.0_WP
-         else
-            d32=d3/d2
-            d30=(d3/d0)**(1.0_WP/3.0_WP)
-         end if
-         buf=0.0_WP
-         volloop: do i=1,this%lp%np
-            buf=buf+vollist(i)
-            if (buf.ge.0.5_WP*d3) then
-               mmd=vollist(i)**(1.0_WP/3.0_WP)
-               exit volloop
-            end if
-         end do volloop
-      end if
-   contains
-      ! Volume sorting
-      recursive subroutine quick_sort(vol)
-         implicit none
-         real(WP), dimension(:)   :: vol
-         integer :: imark
-         if (size(vol).gt.1) then
-            call quick_sort_partition(vol,imark)
-            call quick_sort(vol(     :imark-1))
-            call quick_sort(vol(imark:       ))
-         end if
-      end subroutine quick_sort
-      subroutine quick_sort_partition(vol,marker)
-         implicit none
-         real(WP), dimension(  :) :: vol
-         integer , intent(out)    :: marker
-         integer :: ii,jj
-         real(WP) :: dtmp,x
-         x=vol(1)
-         ii=0; jj=size(vol)+1
-         do
-            jj=jj-1
-            do
-               if (vol(jj).le.x) exit
-               jj=jj-1
-            end do
-            ii=ii+1
-            do
-               if (vol(ii).ge.x) exit
-               ii=ii+1
-            end do
-            if (ii.lt.jj) then
-               dtmp =vol(  ii); vol(  ii)=vol(  jj); vol(  jj)=dtmp
-            else if (ii.eq.jj) then
-               marker=ii+1
-               return
-            else
-               marker=ii
-               return
-            endif
-         end do
-      end subroutine quick_sort_partition
-   end subroutine spray_statistics
+   !    if (this%cfg%amroot) then
+   !       ! Sort volumes
+   !       call quick_sort(vollist)
+   !       ! Calculate d_30, d_32 (Sauter mean), and mass median diameters
+   !       if (d2.le.0.0_WP) then
+   !          d32=0.0_WP
+   !          d30=0.0_WP
+   !       else
+   !          d32=d3/d2
+   !          d30=(d3/d0)**(1.0_WP/3.0_WP)
+   !       end if
+   !       buf=0.0_WP
+   !       volloop: do i=1,this%lp%np
+   !          buf=buf+vollist(i)
+   !          if (buf.ge.0.5_WP*d3) then
+   !             mmd=vollist(i)**(1.0_WP/3.0_WP)
+   !             exit volloop
+   !          end if
+   !       end do volloop
+   !    end if
+   ! contains
+   !    ! Volume sorting
+   !    recursive subroutine quick_sort(vol)
+   !       implicit none
+   !       real(WP), dimension(:)   :: vol
+   !       integer :: imark
+   !       if (size(vol).gt.1) then
+   !          call quick_sort_partition(vol,imark)
+   !          call quick_sort(vol(     :imark-1))
+   !          call quick_sort(vol(imark:       ))
+   !       end if
+   !    end subroutine quick_sort
+   !    subroutine quick_sort_partition(vol,marker)
+   !       implicit none
+   !       real(WP), dimension(  :) :: vol
+   !       integer , intent(out)    :: marker
+   !       integer :: ii,jj
+   !       real(WP) :: dtmp,x
+   !       x=vol(1)
+   !       ii=0; jj=size(vol)+1
+   !       do
+   !          jj=jj-1
+   !          do
+   !             if (vol(jj).le.x) exit
+   !             jj=jj-1
+   !          end do
+   !          ii=ii+1
+   !          do
+   !             if (vol(ii).ge.x) exit
+   !             ii=ii+1
+   !          end do
+   !          if (ii.lt.jj) then
+   !             dtmp =vol(  ii); vol(  ii)=vol(  jj); vol(  jj)=dtmp
+   !          else if (ii.eq.jj) then
+   !             marker=ii+1
+   !             return
+   !          else
+   !             marker=ii
+   !             return
+   !          endif
+   !       end do
+   !    end subroutine quick_sort_partition
+   ! end subroutine spray_statistics
 
    ! !> Setup film statistics folders
    ! subroutine film_statistics_setup(this)
@@ -1410,7 +1128,7 @@ contains
    !    end if
    ! end subroutine film_statistics_setup
 
-   ! !> Output film statistics (thickness per cell, position, maybe normal or velocity)
+   ! ! !> Output film statistics (thickness per cell, position, maybe normal or velocity)
    ! subroutine film_statistics(this,id_largest_film)
    !    use mpi_f08,  only: MPI_BARRIER
    !    use messager, only: die
