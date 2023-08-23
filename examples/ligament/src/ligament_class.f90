@@ -37,6 +37,7 @@ module ligament_class
       type(lpt)            :: lp       !< Particle tracking
       type(timetracker)    :: time     !< Time info
       type(transfermodels) :: tm
+      type(event)          :: ppevt
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
@@ -74,8 +75,8 @@ module ligament_class
    !> Droplet d^3 mean, Sauter mean, and mass median diameters
    real(WP) :: d30,d32,mmd
 
-   !> Film monitor file output
-   real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
+   ! !> Film monitor file output
+   ! real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
 
 contains
    
@@ -527,6 +528,16 @@ contains
          ! call this%filmfile%write()   
       end block create_monitor
 
+      ! Create a specialized post-processing file
+      create_postproc: block
+         use param, only: param_read
+         ! Create event for data postprocessing
+         this%ppevt=event(time=this%time,name='Postproc output')
+         call param_read('Postproc output period',this%ppevt%tper)
+         ! Perform the output
+         if (this%ppevt%occurs()) call postproc_data(this)
+      end block create_postproc
+
       
    end subroutine init
    
@@ -899,6 +910,9 @@ contains
       ! call this%sprayfile%write() 
       ! call this%dropfile%write() 
       ! call this%filmfile%write()
+
+      ! Specialized post-processing
+      if (this%ppevt%occurs()) call postproc_data(this)
       
       
    end subroutine step
@@ -947,173 +961,232 @@ contains
       if (i.ge.pg%imax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
-   ! !> Setup spray statistics folders
-   ! subroutine spray_statistics_setup(this)
-   !    use messager, only: die
-   !    use string,   only: str_medium
-   !    implicit none
-   !    character(len=str_medium) :: filename
-   !    integer :: iunit,ierr
-   !    class(ligament), intent(inout) :: this
+!> Specialized subroutine that outputs the vertical liquid distribution
+   subroutine postproc_data(this)
+      use string,    only: str_medium
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
+      use parallel,  only: MPI_REAL_WP
+      implicit none
+      integer :: iunit,ierr,i,j,k
+      real(WP), dimension(:), allocatable :: myvol,vol
+      real(WP), dimension(:), allocatable :: myxbc,xbc
+      real(WP), dimension(:), allocatable :: myybc,ybc
+      real(WP), dimension(:), allocatable :: myzbc,zbc
+      character(len=str_medium) :: filename,timestamp
+      class(ligament), intent(inout) :: this
+      ! Allocate vertical line storage
+      allocate(myvol(this%vf%cfg%jmin:this%vf%cfg%jmax)); myvol=0.0_WP
+      allocate(myxbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); myxbc=0.0_WP
+      allocate(myybc(this%vf%cfg%jmin:this%vf%cfg%jmax)); myybc=0.0_WP
+      allocate(myzbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); myzbc=0.0_WP
+      allocate(  vol(this%vf%cfg%jmin:this%vf%cfg%jmax)); vol  =0.0_WP
+      allocate(  xbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); xbc  =0.0_WP
+      allocate(  ybc(this%vf%cfg%jmin:this%vf%cfg%jmax)); ybc  =0.0_WP
+      allocate(  zbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); zbc  =0.0_WP
+      ! Initialize local data to zero
+      myvol=0.0_WP; myxbc=0.0_WP; myybc=0.0_WP; myzbc=0.0_WP
+      ! Integrate all data over x and y
+      do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+         do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+            do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+               myvol(k)=myvol(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
+               myxbc(k)=myxbc(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)*this%vf%Lbary(1,i,j,k)
+               myybc(k)=myybc(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)*this%vf%Lbary(2,i,j,k)
+               myzbc(k)=myzbc(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)*this%vf%Lbary(3,i,j,k)
+            end do
+         end do
+      end do
+      ! All-reduce the data
+      call MPI_ALLREDUCE(myvol,vol,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(myxbc,xbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(myybc,ybc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(myzbc,zbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      ! If root, print it out
+      if (this%vf%cfg%amRoot) then
+         call execute_command_line('mkdir -p geometry')
+         filename='barrycenter_'
+         write(timestamp,'(es12.5)') this%time%t
+         open(newunit=iunit,file='geometry/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'z','volume','xlig','ylig','zlig'
+         do k=this%vf%cfg%kmin,this%vf%cfg%kmax
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') this%vf%cfg%zm(k),vol(k),xbc(k),ybc(k),zbc(k)
+         end do
+         close(iunit)
+      end if
+      ! Deallocate work arrays
+      deallocate(myvol,vol)
+      deallocate(myxbc,xbc)
+      deallocate(myybc,ybc)
+      deallocate(myzbc,zbc)
+   end subroutine postproc_data
 
-   !    ! Create directory
-   !    if (this%cfg%amroot) then
-   !       call execute_command_line('mkdir -p spray')
-   !       ! call mkdir('spray')
-   !       ! call mkdir('spray-all')
-   !       filename='spray/droplets'
-   !       open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
-   !       if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-   !       ! Write the header
-   !       write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','total_vel','X ','Y ','Z '
-   !       ! Close the file
-   !       close(iunit)         
-   !    end if
-   ! end subroutine spray_statistics_setup
+   !> Setup spray statistics folders
+   subroutine spray_statistics_setup(this)
+      use messager, only: die
+      use string,   only: str_medium
+      implicit none
+      character(len=str_medium) :: filename
+      integer :: iunit,ierr
+      class(ligament), intent(inout) :: this
 
-   ! !> Output spray statistics (velocity vs. diameter, mean/median diameters)
-   ! subroutine spray_statistics(this)
-   !    use mpi_f08,  only: MPI_REDUCE,MPI_SUM,MPI_BARRIER,MPI_GATHERV
-   !    use messager, only: die
-   !    use parallel, only: MPI_REAL_WP
-   !    use string,   only: str_medium
-   !    implicit none
-   !    real(WP) :: buf,d0,d2,d3,d10
-   !    integer :: iunit,rank,i,ierr
-   !    character(len=str_medium) :: filename
-   !    integer, dimension(:), allocatable :: displacements
-   !    real(WP), dimension(:), allocatable :: vollist_,vollist
-   !    integer, parameter :: col_len=14
-   !    class(ligament), intent(inout) :: this
+      ! Create directory
+      if (this%cfg%amroot) then
+         call execute_command_line('mkdir -p spray')
+         ! call mkdir('spray')
+         ! call mkdir('spray-all')
+         filename='spray/droplets'
+         open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+         if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+         ! Write the header
+         write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','total_vel','X ','Y ','Z '
+         ! Close the file
+         close(iunit)         
+      end if
+   end subroutine spray_statistics_setup
+
+   !> Output spray statistics (velocity vs. diameter, mean/median diameters)
+   subroutine spray_statistics(this)
+      use mpi_f08,  only: MPI_REDUCE,MPI_SUM,MPI_BARRIER,MPI_GATHERV
+      use messager, only: die
+      use parallel, only: MPI_REAL_WP
+      use string,   only: str_medium
+      implicit none
+      real(WP) :: buf,d0,d2,d3,d10
+      integer :: iunit,rank,i,ierr
+      character(len=str_medium) :: filename
+      integer, dimension(:), allocatable :: displacements
+      real(WP), dimension(:), allocatable :: vollist_,vollist
+      integer, parameter :: col_len=14
+      class(ligament), intent(inout) :: this
       
-   !    ! Create safe np/d0
-   !    d0=real(max(this%lp%np,1),WP)
-   !    ! Initialize others
-   !    d2=0.0_WP;d3=0.0_WP;mmd=0.0_WP
-   !    ! Only output list of diameters and velocities when ensight outputs and there exist particles
-   !    if (this%ens_evt%occurs().and.this%lp%np.gt.0) then
-   !    ! if (lp%np.gt.0) then
-   !       ! Create new file for timestep
-   !       filename='spray/droplets.'
-   !       write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
-   !       ! Root write the header
-   !       if (this%cfg%amRoot) then
-   !          ! Open the file
-   !          ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
-   !          open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
-   !          if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-   !          ! Write the header
-   !          write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z '
-   !          ! Close the file
-   !          close(iunit)
-   !       end if
-   !       ! Write the diameters and velocities
-   !       do rank=0,this%cfg%nproc-1
-   !          if (rank.eq.this%cfg%rank) then
-   !             ! Open the file
-   !             ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
-   !             open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
-   !             if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-   !             ! Output diameters and velocities
-   !             do i=1,this%lp%np_
-   !                write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3)  
-   !             end do
-   !             ! Close the file
-   !             close(iunit)
-   !          end if
-   !          ! Force synchronization
-   !          call MPI_BARRIER(this%cfg%comm,ierr)
-   !       end do
-   !    end if
+      ! Create safe np/d0
+      d0=real(max(this%lp%np,1),WP)
+      ! Initialize others
+      d2=0.0_WP;d3=0.0_WP;mmd=0.0_WP
+      ! Only output list of diameters and velocities when ensight outputs and there exist particles
+      if (this%ens_evt%occurs().and.this%lp%np.gt.0) then
+      ! if (lp%np.gt.0) then
+         ! Create new file for timestep
+         filename='spray/droplets.'
+         write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
+         ! Root write the header
+         if (this%cfg%amRoot) then
+            ! Open the file
+            ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
+            open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+            if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+            ! Write the header
+            write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z '
+            ! Close the file
+            close(iunit)
+         end if
+         ! Write the diameters and velocities
+         do rank=0,this%cfg%nproc-1
+            if (rank.eq.this%cfg%rank) then
+               ! Open the file
+               ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
+               open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+               if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
+               ! Output diameters and velocities
+               do i=1,this%lp%np_
+                  write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3)  
+               end do
+               ! Close the file
+               close(iunit)
+            end if
+            ! Force synchronization
+            call MPI_BARRIER(this%cfg%comm,ierr)
+         end do
+      end if
 
-   !    ! Calculate diameter moments
-   !    ! d3 is used as total droplet volume
-   !    allocate(vollist_(1:this%lp%np_))
-   !    d2=0.0_WP
-   !    d3=0.0_WP
-   !    do i=1,this%lp%np_
-   !       d2=d2+this%lp%p(i)%d**2
-   !       d3=d3+this%lp%p(i)%d**3
-   !       vollist_(i)=this%lp%p(i)%d**3
-   !    end do
-   !    ! call MPI_ALLREDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d2=buf
-   !    ! call MPI_ALLREDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d3=buf
-   !    call MPI_REDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d2=buf
-   !    call MPI_REDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d3=buf
+      ! Calculate diameter moments
+      ! d3 is used as total droplet volume
+      allocate(vollist_(1:this%lp%np_))
+      d2=0.0_WP
+      d3=0.0_WP
+      do i=1,this%lp%np_
+         d2=d2+this%lp%p(i)%d**2
+         d3=d3+this%lp%p(i)%d**3
+         vollist_(i)=this%lp%p(i)%d**3
+      end do
+      ! call MPI_ALLREDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d2=buf
+      ! call MPI_ALLREDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr); d3=buf
+      call MPI_REDUCE(d2,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d2=buf
+      call MPI_REDUCE(d3,buf,1,MPI_REAL_WP,MPI_SUM,0,this%cfg%comm,ierr); d3=buf
 
-   !    ! Gather droplet volumes
-   !    ! if (cfg%amroot) then
-   !       allocate(vollist(1:this%lp%np))
-   !       allocate(displacements(this%cfg%nproc)); displacements=0
-   !       do rank=1,this%cfg%nproc-1
-   !          displacements(rank+1)=displacements(rank)+this%lp%np_proc(rank)
-   !       end do
-   !    ! end if
-   !    call MPI_GATHERV(vollist_,this%lp%np_,MPI_REAL_WP,vollist,this%lp%np_proc,displacements,MPI_REAL_WP,0,this%cfg%comm,ierr)
+      ! Gather droplet volumes
+      ! if (cfg%amroot) then
+         allocate(vollist(1:this%lp%np))
+         allocate(displacements(this%cfg%nproc)); displacements=0
+         do rank=1,this%cfg%nproc-1
+            displacements(rank+1)=displacements(rank)+this%lp%np_proc(rank)
+         end do
+      ! end if
+      call MPI_GATHERV(vollist_,this%lp%np_,MPI_REAL_WP,vollist,this%lp%np_proc,displacements,MPI_REAL_WP,0,this%cfg%comm,ierr)
       
-   !    if (this%cfg%amroot) then
-   !       ! Sort volumes
-   !       call quick_sort(vollist)
-   !       ! Calculate d_30, d_32 (Sauter mean), and mass median diameters
-   !       if (d2.le.0.0_WP) then
-   !          d32=0.0_WP
-   !          d30=0.0_WP
-   !       else
-   !          d32=d3/d2
-   !          d30=(d3/d0)**(1.0_WP/3.0_WP)
-   !       end if
-   !       buf=0.0_WP
-   !       volloop: do i=1,this%lp%np
-   !          buf=buf+vollist(i)
-   !          if (buf.ge.0.5_WP*d3) then
-   !             mmd=vollist(i)**(1.0_WP/3.0_WP)
-   !             exit volloop
-   !          end if
-   !       end do volloop
-   !    end if
-   ! contains
-   !    ! Volume sorting
-   !    recursive subroutine quick_sort(vol)
-   !       implicit none
-   !       real(WP), dimension(:)   :: vol
-   !       integer :: imark
-   !       if (size(vol).gt.1) then
-   !          call quick_sort_partition(vol,imark)
-   !          call quick_sort(vol(     :imark-1))
-   !          call quick_sort(vol(imark:       ))
-   !       end if
-   !    end subroutine quick_sort
-   !    subroutine quick_sort_partition(vol,marker)
-   !       implicit none
-   !       real(WP), dimension(  :) :: vol
-   !       integer , intent(out)    :: marker
-   !       integer :: ii,jj
-   !       real(WP) :: dtmp,x
-   !       x=vol(1)
-   !       ii=0; jj=size(vol)+1
-   !       do
-   !          jj=jj-1
-   !          do
-   !             if (vol(jj).le.x) exit
-   !             jj=jj-1
-   !          end do
-   !          ii=ii+1
-   !          do
-   !             if (vol(ii).ge.x) exit
-   !             ii=ii+1
-   !          end do
-   !          if (ii.lt.jj) then
-   !             dtmp =vol(  ii); vol(  ii)=vol(  jj); vol(  jj)=dtmp
-   !          else if (ii.eq.jj) then
-   !             marker=ii+1
-   !             return
-   !          else
-   !             marker=ii
-   !             return
-   !          endif
-   !       end do
-   !    end subroutine quick_sort_partition
-   ! end subroutine spray_statistics
+      if (this%cfg%amroot) then
+         ! Sort volumes
+         call quick_sort(vollist)
+         ! Calculate d_30, d_32 (Sauter mean), and mass median diameters
+         if (d2.le.0.0_WP) then
+            d32=0.0_WP
+            d30=0.0_WP
+         else
+            d32=d3/d2
+            d30=(d3/d0)**(1.0_WP/3.0_WP)
+         end if
+         buf=0.0_WP
+         volloop: do i=1,this%lp%np
+            buf=buf+vollist(i)
+            if (buf.ge.0.5_WP*d3) then
+               mmd=vollist(i)**(1.0_WP/3.0_WP)
+               exit volloop
+            end if
+         end do volloop
+      end if
+   contains
+      ! Volume sorting
+      recursive subroutine quick_sort(vol)
+         implicit none
+         real(WP), dimension(:)   :: vol
+         integer :: imark
+         if (size(vol).gt.1) then
+            call quick_sort_partition(vol,imark)
+            call quick_sort(vol(     :imark-1))
+            call quick_sort(vol(imark:       ))
+         end if
+      end subroutine quick_sort
+      subroutine quick_sort_partition(vol,marker)
+         implicit none
+         real(WP), dimension(  :) :: vol
+         integer , intent(out)    :: marker
+         integer :: ii,jj
+         real(WP) :: dtmp,x
+         x=vol(1)
+         ii=0; jj=size(vol)+1
+         do
+            jj=jj-1
+            do
+               if (vol(jj).le.x) exit
+               jj=jj-1
+            end do
+            ii=ii+1
+            do
+               if (vol(ii).ge.x) exit
+               ii=ii+1
+            end do
+            if (ii.lt.jj) then
+               dtmp =vol(  ii); vol(  ii)=vol(  jj); vol(  jj)=dtmp
+            else if (ii.eq.jj) then
+               marker=ii+1
+               return
+            else
+               marker=ii
+               return
+            endif
+         end do
+      end subroutine quick_sort_partition
+   end subroutine spray_statistics
 
    ! !> Setup film statistics folders
    ! subroutine film_statistics_setup(this)

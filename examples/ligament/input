@@ -36,3 +36,6 @@ Pressure iteration : 100
 
 # Ensight output
 Ensight output period : 1
+
+# Post-processing output
+Postproc output period : 1
