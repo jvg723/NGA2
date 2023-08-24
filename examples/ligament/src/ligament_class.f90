@@ -318,9 +318,9 @@ contains
          call this%lp%resize(0)
          ! Get initial particle volume fraction
          call this%lp%update_VF()  
-         ! ! Calculate spray stats
-         ! call spray_statistics_setup(this)
-         ! call spray_statistics(this)   
+         ! Calculate spray stats
+         call spray_statistics_setup(this)
+         call spray_statistics(this)   
       end block create_lpt
 
       ! Create a transfer model object
@@ -534,6 +534,8 @@ contains
          ! Create event for data postprocessing
          this%ppevt=event(time=this%time,name='Postproc output')
          call param_read('Postproc output period',this%ppevt%tper)
+         ! Create directory to write to
+         if (this%cfg%amRoot) call execute_command_line('mkdir -p geometry')
          ! Perform the output
          if (this%ppevt%occurs()) call postproc_data(this)
       end block create_postproc
@@ -1003,7 +1005,7 @@ contains
       call MPI_ALLREDUCE(myzbc,zbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
       ! If root, print it out
       if (this%vf%cfg%amRoot) then
-         call execute_command_line('mkdir -p geometry')
+         ! call execute_command_line('mkdir -p geometry')
          filename='barrycenter_'
          write(timestamp,'(es12.5)') this%time%t
          open(newunit=iunit,file='geometry/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
