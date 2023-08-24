@@ -318,9 +318,9 @@ contains
          call this%lp%resize(0)
          ! Get initial particle volume fraction
          call this%lp%update_VF()  
-         ! ! Calculate spray stats
-         ! call spray_statistics_setup(this)
-         ! call spray_statistics(this)   
+         ! Calculate spray stats
+         call spray_statistics_setup(this)
+         call spray_statistics(this)   
       end block create_lpt
 
       ! Create a transfer model object
@@ -333,7 +333,7 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=14,name='plic')
+         this%smesh=surfmesh(nvar=13,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='curv'
          this%smesh%varname(3)='edge_sensor'
@@ -344,10 +344,9 @@ contains
          this%smesh%varname(8)='z_velocity'
          this%smesh%varname(9)='visc_l'
          this%smesh%varname(10)='SRmag'
-         this%smesh%varname(11)='film'
-         this%smesh%varname(12)='cxx'
-         this%smesh%varname(13)='cyy'
-         this%smesh%varname(14)='czz'
+         this%smesh%varname(11)='cxx'
+         this%smesh%varname(12)='cyy'
+         this%smesh%varname(13)='czz'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -365,7 +364,6 @@ contains
          this%smesh%var(11,:)=0.0_WP
          this%smesh%var(12,:)=0.0_WP
          this%smesh%var(13,:)=0.0_WP
-         this%smesh%var(14,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -382,10 +380,9 @@ contains
                         this%smesh%var(8,np)=this%Wi(i,j,k)
                         this%smesh%var(9,np)=this%visc_total(i,j,k)
                         this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
-                        this%smesh%var(11,np)=this%tm%cc%film_thickness(i,j,k)
-                        this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
-                        this%smesh%var(13,np)=this%nn%SC(i,j,k,4)
-                        this%smesh%var(14,np)=this%nn%SC(i,j,k,6)
+                        this%smesh%var(11,np)=this%nn%SC(i,j,k,1)
+                        this%smesh%var(12,np)=this%nn%SC(i,j,k,4)
+                        this%smesh%var(13,np)=this%nn%SC(i,j,k,6)
                      end if
                   end do
                end do
@@ -819,8 +816,8 @@ contains
       ! Perform volume-fraction-to-droplet transfer
       call this%tm%transfer_vf_to_drops()
 
-      ! ! Calculate spray statistics
-      ! call spray_statistics(this)
+      ! Calculate spray statistics
+      call spray_statistics(this)
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -853,7 +850,6 @@ contains
             this%smesh%var(11,:)=0.0_WP
             this%smesh%var(12,:)=0.0_WP
             this%smesh%var(13,:)=0.0_WP
-            this%smesh%var(14,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -870,10 +866,9 @@ contains
                            this%smesh%var(8,np)=this%Wi(i,j,k)
                            this%smesh%var(9,np)=this%visc_total(i,j,k)
                            this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
-                           this%smesh%var(11,np)=this%tm%cc%film_thickness(i,j,k)
-                           this%smesh%var(12,np)=this%nn%SC(i,j,k,1)
-                           this%smesh%var(13,np)=this%nn%SC(i,j,k,4)
-                           this%smesh%var(14,np)=this%nn%SC(i,j,k,6)
+                           this%smesh%var(11,np)=this%nn%SC(i,j,k,1)
+                           this%smesh%var(12,np)=this%nn%SC(i,j,k,4)
+                           this%smesh%var(13,np)=this%nn%SC(i,j,k,6)
                         end if
                      end do
                   end do
@@ -907,8 +902,8 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()
-      ! call this%sprayfile%write() 
-      ! call this%dropfile%write() 
+      call this%sprayfile%write() 
+      call this%dropfile%write() 
       ! call this%filmfile%write()
 
       ! Specialized post-processing
@@ -989,10 +984,10 @@ contains
       do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
          do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
             do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-               myvol(k)=myvol(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
-               myxbc(k)=myxbc(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)*this%vf%Lbary(1,i,j,k)
-               myybc(k)=myybc(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)*this%vf%Lbary(2,i,j,k)
-               myzbc(k)=myzbc(k)+this%vf%VF(i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)*this%vf%Lbary(3,i,j,k)
+               myvol(k)=myvol(k)+this%vf%VF(i,j,k)     *this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
+               myxbc(k)=myxbc(k)+this%vf%Lbary(1,i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
+               myybc(k)=myybc(k)+this%vf%Lbary(2,i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
+               myzbc(k)=myzbc(k)+this%vf%Lbary(3,i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
             end do
          end do
       end do
