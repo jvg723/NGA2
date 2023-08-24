@@ -12,7 +12,7 @@ nz : 32 !256
 
 # Flow conditions
 Reynolds number :      100
-Weber number :         20 
+Weber number :         10
 Viscosity ratio :      50
 Density ratio :        1000
 Target Re_lambda :     45
