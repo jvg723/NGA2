@@ -965,53 +965,53 @@ contains
       use parallel,  only: MPI_REAL_WP
       implicit none
       integer :: iunit,ierr,i,j,k
-      real(WP), dimension(:), allocatable :: myvol,vol
+      real(WP), dimension(:), allocatable :: myVOF,VOF
       real(WP), dimension(:), allocatable :: myxbc,xbc
       real(WP), dimension(:), allocatable :: myybc,ybc
       real(WP), dimension(:), allocatable :: myzbc,zbc
       character(len=str_medium) :: filename,timestamp
       class(ligament), intent(inout) :: this
       ! Allocate vertical line storage
-      allocate(myvol(this%vf%cfg%jmin:this%vf%cfg%jmax)); myvol=0.0_WP
+      allocate(myVOF(this%vf%cfg%jmin:this%vf%cfg%jmax)); myVOF=0.0_WP
       allocate(myxbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); myxbc=0.0_WP
       allocate(myybc(this%vf%cfg%jmin:this%vf%cfg%jmax)); myybc=0.0_WP
       allocate(myzbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); myzbc=0.0_WP
-      allocate(  vol(this%vf%cfg%jmin:this%vf%cfg%jmax)); vol  =0.0_WP
+      allocate(  VOF(this%vf%cfg%jmin:this%vf%cfg%jmax)); VOF  =0.0_WP
       allocate(  xbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); xbc  =0.0_WP
       allocate(  ybc(this%vf%cfg%jmin:this%vf%cfg%jmax)); ybc  =0.0_WP
       allocate(  zbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); zbc  =0.0_WP
       ! Initialize local data to zero
-      myvol=0.0_WP; myxbc=0.0_WP; myybc=0.0_WP; myzbc=0.0_WP
+      myVOF=0.0_WP; myxbc=0.0_WP; myybc=0.0_WP; myzbc=0.0_WP
       ! Integrate all data over x and y
       do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
          do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
             do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-               myvol(k)=myvol(k)+this%vf%VF(i,j,k)     *this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
-               myxbc(k)=myxbc(k)+this%vf%Lbary(1,i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
-               myybc(k)=myybc(k)+this%vf%Lbary(2,i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
-               myzbc(k)=myzbc(k)+this%vf%Lbary(3,i,j,k)*this%vf%cfg%dx(i)*this%vf%cfg%dy(j)
+               myVOF(k)=myVOF(k)+this%vf%VF(i,j,k)      
+               myxbc(k)=myxbc(k)+this%vf%Lbary(1,i,j,k)
+               myybc(k)=myybc(k)+this%vf%Lbary(2,i,j,k)
+               myzbc(k)=myzbc(k)+this%vf%Lbary(3,i,j,k)
             end do
          end do
       end do
       ! All-reduce the data
-      call MPI_ALLREDUCE(myvol,vol,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(myxbc,xbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(myybc,ybc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(myzbc,zbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(myVOF,VOF,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr); VOF=VOF/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
+      call MPI_ALLREDUCE(myxbc,xbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr); xbc=xbc/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
+      call MPI_ALLREDUCE(myybc,ybc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr); ybc=ybc/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
+      call MPI_ALLREDUCE(myzbc,zbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr); zbc=zbc/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
       ! If root, print it out
       if (this%vf%cfg%amRoot) then
          ! call execute_command_line('mkdir -p geometry')
          filename='barrycenter_'
          write(timestamp,'(es12.5)') this%time%t
          open(newunit=iunit,file='geometry/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'z','volume','xlig','ylig','zlig'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'z','VOF','xlig','ylig','zlig'
          do k=this%vf%cfg%kmin,this%vf%cfg%kmax
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') this%vf%cfg%zm(k),vol(k),xbc(k),ybc(k),zbc(k)
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') this%vf%cfg%zm(k),VOF(k),xbc(k),ybc(k),zbc(k)
          end do
          close(iunit)
       end if
       ! Deallocate work arrays
-      deallocate(myvol,vol)
+      deallocate(myVOF,VOF)
       deallocate(myxbc,xbc)
       deallocate(myybc,ybc)
       deallocate(myzbc,zbc)
