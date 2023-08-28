@@ -113,11 +113,12 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
 			! Create a VOF solver
-		   vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
+		   !vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF')
 		   ! Initialize to a droplet and a pool
-		   center=[0.00_WP,0.03_WP,0.0_WP]
+		   center=[0.0_WP,0.01_WP,0.0_WP]
 		   radius=0.002_WP
-		   depth =0.01_WP
+		   depth =0.005_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
 					do i=vf%cfg%imino_,vf%cfg%imaxo_
