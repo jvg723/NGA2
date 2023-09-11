@@ -994,10 +994,10 @@ contains
          end do
       end do
       ! All-reduce the data
-      call MPI_ALLREDUCE(myvol,vol,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) !; vol=Vvol/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
-      call MPI_ALLREDUCE(myxbc,xbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) !; xbc=xbc/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
-      call MPI_ALLREDUCE(myybc,ybc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) !; ybc=ybc/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
-      call MPI_ALLREDUCE(myzbc,zbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) !; zbc=zbc/real(this%vf%cfg%nx*this%vf%cfg%ny,WP)
+      call MPI_ALLREDUCE(myvol,vol,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) 
+      call MPI_ALLREDUCE(myxbc,xbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) 
+      call MPI_ALLREDUCE(myybc,ybc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) 
+      call MPI_ALLREDUCE(myzbc,zbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) 
       xbc=xbc/vol
       ybc=ybc/vol
       zbc=zbc/vol
