@@ -40,7 +40,7 @@ module simulation
    
    !> Problem definition
    real(WP), dimension(3) :: center
-   real(WP) :: radius,Vrise,Uin
+   real(WP) :: radius,Vrise,Uin,Uin_old
    real(WP) :: Ycent,Ycent_old,Ycent_0
    real(WP) :: Kc,tau_i,tau_d
    real(WP) :: ek,e_sum
@@ -79,6 +79,50 @@ contains
       isIn=.false.
       if (j.eq.pg%jmin) isIn=.true.
    end function ym_locator
+
+   !> Function that localizes the x+ side of the domain
+   function xp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imax+1) isIn=.true.
+   end function xp_locator
+
+   !> Function that localizes the x- side of the domain
+   function xm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin) isIn=.true.
+   end function xm_locator
+
+   !> Function that localizes the z+ side of the domain
+   function zp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmax+1) isIn=.true.
+   end function zp_locator
+
+   !> Function that localizes the x- side of the domain
+   function zm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmin) isIn=.true.
+   end function zm_locator
    
    
    !> Routine that computes rise velocity
@@ -266,6 +310,8 @@ contains
          ek=Ycent_0-Ycent
          ! Sum errors up to current time
          e_sum=e_sum+ek*time%dt
+         ! Rember old inflow velocity at preivous time step
+         Uin_old=0.0_WP
          ! Inflow velocity
          Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
          ! Setup inflow at top of domain
@@ -285,9 +331,10 @@ contains
 
       ! Create a FENE model 
       create_fene: block 
-         use multiscalar_class, only: bquick
+         use multiscalar_class, only: bcond,bquick,neumann,dirichlet
          use fene_class,        only: fenecr,oldroydb
-         integer :: i,j,k
+         type(bcond), pointer :: mybc
+         integer :: i,j,k,n
          ! Create FENE model solver
          nn=fene(cfg=cfg,model=oldroydb,scheme=bquick,name='FENE')
          ! Assign unity density for simplicity
@@ -302,6 +349,13 @@ contains
          call param_read('Carreau powerlaw exponent',nn%ncoeff)
          ! Reference time scale in in Carreau model
          call param_read('Carreau reference timescale',nn%alphacoeff)
+         ! Neumann BC on each face
+         call nn%add_bcond(name='yp_sc',type=dirichlet,locator=yp_locator,dir='yp')
+         call nn%add_bcond(name='ym_sc',type=neumann,locator=ym_locator,dir='ym')
+         ! call nn%add_bcond(name='zp_sc',type=neumann,locator=zp_locator,dir='zp')
+         ! call nn%add_bcond(name='zm_sc',type=neumann,locator=zm_locator,dir='zm')
+         ! call nn%add_bcond(name='xp_sc',type=neumann,locator=xp_locator,dir='xp')
+         ! call nn%add_bcond(name='xm_sc',type=neumann,locator=xm_locator,dir='xm')
          ! Configure implicit scalar solver
          ss=ddadi(cfg=cfg,name='scalar',nst=13)
          ! Setup the solver
@@ -310,13 +364,22 @@ contains
          nn%SC(:,:,:,1)=1.0_WP !< Cxx
          nn%SC(:,:,:,4)=1.0_WP !< Cyy
          nn%SC(:,:,:,6)=1.0_WP !< Czz
+         ! Set tr(C)=I at at top of domain
+         ! call nn%get_bcond('yp_sc',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    nn%SC(i,j,k,1)=1.0_WP !< Cxx
+         !    nn%SC(i,j,k,4)=1.0_WP !< Cyy
+         !    nn%SC(i,j,k,6)=1.0_WP !< Czz
+         ! end do
+         ! Apply other boundary conditions
+         call nn%apply_bcond(time%t,time%dt)
       end block create_fene
-
+      
       ! Total liquid viscosity
       total_viscosity: block
          visc_total=fs%visc_l+nn%visc
       end block total_viscosity
-
 
       ! Add Ensight output
       create_ensight: block
@@ -427,6 +490,8 @@ contains
             ek=Ycent_0-Ycent
             ! Sum errors up to current time
             e_sum=e_sum+ek*time%dt
+            ! Rember old inflow velocity at preivous time step
+            Uin_old=Uin
             ! Inflow velocity
             Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
             ! Setup inflow at top of domain
@@ -454,8 +519,8 @@ contains
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
-         ! ! Prepare new staggered viscosity (at n+1)
-         ! call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
+         ! Prepare new staggered viscosity (at n+1)
+         call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
 
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
@@ -476,6 +541,7 @@ contains
             
             ! Perform bquick procedure
             bquick: block
+               use fene_class, only: fenecr,fenep,oldroydb
                integer :: i,j,k
                logical, dimension(:,:,:), allocatable :: flag
                ! Allocate work array
@@ -485,18 +551,33 @@ contains
                ! Apply it to get explicit scalar prediction
                SCtmp=2.0_WP*nn%SC-nn%SCold+resSC
                ! Check cells that require bquick
-               do k=nn%cfg%kmino_,nn%cfg%kmaxo_
-                  do j=nn%cfg%jmino_,nn%cfg%jmaxo_
-                     do i=nn%cfg%imino_,nn%cfg%imaxo_
-                        if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
-                        &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
-                           flag(i,j,k)=.true.
-                        else
-                           flag(i,j,k)=.false.
-                        end if
+               select case (nn%model)
+                  case (fenecr,fenep)
+                     do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                        do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                           do i=nn%cfg%imino_,nn%cfg%imaxo_
+                              if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
+                              &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
+                                 flag(i,j,k)=.true.
+                              else
+                                 flag(i,j,k)=.false.
+                              end if
+                           end do
+                        end do
                      end do
-                  end do
-               end do
+                  case (oldroydb)
+                     do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                        do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                           do i=nn%cfg%imino_,nn%cfg%imaxo_
+                              if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP) then
+                                 flag(i,j,k)=.true.
+                              else
+                                 flag(i,j,k)=.false.
+                              end if
+                           end do
+                        end do
+                     end do
+               end select
                ! Adjust metrics
                call nn%metric_adjust(SCtmp,flag)
                ! Clean up
@@ -550,57 +631,58 @@ contains
 
             ! Include shear-thinning effect here by adjusting viscosity based on mid-time strain-rate
             ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
-            shear_thinning: block
-               integer :: i,j,k
-               real(WP) :: liq_vol,gas_vol,tot_vol
-               real(WP) :: visc_l
-               real(WP), dimension(:,:,:,:), allocatable :: SR
-               ! Allocate SR array
-               allocate(SR(1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               ! Calculate strain rate
-               call fs%get_strainrate(SR)
-               ! Update polymer viscosity using Carreau model
-               call nn%update_visc_p(SR)
-               ! Handle mixture viscosity
-               do k=fs%cfg%kmino_+1,fs%cfg%kmaxo_
-                  do j=fs%cfg%jmino_+1,fs%cfg%jmaxo_
-                     do i=fs%cfg%imino_+1,fs%cfg%imaxo_
-                        ! VISC at [xm,ym,zm] - direct sum in x/y/z
-                        liq_vol=sum(vf%Lvol(:,:,:,i,j,k))
-                        gas_vol=sum(vf%Gvol(:,:,:,i,j,k))
-                        tot_vol=gas_vol+liq_vol
-                        visc_l=fs%visc_l+nn%visc_p(i,j,k)
-                        !fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
-                        fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
-                        ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
-                        liq_vol=sum(vf%Lvol(0,0,:,i,j,k))+sum(vf%Lvol(1,0,:,i-1,j,k))+sum(vf%Lvol(0,1,:,i,j-1,k))+sum(vf%Lvol(1,1,:,i-1,j-1,k))
-                        gas_vol=sum(vf%Gvol(0,0,:,i,j,k))+sum(vf%Gvol(1,0,:,i-1,j,k))+sum(vf%Gvol(0,1,:,i,j-1,k))+sum(vf%Gvol(1,1,:,i-1,j-1,k))
-                        tot_vol=gas_vol+liq_vol
-                        visc_l=fs%visc_l+sum(fs%itp_xy(:,:,i,j,k)*nn%visc_p(i-1:i,j-1:j,k))
-                        !fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_xy(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
-                        fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_xy(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
-                        ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
-                        liq_vol=sum(vf%Lvol(:,0,0,i,j,k))+sum(vf%Lvol(:,1,0,i,j-1,k))+sum(vf%Lvol(:,0,1,i,j,k-1))+sum(vf%Lvol(:,1,1,i,j-1,k-1))
-                        gas_vol=sum(vf%Gvol(:,0,0,i,j,k))+sum(vf%Gvol(:,1,0,i,j-1,k))+sum(vf%Gvol(:,0,1,i,j,k-1))+sum(vf%Gvol(:,1,1,i,j-1,k-1))
-                        tot_vol=gas_vol+liq_vol
-                        visc_l=fs%visc_l+sum(fs%itp_yz(:,:,i,j,k)*nn%visc_p(i,j-1:j,k-1:k))
-                        !fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_yz(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
-                        fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_yz(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
-                        ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
-                        liq_vol=sum(vf%Lvol(0,:,0,i,j,k))+sum(vf%Lvol(0,:,1,i,j,k-1))+sum(vf%Lvol(1,:,0,i-1,j,k))+sum(vf%Lvol(1,:,1,i-1,j,k-1))
-                        gas_vol=sum(vf%Gvol(0,:,0,i,j,k))+sum(vf%Gvol(0,:,1,i,j,k-1))+sum(vf%Gvol(1,:,0,i-1,j,k))+sum(vf%Gvol(1,:,1,i-1,j,k-1))
-                        tot_vol=gas_vol+liq_vol
-                        visc_l=fs%visc_l+sum(fs%itp_xz(:,:,i,j,k)*nn%visc_p(i-1:i,j,k-1:k))
-                        !fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_zx(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
-                        fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_zx(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
-                     end do
-                  end do
-               end do
-               ! Total liquid viscosity
-               visc_total=fs%visc_l+nn%visc_p
-               ! Deallocate SR array
-               deallocate(SR)
-            end block shear_thinning
+            ! shear_thinning: block
+            !    integer :: i,j,k
+            !    real(WP) :: liq_vol,gas_vol,tot_vol
+            !    real(WP) :: visc_l
+            !    real(WP), dimension(:,:,:,:), allocatable :: SR
+            !    ! Allocate SR array
+            !    allocate(SR(1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    ! Calculate strain rate
+            !    call fs%get_strainrate(SR)
+            !    ! Update polymer viscosity using Carreau model
+            !    ! call nn%update_visc_p(SR)
+            !    ! Handle mixture viscosity
+            !    do k=fs%cfg%kmino_+1,fs%cfg%kmaxo_
+            !       do j=fs%cfg%jmino_+1,fs%cfg%jmaxo_
+            !          do i=fs%cfg%imino_+1,fs%cfg%imaxo_
+            !             ! VISC at [xm,ym,zm] - direct sum in x/y/z
+            !             liq_vol=sum(vf%Lvol(:,:,:,i,j,k))
+            !             gas_vol=sum(vf%Gvol(:,:,:,i,j,k))
+            !             tot_vol=gas_vol+liq_vol
+            !             ! visc_l=fs%visc_l+nn%visc_p(i,j,k)
+            !             visc_l=fs%visc_l+nn%visc
+            !             !fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
+            !             fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+            !             ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
+            !             liq_vol=sum(vf%Lvol(0,0,:,i,j,k))+sum(vf%Lvol(1,0,:,i-1,j,k))+sum(vf%Lvol(0,1,:,i,j-1,k))+sum(vf%Lvol(1,1,:,i-1,j-1,k))
+            !             gas_vol=sum(vf%Gvol(0,0,:,i,j,k))+sum(vf%Gvol(1,0,:,i-1,j,k))+sum(vf%Gvol(0,1,:,i,j-1,k))+sum(vf%Gvol(1,1,:,i-1,j-1,k))
+            !             tot_vol=gas_vol+liq_vol
+            !             visc_l=fs%visc_l+sum(fs%itp_xy(:,:,i,j,k)*nn%visc_p(i-1:i,j-1:j,k))
+            !             !fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_xy(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
+            !             fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_xy(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+            !             ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
+            !             liq_vol=sum(vf%Lvol(:,0,0,i,j,k))+sum(vf%Lvol(:,1,0,i,j-1,k))+sum(vf%Lvol(:,0,1,i,j,k-1))+sum(vf%Lvol(:,1,1,i,j-1,k-1))
+            !             gas_vol=sum(vf%Gvol(:,0,0,i,j,k))+sum(vf%Gvol(:,1,0,i,j-1,k))+sum(vf%Gvol(:,0,1,i,j,k-1))+sum(vf%Gvol(:,1,1,i,j-1,k-1))
+            !             tot_vol=gas_vol+liq_vol
+            !             visc_l=fs%visc_l+sum(fs%itp_yz(:,:,i,j,k)*nn%visc_p(i,j-1:j,k-1:k))
+            !             !fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_yz(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
+            !             fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_yz(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+            !             ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
+            !             liq_vol=sum(vf%Lvol(0,:,0,i,j,k))+sum(vf%Lvol(0,:,1,i,j,k-1))+sum(vf%Lvol(1,:,0,i-1,j,k))+sum(vf%Lvol(1,:,1,i-1,j,k-1))
+            !             gas_vol=sum(vf%Gvol(0,:,0,i,j,k))+sum(vf%Gvol(0,:,1,i,j,k-1))+sum(vf%Gvol(1,:,0,i-1,j,k))+sum(vf%Gvol(1,:,1,i-1,j,k-1))
+            !             tot_vol=gas_vol+liq_vol
+            !             visc_l=fs%visc_l+sum(fs%itp_xz(:,:,i,j,k)*nn%visc_p(i-1:i,j,k-1:k))
+            !             !fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_zx(i,j,k)=(visc_l*liq_vol+fs%visc_g*gas_vol)/tot_vol
+            !             fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) fs%visc_zx(i,j,k)=fs%visc_g*visc_l/(visc_l*gas_vol/tot_vol+fs%visc_g*liq_vol/tot_vol+epsilon(1.0_WP))
+            !          end do
+            !       end do
+            !    end do
+            !    ! Total liquid viscosity
+            !    visc_total=fs%visc_l+nn%visc_p
+            !    ! Deallocate SR array
+            !    deallocate(SR)
+            ! end block shear_thinning
 
             ! Preliminary mass and momentum transport step at the interface
             call fs%prepare_advection_upwind(dt=time%dt)
@@ -609,7 +691,20 @@ contains
             call fs%get_dmomdt(resU,resV,resW)
             
             ! Add momentum source terms
+            ! Add in af
             call fs%addsrc_gravity(resU,resV,resW)
+
+            ! ! Body forcing from non-inertial frame
+            ! moving_frame: block
+            !    integer :: i,j,k
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
+            !          end do
+            !       end do
+            !    end do
+            ! end block moving_frame
 
             ! Add polymer stress term
             polymer_stress: block
