@@ -167,6 +167,7 @@ module tpns_class
       procedure :: get_max                                !< Calculate maximum field values
       procedure :: interp_vel                             !< Calculate interpolated velocity
       procedure :: get_strainrate                         !< Calculate deviatoric part of strain rate tensor
+      procedure :: get_strainrate_interpolated            !< Calculate strain rate tensor based on Ui/Wi/Vi
       procedure :: get_gradu                              !< Calculate velocity gradient tensor
       procedure :: get_vorticity                          !< Calculate vorticity tensor
       procedure :: get_mfr                                !< Calculate outgoing MFR through each bcond
@@ -2070,6 +2071,60 @@ contains
 	   deallocate(dudy,dudz,dvdx,dvdz,dwdx,dwdy)
       
    end subroutine get_strainrate
+
+   !> Calculate the strain rate tensor, including approximations for domain overlap
+   !> This only uses interpolated velocities passed to this function (we could imagine a more local one that uses U/V/W too)
+   subroutine get_strainrate_interpolated(this,gradU,SR)
+      use messager, only: die
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      class(tpns), intent(inout) :: this
+      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: SR !< Needs to be (1:6,imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: i,j,k,ierr
+      
+      ! Calculate inside
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               SR(1,i,j,k)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,3,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
+               SR(2,i,j,k)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,3,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
+               SR(3,i,j,k)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,3,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
+               SR(4,i,j,k)=0.5_WP*(gradU(2,1,i,j,k)+gradU(1,2,i,j,k))
+               SR(5,i,j,k)=0.5_WP*(gradU(3,2,i,j,k)+gradU(2,3,i,j,k))
+               SR(6,i,j,k)=0.5_WP*(gradU(3,1,i,j,k)+gradU(1,3,i,j,k))
+            end do
+         end do
+      end do
+      
+      ! Apply a Neumann condition in non-periodic directions
+      if (.not.this%cfg%xper) then
+         if (this%cfg%iproc.eq.1)            SR(:,this%cfg%imin-1,:,:)=SR(:,this%cfg%imin,:,:)
+         if (this%cfg%iproc.eq.this%cfg%npx) SR(:,this%cfg%imax+1,:,:)=SR(:,this%cfg%imax,:,:)
+      end if
+      if (.not.this%cfg%yper) then
+         if (this%cfg%jproc.eq.1)            SR(:,:,this%cfg%jmin-1,:)=SR(:,:,this%cfg%jmin,:)
+         if (this%cfg%jproc.eq.this%cfg%npy) SR(:,:,this%cfg%jmax+1,:)=SR(:,:,this%cfg%jmax,:)
+      end if
+      if (.not.this%cfg%zper) then
+         if (this%cfg%kproc.eq.1)            SR(:,:,:,this%cfg%kmin-1)=SR(:,:,:,this%cfg%kmin)
+         if (this%cfg%kproc.eq.this%cfg%npz) SR(:,:,:,this%cfg%kmax+1)=SR(:,:,:,this%cfg%kmax)
+      end if
+      
+      ! Ensure zero in walls
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               if (this%mask(i,j,k).eq.1) SR(:,i,j,k)=0.0_WP
+            end do
+         end do
+      end do
+      
+      ! Sync it
+      call this%cfg%sync(SR)
+      
+   end subroutine get_strainrate_interpolated
 
    
    !> Calculate the velocity gradient tensor from U/V/W
