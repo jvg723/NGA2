@@ -2,12 +2,12 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx : 0.208
-Ly : 0.78
-Lz : 0.00208
-nx : 64
-ny : 240
-nz : 1
+Lx :	0.025
+Ly :	0.1
+Lz :	0.00025
+nx :	128
+ny :	512
+nz :	1
 
 # Fluid properties                              # (Owkes and Desjardins 2016)
 Gravity :                     0 -9.81 0         # Case 1              Case 2
@@ -30,8 +30,8 @@ Maximum polymer extensibility : 10
 
 # Time integration
 Max timestep size : 2e-4
-Max cfl number :    2
-Max time :          50
+Max cfl number :    2.5
+Max time :          2
 
 # Pressure solver
 Pressure tolerance : 1e-4
