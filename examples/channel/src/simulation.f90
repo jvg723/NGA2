@@ -322,10 +322,10 @@ contains
       ! Create a FENE model 
       create_fene: block 
          use multiscalar_class, only: bquick
-         use fene_class,        only: fenep
+         use fene_class,        only: fenep,lptt
          integer :: i,j,k
          ! Create FENE model solver
-         nn=fene(cfg=cfg,model=fenep,scheme=bquick,name='FENE')
+         nn=fene(cfg=cfg,model=lptt,scheme=bquick,name='FENE')
          ! Assign unity density for simplicity
          nn%rho=1.0_WP
          ! Maximum extensibility of polymer chain
@@ -553,6 +553,7 @@ contains
             
             ! Perform bquick procedure
             bquick: block
+               use fene_class, only: fenep,lptt
                integer :: i,j,k
                logical, dimension(:,:,:), allocatable :: flag
                ! Allocate work array
@@ -562,18 +563,33 @@ contains
                ! Apply it to get explicit scalar prediction
                SCtmp=2.0_WP*nn%SC-nn%SCold+resSC
                ! Check cells that require bquick
-               do k=nn%cfg%kmino_,nn%cfg%kmaxo_
-                  do j=nn%cfg%jmino_,nn%cfg%jmaxo_
-                     do i=nn%cfg%imino_,nn%cfg%imaxo_
-                        if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
-                        &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
-                           flag(i,j,k)=.true.
-                        else
-                           flag(i,j,k)=.false.
-                        end if
+               select case (nn%model)
+                  case (fenep)
+                     do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                        do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                           do i=nn%cfg%imino_,nn%cfg%imaxo_
+                              if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
+                              &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
+                                 flag(i,j,k)=.true.
+                              else
+                                 flag(i,j,k)=.false.
+                              end if
+                           end do
+                        end do
                      end do
-                  end do
-               end do
+                  case (lptt)
+                     do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                        do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                           do i=nn%cfg%imino_,nn%cfg%imaxo_
+                              if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP) then
+                                 flag(i,j,k)=.true.
+                              else
+                                 flag(i,j,k)=.false.
+                              end if
+                           end do
+                        end do
+                     end do
+               end select
                ! Adjust metrics
                call nn%metric_adjust(SCtmp,flag)
                ! Clean up
@@ -582,8 +598,9 @@ contains
                call nn%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
             end block bquick
             
-            ! Add fene sources
+            ! Add viscoleastic force terms
             call nn%addsrc_CgradU(gradU,resSC)
+            call nn%addsrc_PTT(gradU,resSC)
             call nn%addsrc_relax(resSC,time%dt)
             
             ! Assemble explicit residual

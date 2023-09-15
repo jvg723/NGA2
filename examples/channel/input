@@ -20,9 +20,9 @@ Perturbation              : 0
 Angular velocity          : 0
 
 # Non-Newtonian modeling                    
-Polymer viscosity :             0.04   
+Polymer viscosity :             0.01   
 Polymer relaxation time :       5.0   
-Maximum polymer extensibility : 10
+Maximum polymer extensibility : 0
 
 # Time integration
 Max timestep size : 2e-3
