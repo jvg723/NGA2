@@ -11,20 +11,21 @@ nz :	1
 
 # Fluid properties
 Gravity :                     0 -9.81 0
-Liquid dynamic viscosity :    1.137e-3
+Liquid dynamic viscosity :    0.03
 Gas dynamic viscosity :       1.780e-5
-Liquid density :              1000
+Liquid density :              1000.9
 Gas density :                 1.226
-Surface tension coefficient : 0.0728
+Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   19    # in mm^3
+Bubble volume :   45.8    # in mm^3
 Bubble position : 0 0.01 0
 
 # Non-Newtonian modeling                     # w=0.8 case    # w=0.3 case
-Carreau powerlaw :              0.57         # 0.33          # 0.57
-Polymer viscosity :             0.096511     # 1.5122        # 0.096511
-Polymer relaxation time :       0.45         # 1.4           # 0.45
+Carreau powerlaw exponent :     0.001         # 0.33          # 0.57
+Carreau reference timescale :   0.203        
+Polymer viscosity :             1.513     # 1.5122        # 0.096511
+Polymer relaxation time :       0.203         # 1.4           # 0.45
 Maximum polymer extensibility : 10
 
 # Time integration

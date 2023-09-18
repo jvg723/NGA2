@@ -22,6 +22,7 @@ module fene_class
       integer  :: model                                    !< Closure model of FENE
       real(WP) :: ncoeff                                   !< Carreau powerlaw coefficient
       real(WP) :: trelax                                   !< Polymer relaxation timescale
+      real(WP) :: alphacoeff                               !< Carreau relaxation timescale
       real(WP) :: visc                                     !< Polymer viscosity at zero strain rate
       real(WP) :: Lmax                                     !< Polymer maximum extensibility
       ! Polymer viscosity
@@ -80,7 +81,7 @@ contains
                ! Compute second invariant of strain rate tensor = sqrt(2*SR**2)
                SRmag=sqrt(2.0_WP*(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2)))
                ! Compute polymer viscosity
-               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%trelax*SRmag)**2)**(0.5_WP*this%ncoeff-0.5_WP)
+               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%alphacoeff*SRmag)**2)**(0.5_WP*this%ncoeff-0.5_WP)
             end do
          end do
       end do

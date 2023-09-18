@@ -220,10 +220,12 @@ contains
          call param_read('Maximum polymer extensibility',nn%Lmax)
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',nn%trelax)
+         ! Powerlaw coefficient in Carreau model
+         call param_read('Carreau powerlaw exponent',nn%ncoeff)
          ! Polymer viscosity at zero strain rate
          call param_read('Polymer viscosity',nn%visc)
-         ! Powerlaw coefficient in Carreau model
-         call param_read('Carreau powerlaw',nn%ncoeff)
+         ! Reference time scale in in Carreau model
+         call param_read('Carreau reference timescale',nn%alphacoeff)
          ! Configure implicit scalar solver
          ss=ddadi(cfg=cfg,name='scalar',nst=13)
          ! Setup the solver
