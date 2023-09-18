@@ -274,7 +274,7 @@ contains
       
       ! Create a single-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use hypre_str_class, only: pcg_pfmg,gmres_pfmg   
+         use hypre_str_class, only: pcg_pfmg2  
          use mathtools, only: twoPi
          integer :: i,j,k
          real(WP) :: amp,vel,omega
@@ -285,8 +285,8 @@ contains
          ! Assign constant density
          call param_read('Density',fs%rho)
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
-         ps%maxlevel=10
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
@@ -334,6 +334,10 @@ contains
          call param_read('Polymer relaxation time',nn%trelax)
          ! Polymer viscosity at zero strain rate
          call param_read('Polymer viscosity',nn%visc)
+         ! Extensional viscosity paramter for PTT model
+         call param_read('Extensional viscosity parameter', nn%elongvisc)
+         ! Slip between molecular network and continuum mediuem
+         call param_read('Affine parameter',nn%affinecoeff)
          ! Configure implicit scalar solver
          ss=ddadi(cfg=cfg,name='scalar',nst=13)
          ! Setup the solver
@@ -435,10 +439,13 @@ contains
          allocate(Txy(fs%cfg%jmin:fs%cfg%jmax)); Txy=0.0_WP
          allocate(Txx(fs%cfg%jmin:fs%cfg%jmax)); Txx=0.0_WP
          allocate(u  (fs%cfg%jmin:fs%cfg%jmax)); u  =0.0_WP
-         ! Polymer terms
-         b2=nn%Lmax**2.00_WP-3.00_WP
-         eps=1.00_WP/((b2+5.00_WP))
-         lam=((b2+2.00_WP)/(b2+5.00_WP))*nn%trelax
+         ! Polymer terms (FENE-P)
+         ! b2=nn%Lmax**2.00_WP-3.00_WP
+         ! eps=1.00_WP/((b2+5.00_WP))
+         ! lam=((b2+2.00_WP)/(b2+5.00_WP))*nn%trelax
+         ! Polymer terms (PTT)
+         eps=nn%elongvisc
+         lam=nn%trelax
          beta=(visc_s/(visc_s+nn%visc))
          ! Constant coefficents 
          A=(nn%visc**2.00_WP/(6.00_WP*eps*lam**2.00_WP))*(1.00_WP+nn%visc/visc_s)
@@ -599,9 +606,9 @@ contains
             end block bquick
             
             ! Add viscoleastic force terms
-            call nn%addsrc_CgradU(gradU,resSC)
-            call nn%addsrc_PTT(gradU,resSC)
-            call nn%addsrc_relax(resSC,time%dt)
+            call nn%get_CgradU(gradU,SCtmp)
+            call nn%get_affine(gradU,SCtmp)
+            call nn%get_relax(SCtmp,time%dt)
             
             ! Assemble explicit residual
             resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
@@ -670,7 +677,7 @@ contains
                allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                ! Calculate the polymer relaxation
-               stress=0.0_WP; call nn%addsrc_relax(stress,time%dt)
+               call nn%get_relax(stress,time%dt)
                ! Build liquid stress tensor (constant polymer viscosity)
                do n=1,6
                   stress(:,:,:,n)=-nn%visc*stress(:,:,:,n)
