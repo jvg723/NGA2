@@ -33,7 +33,7 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR
    real(WP), dimension(:,:,:,:),   allocatable :: stress
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU 
 
@@ -256,6 +256,7 @@ contains
          allocate(Wi    (  cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SR    (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU (1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
@@ -322,7 +323,7 @@ contains
       ! Create a FENE model 
       create_fene: block 
          use multiscalar_class, only: bquick
-         use fene_class,        only: fenep,lptt
+         use fene_class,        only: fenep,lptt,oldroydb
          integer :: i,j,k
          ! Create FENE model solver
          nn=fene(cfg=cfg,model=lptt,scheme=bquick,name='FENE')
@@ -439,7 +440,7 @@ contains
          allocate(Txy(fs%cfg%jmin:fs%cfg%jmax)); Txy=0.0_WP
          allocate(Txx(fs%cfg%jmin:fs%cfg%jmax)); Txx=0.0_WP
          allocate(u  (fs%cfg%jmin:fs%cfg%jmax)); u  =0.0_WP
-         ! Polymer terms (FENE-P)
+         ! ! Polymer terms (FENE-P)
          ! b2=nn%Lmax**2.00_WP-3.00_WP
          ! eps=1.00_WP/((b2+5.00_WP))
          ! lam=((b2+2.00_WP)/(b2+5.00_WP))*nn%trelax
@@ -513,6 +514,8 @@ contains
          if (ppevt%occurs()) call plotter()
       end block create_postproc
 
+      print *, 'zeta=',nn%affinecoeff
+
    end subroutine simulation_init
    
    
@@ -560,7 +563,7 @@ contains
             
             ! Perform bquick procedure
             bquick: block
-               use fene_class, only: fenep,lptt
+               use fene_class, only: fenep,lptt,oldroydb
                integer :: i,j,k
                logical, dimension(:,:,:), allocatable :: flag
                ! Allocate work array
@@ -584,7 +587,7 @@ contains
                            end do
                         end do
                      end do
-                  case (lptt)
+                  case (lptt,oldroydb)
                      do k=nn%cfg%kmino_,nn%cfg%kmaxo_
                         do j=nn%cfg%jmino_,nn%cfg%jmaxo_
                            do i=nn%cfg%imino_,nn%cfg%imaxo_
@@ -605,10 +608,11 @@ contains
                call nn%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
             end block bquick
             
-            ! Add viscoleastic force terms
-            call nn%get_CgradU(gradU,SCtmp)
-            call nn%get_affine(gradU,SCtmp)
-            call nn%get_relax(SCtmp,time%dt)
+            ! Add viscoleastic source terms
+            call nn%get_CgradU(gradU,SCtmp);  resSC=resSC+SCtmp
+            ! call fs%get_strainrate(SR)
+            ! call nn%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
+            call nn%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
             
             ! Assemble explicit residual
             resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
@@ -680,6 +684,7 @@ contains
                call nn%get_relax(stress,time%dt)
                ! Build liquid stress tensor (constant polymer viscosity)
                do n=1,6
+                  ! stress(:,:,:,n)=-nn%visc/(1-nn%affinecoeff)*stress(:,:,:,n)
                   stress(:,:,:,n)=-nn%visc*stress(:,:,:,n)
                end do
                ! Interpolate tensor components to cell edges
