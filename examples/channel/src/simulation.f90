@@ -431,6 +431,7 @@ contains
 
       ! Theory solution for 2D FENE-P channel flow from D.O.A. Cruz et al. (2005)
       theory: block
+         use fene_class, only: fenep,lptt 
          use string, only: str_medium
          real(WP) :: b2,eps,A,B,C,lam                        !> Terms for theoretical stress tensor calculation in laminar flow
          real(WP) :: Fp_H,Fm_H,Gp_H,Gm_H,Fp_y,Fm_y,Gp_y,Gm_y !> Terms for velocity curves
@@ -440,13 +441,16 @@ contains
          allocate(Txy(fs%cfg%jmin:fs%cfg%jmax)); Txy=0.0_WP
          allocate(Txx(fs%cfg%jmin:fs%cfg%jmax)); Txx=0.0_WP
          allocate(u  (fs%cfg%jmin:fs%cfg%jmax)); u  =0.0_WP
-         ! ! Polymer terms (FENE-P)
-         ! b2=nn%Lmax**2.00_WP-3.00_WP
-         ! eps=1.00_WP/((b2+5.00_WP))
-         ! lam=((b2+2.00_WP)/(b2+5.00_WP))*nn%trelax
-         ! Polymer terms (PTT)
-         eps=nn%elongvisc
-         lam=nn%trelax
+         ! Polymer terms
+         select case (nn%model)
+         case (fenep)
+            b2=nn%Lmax**2.00_WP-3.00_WP
+            eps=1.00_WP/((b2+5.00_WP))
+            lam=((b2+2.00_WP)/(b2+5.00_WP))*nn%trelax
+         case (lptt)
+            eps=nn%elongvisc
+            lam=nn%trelax
+         end select
          beta=(visc_s/(visc_s+nn%visc))
          ! Constant coefficents 
          A=(nn%visc**2.00_WP/(6.00_WP*eps*lam**2.00_WP))*(1.00_WP+nn%visc/visc_s)
@@ -514,8 +518,6 @@ contains
          if (ppevt%occurs()) call plotter()
       end block create_postproc
 
-      print *, 'zeta=',nn%affinecoeff
-
    end subroutine simulation_init
    
    
@@ -574,31 +576,31 @@ contains
                SCtmp=2.0_WP*nn%SC-nn%SCold+resSC
                ! Check cells that require bquick
                select case (nn%model)
-                  case (fenep)
-                     do k=nn%cfg%kmino_,nn%cfg%kmaxo_
-                        do j=nn%cfg%jmino_,nn%cfg%jmaxo_
-                           do i=nn%cfg%imino_,nn%cfg%imaxo_
-                              if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
-                              &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
-                                 flag(i,j,k)=.true.
-                              else
-                                 flag(i,j,k)=.false.
-                              end if
-                           end do
+               case (fenep)
+                  do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                     do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                        do i=nn%cfg%imino_,nn%cfg%imaxo_
+                           if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
+                           &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.nn%Lmax**2) then
+                              flag(i,j,k)=.true.
+                           else
+                              flag(i,j,k)=.false.
+                           end if
                         end do
                      end do
-                  case (lptt,oldroydb)
-                     do k=nn%cfg%kmino_,nn%cfg%kmaxo_
-                        do j=nn%cfg%jmino_,nn%cfg%jmaxo_
-                           do i=nn%cfg%imino_,nn%cfg%imaxo_
-                              if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP) then
-                                 flag(i,j,k)=.true.
-                              else
-                                 flag(i,j,k)=.false.
-                              end if
-                           end do
+                  end do
+               case (lptt,oldroydb)
+                  do k=nn%cfg%kmino_,nn%cfg%kmaxo_
+                     do j=nn%cfg%jmino_,nn%cfg%jmaxo_
+                        do i=nn%cfg%imino_,nn%cfg%imaxo_
+                           if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP) then
+                              flag(i,j,k)=.true.
+                           else
+                              flag(i,j,k)=.false.
+                           end if
                         end do
                      end do
+                  end do
                end select
                ! Adjust metrics
                call nn%metric_adjust(SCtmp,flag)
@@ -609,10 +611,18 @@ contains
             end block bquick
             
             ! Add viscoleastic source terms
-            call nn%get_CgradU(gradU,SCtmp);  resSC=resSC+SCtmp
-            ! call fs%get_strainrate(SR)
-            ! call nn%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
-            call nn%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
+            viscoelastic_src: block
+               use fene_class, only: fenep,lptt,eptt
+               ! Streching and distortion term
+               call nn%get_CgradU(gradU,SCtmp);  resSC=resSC+SCtmp
+               ! Relaxation term
+               call nn%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
+               ! Affine term (lPTT and ePTT only)
+               if (nn%model.eq.lptt.or.nn%model.eq.eptt) then
+                  call fs%get_strainrate(SR)
+                  call nn%get_affine(SR,SCtmp);  resSC=resSC+SCtmp
+               end if
+            end block viscoelastic_src
             
             ! Assemble explicit residual
             resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
@@ -672,21 +682,40 @@ contains
 
             ! Add polymer stress term
             polymer_stress: block
+               use fene_class, only: fenep,lptt,eptt
                integer :: i,j,k,n
                real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-               ! real(WP), dimension(:,:,:,:), allocatable :: stress
+               real(WP) :: coeff
                ! Allocate work arrays
-               ! allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
                allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               ! Calculate the polymer relaxation
-               call nn%get_relax(stress,time%dt)
-               ! Build liquid stress tensor (constant polymer viscosity)
-               do n=1,6
-                  ! stress(:,:,:,n)=-nn%visc/(1-nn%affinecoeff)*stress(:,:,:,n)
-                  stress(:,:,:,n)=-nn%visc*stress(:,:,:,n)
-               end do
+               ! ! Build liquid stress tensor
+               select case (nn%model)
+               case (fenep)
+                  call nn%get_relax(stress,time%dt)
+                  do n=1,6
+                     stress(:,:,:,n)=-nn%visc*stress(:,:,:,n)
+                  end do
+               case (eptt,lptt)
+                  stress=0.0_WP
+                  coeff=nn%visc/(nn%trelax*(1-nn%affinecoeff))
+                  do n=1,6
+                     do k=cfg%kmino_,cfg%kmaxo_
+                        do j=cfg%jmino_,cfg%jmaxo_
+                           do i=cfg%imino_,cfg%imaxo_
+                              if (nn%mask(i,j,k).ne.0) cycle                !< Skip non-solved cells
+                              stress(i,j,k,1)=coeff*(nn%SC(i,j,k,1)-1.0_WP) !> xx tensor component
+                              stress(i,j,k,2)=coeff*(nn%SC(i,j,k,2)-0.0_WP) !> xy tensor component
+                              stress(i,j,k,3)=coeff*(nn%SC(i,j,k,3)-0.0_WP) !> xz tensor component
+                              stress(i,j,k,4)=coeff*(nn%SC(i,j,k,4)-1.0_WP) !> yy tensor component
+                              stress(i,j,k,5)=coeff*(nn%SC(i,j,k,5)-0.0_WP) !> yz tensor component
+                              stress(i,j,k,6)=coeff*(nn%SC(i,j,k,6)-1.0_WP) !> zz tensor component
+                           end do
+                        end do
+                     end do
+                  end do
+               end select
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1
                   do j=cfg%jmin_,cfg%jmax_+1

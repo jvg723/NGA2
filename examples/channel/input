@@ -20,17 +20,17 @@ Perturbation              : 0
 Angular velocity          : 0
 
 # Non-Newtonian modeling                    
-Polymer viscosity :             0.0025
+Polymer viscosity :             0.01
 Polymer relaxation time :       1.0   
 Maximum polymer extensibility : 10
-Extensional viscosity parameter : 10.0
+Extensional viscosity parameter : 0.25
 Affine parameter                : 0.0
 
 
 # Time integration
 Max timestep size : 2e-3
 Max cfl number :    0.9
-Max time :          100
+Max time :          50
 
 # Pressure solver
 Pressure tolerance : 1e-4
