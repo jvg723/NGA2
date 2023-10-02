@@ -5,17 +5,16 @@ module ligament_class
    use iterator_class,      only: iterator
    use ensight_class,       only: ensight
    use surfmesh_class,      only: surfmesh
-   use partmesh_class,      only: partmesh
    use hypre_str_class,     only: hypre_str
    use ddadi_class,         only: ddadi
    use vfs_class,           only: vfs
    use fene_class,          only: fene
    use lpt_class,           only: lpt
    use tpns_class,          only: tpns
+   use breakup_class,       only: breakup
    use timetracker_class,   only: timetracker
    use event_class,         only: event
    use monitor_class,       only: monitor
-   use transfermodel_class, only: transfermodels
    implicit none
    private
    
@@ -28,17 +27,19 @@ module ligament_class
       type(config) :: cfg
       
       !> Flow solver
-      type(vfs)            :: vf       !< Volume fraction solver
-      type(tpns)           :: fs       !< Two-phase flow solver
-      type(hypre_str)      :: ps       !< Structured Hypre linear solver for pressure
-      type(ddadi)          :: vs       !< DDADI solver for velocity 
-      type(ddadi)          :: ss       !< DDADI solver for scalar
-      type(fene)           :: nn       !< FENE model for polymer stress
-      type(lpt)            :: lp       !< Particle tracking
-      type(timetracker)    :: time     !< Time info
-      type(transfermodels) :: tm
-      type(event)          :: ppevt
+      type(vfs)         :: vf    !< Volume fraction solver
+      type(tpns)        :: fs    !< Two-phase flow solver
+      type(hypre_str)   :: ps    !< Structured Hypre linear solver for pressure
+      type(ddadi)       :: vs    !< DDADI solver for velocity 
+      type(ddadi)       :: ss    !< DDADI solver for scalar
+      type(fene)        :: nn    !< FENE model for polymer stress
+      type(timetracker) :: time  !< Time info
+      type(event)       :: ppevt
       
+      !> Break-up modeling
+      type(lpt)         :: lp    !< Lagrangian particle solver
+      type(breakup)     :: bu    !< SGS break-up model
+
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
       type(partmesh) :: pmesh
@@ -322,11 +323,12 @@ contains
          call spray_statistics_setup(this)
          call spray_statistics(this)   
       end block create_lpt
-
-      ! Create a transfer model object
-      create_transfermodel: block
-         call this%tm%initialize(cfg=this%cfg,vf=this%vf,fs=this%fs,lp=this%lp)
-      end block create_transfermodel
+      
+      ! Create breakup model
+      create_breakup: block
+         call this%bu%initialize(vf=this%vf,fs=this%fs,lp=this%lp)
+      end block create_breakup
+      
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
