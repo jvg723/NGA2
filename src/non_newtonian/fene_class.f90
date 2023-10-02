@@ -129,7 +129,7 @@ contains
       end do
    end subroutine get_CgradU
 
-   !> Get D*C terms for PTT equation
+   !> Get S*C terms for PTT equation
    subroutine get_affine(this,SR,resSC)
       implicit none
       class(fene), intent(inout) :: this
@@ -241,10 +241,10 @@ contains
                   if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
                   coeff=1.0_WP/this%trelax                                      !< Inverse of relaxation time
                   resSC(i,j,k,1)=-coeff*(this%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-                  resSC(i,j,k,2)=-coeff* this%SC(i,j,k,2)         !> xy tensor component
-                  resSC(i,j,k,3)=-coeff* this%SC(i,j,k,3)         !> xz tensor component
+                  resSC(i,j,k,2)=-coeff*(this%SC(i,j,k,2)-0.0_WP) !> xy tensor component
+                  resSC(i,j,k,3)=-coeff*(this%SC(i,j,k,3)-0.0_WP) !> xz tensor component
                   resSC(i,j,k,4)=-coeff*(this%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-                  resSC(i,j,k,5)=-coeff* this%SC(i,j,k,5)         !> yz tensor component
+                  resSC(i,j,k,5)=-coeff*(this%SC(i,j,k,5)-0.0_WP) !> yz tensor component
                   resSC(i,j,k,6)=-coeff*(this%SC(i,j,k,6)-1.0_WP) !> zz tensor component
                end do
             end do
@@ -273,10 +273,10 @@ contains
                   coeff=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6))-3.0_WP))
                   coeff=coeff/this%trelax                   !< Divide by relaxation time scale
                   resSC(i,j,k,1)=-coeff*(this%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-                  resSC(i,j,k,2)=-coeff* this%SC(i,j,k,2)         !> xy tensor component
-                  resSC(i,j,k,3)=-coeff* this%SC(i,j,k,3)         !> xz tensor component
+                  resSC(i,j,k,2)=-coeff*(this%SC(i,j,k,2)-0.0_WP) !> xy tensor component
+                  resSC(i,j,k,3)=-coeff*(this%SC(i,j,k,3)-0.0_WP) !> xz tensor component
                   resSC(i,j,k,4)=-coeff*(this%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-                  resSC(i,j,k,5)=-coeff* this%SC(i,j,k,5)         !> yz tensor component
+                  resSC(i,j,k,5)=-coeff*(this%SC(i,j,k,5)-0.0_WP) !> yz tensor component
                   resSC(i,j,k,6)=-coeff*(this%SC(i,j,k,6)-1.0_WP) !> zz tensor component
                end do
             end do
