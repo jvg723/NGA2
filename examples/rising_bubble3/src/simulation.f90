@@ -125,7 +125,7 @@ contains
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
          !allocate(vf,source=vfs(cfg=cfg,reconstruction_method=elvira,name='VOF'))
-         call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF',store_detailed_flux=.true.)
          ! Initialize a bubble
          call param_read('Bubble position',center)
          call param_read('Bubble volume',radius)
