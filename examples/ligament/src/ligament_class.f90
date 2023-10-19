@@ -5,13 +5,14 @@ module ligament_class
    use iterator_class,      only: iterator
    use ensight_class,       only: ensight
    use surfmesh_class,      only: surfmesh
+   use partmesh_class,      only: partmesh
    use hypre_str_class,     only: hypre_str
    use ddadi_class,         only: ddadi
    use vfs_class,           only: vfs
    use fene_class,          only: fene
    use lpt_class,           only: lpt
    use tpns_class,          only: tpns
-   use breakup_class,       only: breakup
+   use transfermodel_class, only: transfermodels
    use timetracker_class,   only: timetracker
    use event_class,         only: event
    use monitor_class,       only: monitor
@@ -37,8 +38,8 @@ module ligament_class
       type(event)       :: ppevt
       
       !> Break-up modeling
-      type(lpt)         :: lp    !< Lagrangian particle solver
-      type(breakup)     :: bu    !< SGS break-up model
+      type(lpt)            :: lp    !< Lagrangian particle solver
+      type(transfermodels) :: tm
 
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
@@ -76,8 +77,8 @@ module ligament_class
    !> Droplet d^3 mean, Sauter mean, and mass median diameters
    real(WP) :: d30,d32,mmd
 
-   ! !> Film monitor file output
-   ! real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
+   !> Film monitor file output
+   real(WP) :: min_thickness, film_volume, my_converted_volume, converted_volume, film_ratio
 
 contains
    
@@ -318,16 +319,13 @@ contains
          ! Initialize with zero particles
          call this%lp%resize(0)
          ! Get initial particle volume fraction
-         call this%lp%update_VF()  
-         ! Calculate spray stats
-         call spray_statistics_setup(this)
-         call spray_statistics(this)   
+         call this%lp%update_VF()   
       end block create_lpt
       
-      ! Create breakup model
-      create_breakup: block
-         call this%bu%initialize(vf=this%vf,fs=this%fs,lp=this%lp)
-      end block create_breakup
+      ! Create a transfer model object
+      create_transfermodel: block
+         call this%tm%initialize(cfg=this%cfg,vf=this%vf,fs=this%fs,lp=this%lp)
+      end block create_transfermodel
       
 
       ! Create surfmesh object for interface polygon output
@@ -516,18 +514,18 @@ contains
          ! call this%dropfile%add_column(d32,'d32')
          ! call this%dropfile%add_column(mmd,'MMD')
          ! call this%dropfile%write()
-         ! ! Create film thickness monitor
-         ! this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
-         ! call this%filmfile%add_column(this%time%n,'Timestep number')
-         ! call this%filmfile%add_column(this%time%t,'Time')
-         ! call this%filmfile%add_column(min_thickness,'Min thickness')
-         ! call this%filmfile%add_column(film_volume,'Largest Film volume')
-         ! call this%filmfile%add_column(film_ratio,'Vb/V0')
-         ! call this%filmfile%add_column(converted_volume,'VOF-LPT Converted volume')
-         ! call this%filmfile%write()   
+         ! Create film thickness monitor
+         this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
+         call this%filmfile%add_column(this%time%n,'Timestep number')
+         call this%filmfile%add_column(this%time%t,'Time')
+         call this%filmfile%add_column(min_thickness,'Min thickness')
+         call this%filmfile%add_column(film_volume,'Largest Film volume')
+         call this%filmfile%add_column(film_ratio,'Vb/V0')
+         call this%filmfile%add_column(converted_volume,'VOF-LPT Converted volume')
+         call this%filmfile%write()   
       end block create_monitor
 
-      ! Create a specialized post-processing file
+      ! Create a specialized post-processing files
       create_postproc: block
          use param, only: param_read
          ! Create event for data postprocessing
@@ -537,6 +535,12 @@ contains
          if (this%cfg%amRoot) call execute_command_line('mkdir -p geometry')
          ! Perform the output
          if (this%ppevt%occurs()) call postproc_data(this)
+         ! Calculate spray stats
+         call spray_statistics_setup(this)
+         call spray_statistics(this)  
+         ! Calculate film stats
+         call film_statistics_setup(this)
+         call film_statistics(this)  
       end block create_postproc
 
       
@@ -819,9 +823,6 @@ contains
 
       ! Perform volume-fraction-to-droplet transfer
       call this%tm%transfer_vf_to_drops()
-
-      ! Calculate spray statistics
-      call spray_statistics(this)
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -907,12 +908,15 @@ contains
       call this%cflfile%write()
       call this%scfile%write()
       call this%sprayfile%write() 
-      call this%dropfile%write() 
-      ! call this%filmfile%write()
+      ! call this%dropfile%write() 
+      call this%filmfile%write()
 
       ! Specialized post-processing
       if (this%ppevt%occurs()) call postproc_data(this)
-      
+
+      ! Calculate spray and film statistics
+      call spray_statistics(this)
+      call film_statistics(this)
       
    end subroutine step
    
@@ -960,7 +964,7 @@ contains
       if (i.ge.pg%imax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
-!> Specialized subroutine that outputs the vertical liquid distribution
+   !> Specialized subroutine that outputs the vertical liquid distribution
    subroutine postproc_data(this)
       use string,    only: str_medium
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
@@ -971,6 +975,7 @@ contains
       real(WP), dimension(:), allocatable :: myxbc,xbc
       real(WP), dimension(:), allocatable :: myybc,ybc
       real(WP), dimension(:), allocatable :: myzbc,zbc
+      integer,  dimension(3) :: ind
       character(len=str_medium) :: filename,timestamp
       class(ligament), intent(inout) :: this
       ! Allocate vertical line storage
@@ -984,17 +989,27 @@ contains
       allocate(  zbc(this%vf%cfg%jmin:this%vf%cfg%jmax)); zbc  =0.0_WP
       ! Initialize local data to zero
       myvol=0.0_WP; myxbc=0.0_WP; myybc=0.0_WP; myzbc=0.0_WP
-      ! Integrate all data over x and y
+      ! Integrate all data over x and z for y=0
       do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-         do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-            do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-               myvol(k)=myvol(k)+                  this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)     
-               myxbc(k)=myxbc(k)+this%vf%cfg%xm(i)*this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)
-               myybc(k)=myybc(k)+this%vf%cfg%ym(j)*this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)
-               myzbc(k)=myzbc(k)+this%vf%cfg%zm(k)*this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)
-            end do
+         do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+            ind=this%cfg%get_ijk_local([this%vf%cfg%xm(i),0.0_WP,this%vf%cfg%zm(k)],[i,1,k])
+            myvol(k)=myvol(k)+                       this%vf%VF(i,ind(2),k)*this%cfg%vol(i,ind(2),k)     
+            myxbc(k)=myxbc(k)+this%vf%cfg%xm(     i)*this%vf%VF(i,ind(2),k)*this%cfg%vol(i,ind(2),k)
+            myybc(k)=myybc(k)+this%vf%cfg%ym(ind(2))*this%vf%VF(i,ind(2),k)*this%cfg%vol(i,ind(2),k)
+            myzbc(k)=myzbc(k)+this%vf%cfg%zm(     k)*this%vf%VF(i,ind(2),k)*this%cfg%vol(i,ind(2),k)
          end do
       end do
+      ! ! Integrate all data over x, y and z
+      ! do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+      !    do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+      !       do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+      !          myvol(k)=myvol(k)+                  this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)     
+      !          myxbc(k)=myxbc(k)+this%vf%cfg%xm(i)*this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)
+      !          myybc(k)=myybc(k)+this%vf%cfg%ym(j)*this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)
+      !          myzbc(k)=myzbc(k)+this%vf%cfg%zm(k)*this%vf%VF(i,j,k)*this%cfg%vol(i,j,k)
+      !       end do
+      !    end do
+      ! end do
       ! All-reduce the data
       call MPI_ALLREDUCE(myvol,vol,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) 
       call MPI_ALLREDUCE(myxbc,xbc,this%vf%cfg%nz,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) 
@@ -1190,76 +1205,82 @@ contains
       end subroutine quick_sort_partition
    end subroutine spray_statistics
 
-   ! !> Setup film statistics folders
-   ! subroutine film_statistics_setup(this)
-   !    use string,   only: str_medium
-   !    implicit none
-   !    character(len=str_medium) :: filename
-   !    class(ligament), intent(inout) :: this
+   !> Setup film statistics folders
+   subroutine film_statistics_setup(this)
+      use string,   only: str_medium
+      implicit none
+      character(len=str_medium) :: filename
+      class(ligament), intent(inout) :: this
+      ! Create directory
+      if (this%cfg%amroot) then
+         call execute_command_line('mkdir -p film')
+      end if
+   end subroutine film_statistics_setup
 
-   !    ! Create directory
-   !    if (this%cfg%amroot) then
-   !       call execute_command_line('mkdir -p film')
-   !    end if
-   ! end subroutine film_statistics_setup
+   ! !> Output film statistics (thickness per cell, position, maybe normal or velocity)
+   subroutine film_statistics(this)
+      use mpi_f08,  only: MPI_BARRIER
+      use messager, only: die
+      use string,   only: str_medium
+      use irl_fortran_interface
+      implicit none
+      real(WP) :: buf
+      integer :: iunit,rank,i,j,k,ierr,m,n,id
+      character(len=str_medium) :: filename
+      integer, dimension(:), allocatable :: displacements
+      real(WP), dimension(:), allocatable :: vollist_,vollist
+      integer, parameter :: col_len=14
+      class(ligament), intent(inout) :: this
 
-   ! ! !> Output film statistics (thickness per cell, position, maybe normal or velocity)
-   ! subroutine film_statistics(this,id_largest_film)
-   !    use mpi_f08,  only: MPI_BARRIER
-   !    use messager, only: die
-   !    use string,   only: str_medium
-   !    use irl_fortran_interface
-   !    implicit none
-   !    integer, intent(in) :: id_largest_film
-   !    real(WP) :: buf
-   !    integer :: iunit,rank,i,j,k,ierr,m,n,id
-   !    character(len=str_medium) :: filename
-   !    integer, dimension(:), allocatable :: displacements
-   !    real(WP), dimension(:), allocatable :: vollist_,vollist
-   !    integer, parameter :: col_len=14
-   !    class(ligament), intent(inout) :: this
+      ! Only output list of thicknesses and positions when ensight outputs and there exist film cells
+      if (this%ens_evt%occurs().and.this%tm%cc%n_film_max.gt.0) then
+         ! Create new file for timestep
+         filename='film/cells.'
+         write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
+         ! Root write the header
+         if (this%cfg%amRoot) then
+            ! Open the file
+            ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
+            open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+            if (ierr.ne.0) call die('[simulation write film stats] Could not open file: '//trim(filename))
+            ! Write the header
+            write(iunit,*) 'ID ','ID min thickness ','Thickness ','Volume ','X ','Y ','Z '
+            ! Close the file
+            close(iunit)
+         end if
+         ! Write the thicknesses and positions
+         do rank=0,this%cfg%nproc-1
+            print *, '1'
+            if (rank.eq.this%cfg%rank) then
+               print *, '2'
+               ! Open the file
+               open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+               print *, '3'
+               if (ierr.ne.0) call die('[simulation write film stats] Could not open file: '//trim(filename))
+               print *, '4'
+               ! Output thicknesses and positions
+               do m=this%tm%cc%film_sync_offset+1,this%tm%cc%film_sync_offset+this%tm%cc%n_film ! Loops over film segments contained locally
+                  print *, '5'
+                  id=this%tm%cc%film_list(this%tm%cc%film_map_(m))%parent
+                  print *, '6'
+                  do n=1,this%tm%cc%film_list(this%tm%cc%film_map_(m))%nnode ! Loops over cells within local film segment
+                     i=this%tm%cc%film_list(this%tm%cc%film_map_(m))%node(1,n)
+                     j=this%tm%cc%film_list(this%tm%cc%film_map_(m))%node(2,n)
+                     k=this%tm%cc%film_list(this%tm%cc%film_map_(m))%node(3,n)
+                     print *, '7'
+                     write(iunit,*) id, this%tm%cc%film_list(this%tm%cc%film_map_(m))%min_thickness, this%tm%cc%film_thickness(i,j,k), this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k), calculateCentroid(this%vf%interface_polygon(1,i,j,k))
+                     print *, '9'
+                  end do
+               end do
+               ! Close the file
+               close(iunit)
+            end if
+            ! Force synchronization
+            call MPI_BARRIER(this%cfg%comm,ierr)
+         end do
+      end if
 
-   !    ! Only output list of thicknesses and positions when ensight outputs and there exist film cells
-   !    if (this%ens_evt%occurs().and.this%cc%n_film_max.gt.0) then
-   !       ! Create new file for timestep
-   !       filename='film/cells.'
-   !       write(filename(len_trim(filename)+1:len_trim(filename)+6),'(i6.6)') this%time%n
-   !       ! Root write the header
-   !       if (this%cfg%amRoot) then
-   !          ! Open the file
-   !          ! open(newunit=iunit,file=trim(filename),form='unformatted',status='replace',access='stream',iostat=ierr)
-   !          open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
-   !          if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-   !          ! Write the header
-   !          write(iunit,*) 'ID ','ID min thickness ','Thickness ','Volume ','X ','Y ','Z '
-   !          ! Close the file
-   !          close(iunit)
-   !       end if
-   !       ! Write the thicknesses and positions
-   !       do rank=0,this%cfg%nproc-1
-   !          if (rank.eq.this%cfg%rank) then
-   !             ! Open the file
-   !             open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
-   !             if (ierr.ne.0) call die('[simulation write spray stats] Could not open file: '//trim(filename))
-   !             ! Output thicknesses and positions
-   !             do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film ! Loops over film segments contained locally
-   !                id=this%cc%film_list(this%cc%film_map_(m))%parent
-   !                do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
-   !                   i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
-   !                   j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
-   !                   k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
-   !                   write(iunit,*) id, this%cc%film_list(this%cc%film_map_(m))%min_thickness, this%cc%film_thickness(i,j,k), this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k), calculateCentroid(this%vf%interface_polygon(1,i,j,k))
-   !                end do
-   !             end do
-   !             ! Close the file
-   !             close(iunit)
-   !          end if
-   !          ! Force synchronization
-   !          call MPI_BARRIER(this%cfg%comm,ierr)
-   !       end do
-   !    end if
-
-   ! end subroutine film_statistics
+   end subroutine film_statistics
    
    
 end module ligament_class
