@@ -533,6 +533,8 @@ contains
          call param_read('Postproc output period',this%ppevt%tper)
          ! Create directory to write to
          if (this%cfg%amRoot) call execute_command_line('mkdir -p geometry')
+         if (this%cfg%amRoot) call execute_command_line('mkdir -p film')
+         if (this%cfg%amRoot) call execute_command_line('mkdir -p spray')
          ! Perform the output
          if (this%ppevt%occurs()) call postproc_data(this)
          ! Calculate spray stats
@@ -540,7 +542,9 @@ contains
          call spray_statistics(this)  
          ! Calculate film stats
          call film_statistics_setup(this)
+         call this%tm%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
          call film_statistics(this)  
+         call this%tm%cc%deallocate_lists()
       end block create_postproc
 
       
@@ -914,9 +918,13 @@ contains
       ! Specialized post-processing
       if (this%ppevt%occurs()) call postproc_data(this)
 
-      ! Calculate spray and film statistics
+      ! Calculate spray statistics
       call spray_statistics(this)
+
+      ! Calculate film statistics
+      call this%tm%cc%build_lists(VF=this%vf%VF,poly=this%vf%interface_polygon,U=this%fs%U,V=this%fs%V,W=this%fs%W)
       call film_statistics(this)
+      call this%tm%cc%deallocate_lists()
       
    end subroutine step
    
@@ -1048,7 +1056,7 @@ contains
 
       ! Create directory
       if (this%cfg%amroot) then
-         call execute_command_line('mkdir -p spray')
+         ! call execute_command_line('mkdir -p spray')
          ! call mkdir('spray')
          ! call mkdir('spray-all')
          filename='spray/droplets'
@@ -1207,13 +1215,22 @@ contains
 
    !> Setup film statistics folders
    subroutine film_statistics_setup(this)
+      use messager, only: die
       use string,   only: str_medium
       implicit none
       character(len=str_medium) :: filename
+      integer :: iunit,ierr
       class(ligament), intent(inout) :: this
       ! Create directory
       if (this%cfg%amroot) then
-         call execute_command_line('mkdir -p film')
+         ! call execute_command_line('mkdir -p film')
+         filename='film/cells'
+         open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+         if (ierr.ne.0) call die('[simulation write film stats] Could not open file: '//trim(filename))
+         ! Write the header
+         write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'ID ','ID min thickness ','Thickness ','Volume ','X ','Y ','Z '
+         ! Close the file
+         close(iunit)
       end if
    end subroutine film_statistics_setup
 
@@ -1227,8 +1244,6 @@ contains
       real(WP) :: buf
       integer :: iunit,rank,i,j,k,ierr,m,n,id
       character(len=str_medium) :: filename
-      integer, dimension(:), allocatable :: displacements
-      real(WP), dimension(:), allocatable :: vollist_,vollist
       integer, parameter :: col_len=14
       class(ligament), intent(inout) :: this
 
@@ -1244,30 +1259,38 @@ contains
             open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
             if (ierr.ne.0) call die('[simulation write film stats] Could not open file: '//trim(filename))
             ! Write the header
-            write(iunit,*) 'ID ','ID min thickness ','Thickness ','Volume ','X ','Y ','Z '
+            write(iunit,'(a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12,5x,a12)') 'ID ','ID min thickness ','Thickness ','Volume ','X ','Y ','Z '
             ! Close the file
             close(iunit)
          end if
+         print *, '1'
          ! Write the thicknesses and positions
          do rank=0,this%cfg%nproc-1
-            print *, '1'
+            print *, '2'
             if (rank.eq.this%cfg%rank) then
-               print *, '2'
+               print *, '3'
                ! Open the file
                open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
-               print *, '3'
-               if (ierr.ne.0) call die('[simulation write film stats] Could not open file: '//trim(filename))
                print *, '4'
+               if (ierr.ne.0) call die('[simulation write film stats] Could not open file: '//trim(filename))
+               print *, '5'
                ! Output thicknesses and positions
                do m=this%tm%cc%film_sync_offset+1,this%tm%cc%film_sync_offset+this%tm%cc%n_film ! Loops over film segments contained locally
-                  print *, '5'
-                  id=this%tm%cc%film_list(this%tm%cc%film_map_(m))%parent
+                  ! if (this%tm%cc%film_map_(m).eq.0) cycle
+                  print *, '5.5'
+                  print *, this%tm%cc%film_map_(1)
                   print *, '6'
+                  print *, m
+                  ! this%tm%cc%film_map_(m)=2
+                  ! id=this%tm%cc%film_list(this%tm%cc%film_map_(m))%parent
+                  print*, this%tm%cc%film_map_(m) ! This is 0 which casuse indexing on rest of the arrays to be an issue
+                  ! print*, this%tm%cc%film_list(this%tm%cc%film_map_(m))%parent
+                  print *, '7'
                   do n=1,this%tm%cc%film_list(this%tm%cc%film_map_(m))%nnode ! Loops over cells within local film segment
                      i=this%tm%cc%film_list(this%tm%cc%film_map_(m))%node(1,n)
                      j=this%tm%cc%film_list(this%tm%cc%film_map_(m))%node(2,n)
                      k=this%tm%cc%film_list(this%tm%cc%film_map_(m))%node(3,n)
-                     print *, '7'
+                     print *, '8'
                      write(iunit,*) id, this%tm%cc%film_list(this%tm%cc%film_map_(m))%min_thickness, this%tm%cc%film_thickness(i,j,k), this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k), calculateCentroid(this%vf%interface_polygon(1,i,j,k))
                      print *, '9'
                   end do
