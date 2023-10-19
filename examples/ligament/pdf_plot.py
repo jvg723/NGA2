@@ -49,7 +49,7 @@ weights = np.pi/6.0*diam**3.0 # Weight by volume
 vals1,edges1 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  # arguments are passed to np.histogram
 edgemed1 = (edges1[:-1]+edges1[1:])/2
 ax1.plot(edgemed1,vals1*np.sum(weights)/initial_volume,'-x',linewidth=2.0,label='Case 3')
-ax1.plot(edgemed1,vals1*np.sum(weights)/initial_volume,'k-x',linewidth=2.0)
+ax3.plot(edgemed1,vals1*np.sum(weights)/initial_volume,'k-x',linewidth=2.0)
 
 # Figure 1: visc_r=50 comparison
 ax1.set_xlabel(dimless_x_label)
