@@ -6,7 +6,7 @@ module simulation
 	use ddadi_class,       only: ddadi
 	use tpns_class,        only: tpns
 	use vfs_class,         only: vfs
-	use fene_class,        only: fene
+   use tpscalar_class,    only: tpscalar
 	use timetracker_class, only: timetracker
 	use ensight_class,     only: ensight
 	use surfmesh_class,    only: surfmesh
@@ -20,7 +20,7 @@ module simulation
 	type(ddadi),       public :: vs,ss
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
-	type(fene),        public :: fm
+   type(tpscalar),    public :: sc
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
@@ -29,12 +29,13 @@ module simulation
 	type(event)    :: ens_evt
 	
 	!> Simulation monitor file
-	type(monitor) :: mfile,cflfile
+	type(monitor) :: mfile,cflfile,scfile
 	
 	public :: simulation_init,simulation_run,simulation_final
 	
 	!> Private work arrays
-	real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
+	real(WP), dimension(:,:,:,:), allocatable :: resSC
+   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
 	real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
 	real(WP), dimension(:,:,:,:),   allocatable :: resSC,SC_
 	real(WP), dimension(:,:,:,:),   allocatable :: fR,CgradU
@@ -76,19 +77,14 @@ contains
 		
 		
 		! Allocate work arrays
-	   	allocate_work_arrays: block
-		   	allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(resV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(resW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			allocate(gradu(3,3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-			! Scalar solver
-			allocate(resSC (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6))
-			allocate(SC_   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Temp SC array for checking bquick bound
-			allocate(fR    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Array to hold relaxation function for FENE
-			allocate(CgradU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,6)) !< Sum of distortion terms (CdotU and (CdotU)T)
+	   allocate_work_arrays: block
+         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:2))
+		   allocate(resU (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(resV (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(resW (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(Ui   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(Vi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+			allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 		end block allocate_work_arrays
 		
 		
@@ -102,7 +98,7 @@ contains
 			time%itmax=2
 		end block initialize_timetracker
 		
-		
+      
 		! Initialize our VOF solver and field
 	   create_and_initialize_vof: block
 			use mms_geom, only: cube_refine_vol
@@ -114,7 +110,7 @@ contains
 			integer, parameter :: amr_ref_lvl=4
 			! Create a VOF solver
 		   !vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
-         call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF',store_detailed_flux=.true.)
 		   ! Initialize to a droplet and a pool
 		   center=[0.0_WP,0.01_WP,0.0_WP]
 		   radius=0.002_WP
@@ -197,44 +193,46 @@ contains
 		   call fs%interp_vel(Ui,Vi,Wi)
 		   call fs%get_div()
 	   end block create_and_initialize_flow_solver
-
-	   	! Create a FENE model 
-	   	create_fene: block 
-			use multiscalar_class, only: bquick
-			use fene_class,        only: FENEP
-			! Create FENE model solver
-			fm=fene(cfg=cfg,model=FENEP,scheme=bquick,name='FENE')
-			! Assign aritifical stress diffusivisty
-			call param_read('Stress diffusivisty',stress_diff)
-			fm%diff=stress_diff
-			! Assign constant density
-			fm%rho=1.00_WP
-			! Maximum extensibility of polymer chain
-			call param_read('Maximum extension of polymer chain',Lmax)
-			! Relaxation time for polymer
-			call param_read('Polymer Relaxation Time',lambda)
-			! Solvent/polymer viscosity ratio
-			call param_read('Beta',Beta)
-			! Polymer viscosity
-			visc_p=visc_s*((1.00_WP-Beta)/Beta)
-			! Configure the scalar solver
-			ss=ddadi(cfg=cfg,name='Scalar',nst=13)
-			! Setup the solver
-			call fm%setup(implicit_solver=ss)
-			! Intalize conformation tensor to identity matrix
-			fm%SC(:,:,:,1)=1.00_WP !Cxx
-			fm%SC(:,:,:,2)=0.00_WP !Cyx
-			fm%SC(:,:,:,3)=0.00_WP !Czx
-			fm%SC(:,:,:,4)=1.00_WP !Cyy
-			fm%SC(:,:,:,5)=0.00_WP !Czy
-			fm%SC(:,:,:,6)=1.00_WP !Czz
-			! Calculate the relaxation function
-			call fm%get_relaxationFunction(fR,Lmax)
-			! Build stress tensor
-			fm%T=(visc_p/lambda)*fR   
-		end block create_fene
 	   
-
+      
+      ! Create a liquid scalar solver
+      create_scalar: block
+         integer :: i,j,k
+         ! Create scalar solver
+         call sc%initialize(cfg=cfg,nscalar=2,name='tpscalar_test')
+         ! Make it liquid and give it a name
+         sc%SCname=['Zl','Zg']
+         sc%phase =[  0 ,  1 ]
+         ! Assign zero diffusivity
+         sc%diff=0.0_WP
+         ! Setup without an implicit solver
+         call sc%setup()
+         ! Initialize scalar fields
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  ! Liquid scalar
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
+                     ! We are in the liquid
+                     if (cfg%ym(j).gt.depth) then
+                        ! We are above the pool
+                        sc%SC(i,j,k,1)=1.0_WP
+                     else
+                        ! We are in the pool
+                        sc%SC(i,j,k,1)=2.0_WP
+                     end if
+                  end if
+                  ! Gas scalar
+                  if (vf%VF(i,j,k).lt.1.0_WP) then
+                     ! We are in the gas
+                     sc%SC(i,j,k,2)=(cfg%ym(j)-depth)/(cfg%yL-depth)
+                  end if
+               end do
+            end do
+         end do
+      end block create_scalar
+      
+      
 	   ! Create surfmesh object for interface polygon output
       create_smesh: block
          smesh=surfmesh(nvar=0,name='plic')
@@ -244,6 +242,7 @@ contains
 
 	   ! Add Ensight output
 	   create_ensight: block
+         integer :: nsc
 		   ! Create Ensight output from cfg
 		   ens_out=ensight(cfg=cfg,name='FallingDrop')
 			! Create event for Ensight output
@@ -254,30 +253,23 @@ contains
 		   call ens_out%add_scalar('VOF',vf%VF)
 		   call ens_out%add_scalar('pressure',fs%P)
 		   call ens_out%add_scalar('curvature',vf%curv)
-		   call ens_out%add_scalar('trC',fm%trC)
-		   call ens_out%add_scalar('Cxx',fm%SC(:,:,:,1))
-		   call ens_out%add_scalar('Cxy',fm%SC(:,:,:,2))
-		   call ens_out%add_scalar('Czx',fm%SC(:,:,:,3))
-		   call ens_out%add_scalar('Cyy',fm%SC(:,:,:,4))
-		   call ens_out%add_scalar('Czy',fm%SC(:,:,:,5))
-		   call ens_out%add_scalar('Czz',fm%SC(:,:,:,6))
-		   call ens_out%add_scalar('Txx',fm%T (:,:,:,1))
-		   call ens_out%add_scalar('Txy',fm%T (:,:,:,2))
-		   call ens_out%add_scalar('Tzx',fm%T (:,:,:,3))
-		   call ens_out%add_scalar('Tyy',fm%T (:,:,:,4))
-		   call ens_out%add_scalar('Tzy',fm%T (:,:,:,5))
-		   call ens_out%add_scalar('Tzz',fm%T (:,:,:,6))
+         call ens_out%add_surface('plic',smesh)
+         do nsc=1,sc%nscalar
+            call ens_out%add_scalar(trim(sc%SCname(nsc)),sc%SC(:,:,:,nsc))
+         end do
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
 		end block create_ensight
 	   
 	   
-		! Create a monitor file
-		create_monitor: block
+	   ! Create a monitor file
+	   create_monitor: block
+         integer :: nsc
 		   ! Prepare some info about fields
 		   call fs%get_cfl(time%dt,time%cfl)
 		   call fs%get_max()
 		   call vf%get_max()
+         call sc%get_max(VF=vf%VF)
 		   ! Create simulation monitor
 		   mfile=monitor(fs%cfg%amRoot,'simulation')
 		   call mfile%add_column(time%n,'Timestep number')
@@ -307,7 +299,17 @@ contains
 		   call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
 		   call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
 		   call cflfile%write()
-		end block create_monitor
+         ! Create scalar monitor
+         scfile=monitor(sc%cfg%amRoot,'scalar')
+         call scfile%add_column(time%n,'Timestep number')
+         call scfile%add_column(time%t,'Time')
+         do nsc=1,sc%nscalar
+            call scfile%add_column(sc%SCmin(nsc),trim(sc%SCname(nsc))//'_min')
+            call scfile%add_column(sc%SCmax(nsc),trim(sc%SCname(nsc))//'_max')
+            call scfile%add_column(sc%SCint(nsc),trim(sc%SCname(nsc))//'_int')
+         end do
+         call scfile%write()
+	   end block create_monitor
 	   
 	   
 	end subroutine simulation_init
@@ -327,8 +329,11 @@ contains
 			call time%increment()
 			
 			! Remember old VOF
-			vf%VFold=vf%VF
-			
+		   vf%VFold=vf%VF
+         
+         ! Remember old SC
+         sc%SCold=sc%SC
+         
 			! Remember old velocity
 			fs%Uold=fs%U
 			fs%Vold=fs%V
@@ -342,9 +347,41 @@ contains
 			
 			! Prepare new staggered viscosity (at n+1)
 		   call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
-			
-			! Perform sub-iterations
-			do while (time%it.le.time%itmax)
+
+         ! Now transport our phase-specific scalars
+         advance_scalar: block
+            use vfs_class, only: VFlo,VFhi
+            integer :: nsc
+            ! Explicit calculation of dSC/dt from scalar equation
+            call sc%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Advance scalar fields
+            do nsc=1,sc%nscalar
+               if (sc%phase(nsc).eq.0) then
+                  ! Liquid scalar
+                  where (sc%mask.eq.0)
+                     where (vf%VF.ge.VFlo)
+                        sc%SC(:,:,:,nsc)=(vf%VFold*sc%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+                     else where
+                        sc%SC(:,:,:,nsc)=0.0_WP
+                     end where
+                  end where
+               else if (sc%phase(nsc).eq.1) then
+                  ! Gas scalar
+                  where (sc%mask.eq.0)
+                     where (vf%VF.le.VFhi)
+                        sc%SC(:,:,:,nsc)=((1.0_WP-vf%VFold)*sc%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/(1.0_WP-vf%VF)
+                     else where
+                        sc%SC(:,:,:,nsc)=0.0_WP
+                     end where
+                  end where
+               end if
+            end do
+            ! Apply boundary conditions
+            call sc%apply_bcond(time%t,time%dt)
+         end block advance_scalar
+         
+		   ! Perform sub-iterations
+		   do while (time%it.le.time%itmax)
 				
 				! Build mid-time velocity
 			   	fs%U=0.5_WP*(fs%U+fs%Uold)
@@ -488,8 +525,10 @@ contains
 			! Perform and output monitoring
 		   	call fs%get_max()
 			call vf%get_max()
+         call sc%get_max(VF=vf%VF)
 			call mfile%write()
 			call cflfile%write()
+         call scfile%write()
 			
 		end do
 		
@@ -507,7 +546,7 @@ contains
 		! timetracker
 	   
 	   ! Deallocate work arrays
-	   deallocate(resU,resV,resW,Ui,Vi,Wi)
+	   deallocate(resSC,resU,resV,resW,Ui,Vi,Wi)
 	   
 	end subroutine simulation_final
 	
