@@ -107,15 +107,14 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
 			! Create a VOF solver
-			!vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
-			call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF',store_detailed_flux=.true.)
-			! Initialize to a droplet and a pool
-			center=[0.0_WP,0.01_WP,0.0_WP]
-			radius=0.002_WP
-			depth =0.005_WP
-				do k=vf%cfg%kmino_,vf%cfg%kmaxo_
-					do j=vf%cfg%jmino_,vf%cfg%jmaxo_
-						do i=vf%cfg%imino_,vf%cfg%imaxo_
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF',store_detailed_flux=.true.)
+		   ! Initialize to a droplet and a pool
+		   center=[0.0_WP,0.05_WP,0.0_WP]
+		   radius=0.01_WP
+		   depth =0.025_WP
+			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
+				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
+					do i=vf%cfg%imino_,vf%cfg%imaxo_
 						! Set cube vertices
 						n=0
 							do sk=0,1
@@ -159,9 +158,9 @@ contains
 		
 		
 		! Create a two-phase flow solver without bconds
-	   	create_and_initialize_flow_solver: block
-			use hypre_str_class, only: pcg_pfmg
-			use mathtools,       only: Pi
+	   create_and_initialize_flow_solver: block
+		   use hypre_str_class, only: pcg_pfmg2
+         use mathtools,       only: Pi
 			! Create flow solver
 			fs=tpns(cfg=cfg,name='Two-phase NS')
 			! Assign constant viscosity to each phase
@@ -177,19 +176,19 @@ contains
 			! Assign acceleration of gravity
 			call param_read('Gravity',fs%gravity)
 			! Configure pressure solver
-			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
-			ps%maxlevel=10
-			call param_read('Pressure iteration',ps%maxit)
-			call param_read('Pressure tolerance',ps%rcvg)
-			! Configure implicit velocity solver
-			vs=ddadi(cfg=cfg,name='Velocity',nst=7)
-			! Setup the solver
-			call fs%setup(pressure_solver=ps,implicit_solver=vs)
-			! Zero initial field
-			fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-			! Calculate cell-centered velocities and divergence
-			call fs%interp_vel(Ui,Vi,Wi)
-			call fs%get_div()
+			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         ps%maxlevel=10
+         call param_read('Pressure iteration',ps%maxit)
+         call param_read('Pressure tolerance',ps%rcvg)
+         ! Configure implicit velocity solver
+         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
+         ! Setup the solver
+		   call fs%setup(pressure_solver=ps,implicit_solver=vs)
+		   ! Zero initial field
+		   fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
+		   ! Calculate cell-centered velocities and divergence
+		   call fs%interp_vel(Ui,Vi,Wi)
+		   call fs%get_div()
 	   end block create_and_initialize_flow_solver
 	   
       
