@@ -373,18 +373,7 @@ contains
                do n=1,6
                   resSC(:,:,:,n)=resSC(:,:,:,n)+vf%VF(:,:,:)*SCtmp(:,:,:,n)
                end do
-            !    ! Affine term (lPTT and ePTT only)
-            !    if (nn%model.eq.lptt.or.nn%model.eq.eptt) then
-            !       call fs%get_strainrate(SR)
-            !       call nn%get_affine(SR,SCtmp)
-            !       do n=1,6
-            !          resSC(:,:,:,n)=resSC(:,:,:,n)+vf%VF(:,:,:)*SCtmp(:,:,:,n)
-            !       end do
-            !    end if
             end block viscoelastic_src
-
-			! ! Assemble explicit residual
-            ! resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
 
     		! Now transport our phase-specific scalars
     		advance_scalar: block
@@ -422,6 +411,56 @@ contains
 				
 				! Add momentum source terms
 			   	call fs%addsrc_gravity(resU,resV,resW)
+
+				! Add polymer stress term
+					polymer_stress: block
+					use fene_class, only: fenep
+					integer :: i,j,k,n
+					real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+					real(WP), dimension(:,:,:,:), allocatable :: stress
+					real(WP) :: coeff
+					! Allocate work arrays
+					allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+					allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+					allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+					allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+					! Build liquid stress tensor
+					select case (nn%model)
+					case (fenep)
+						call nn%get_relax(stress,time%dt)
+						do n=1,6
+							stress(:,:,:,n)=-nn%visc*vf%VF*stress(:,:,:,n)          
+						end do
+				   	end select
+				   	! Interpolate tensor components to cell edges
+				   	do k=cfg%kmin_,cfg%kmax_+1
+						do j=cfg%jmin_,cfg%jmax_+1
+							do i=cfg%imin_,cfg%imax_+1
+								Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+								Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+								Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+							end do
+						end do
+				   	end do
+				   	! Add divergence of stress to residual
+				   	do k=fs%cfg%kmin_,fs%cfg%kmax_
+					  	do j=fs%cfg%jmin_,fs%cfg%jmax_
+							do i=fs%cfg%imin_,fs%cfg%imax_
+								if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+								&                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+								&                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+								if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+								&                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+								&                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+								if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+								&                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+								&                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+						 	end do
+					  	end do
+				   	end do
+				   	! Clean up
+				   	deallocate(stress,Txy,Tyz,Tzx)
+				end block polymer_stress
 				
 				! Assemble explicit residual
 			   	resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
@@ -472,7 +511,7 @@ contains
 			! Perform and output monitoring
 		   	call fs%get_max()
 			call vf%get_max()
-         call nn%get_max(VF=vf%VF)
+         	call nn%get_max(VF=vf%VF)
 			call mfile%write()
 			call cflfile%write()
          call scfile%write()
