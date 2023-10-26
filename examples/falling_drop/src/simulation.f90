@@ -6,7 +6,8 @@ module simulation
 	use ddadi_class,       only: ddadi
 	use tpns_class,        only: tpns
 	use vfs_class,         only: vfs
-   	use tpscalar_class,    only: tpscalar
+   	! use tpscalar_class,    only: tpscalar
+	use tpfene_class,      only: tpfene
 	use timetracker_class, only: timetracker
 	use ensight_class,     only: ensight
 	use surfmesh_class,    only: surfmesh
@@ -20,7 +21,8 @@ module simulation
 	type(ddadi),       public :: vs,ss
 	type(tpns),        public :: fs
 	type(vfs),         public :: vf
-   	type(tpscalar),    public :: sc
+	type(tpfene),      public :: nn
+   	! type(tpscalar),    public :: sc
 	type(timetracker), public :: time
 	
 	!> Ensight postprocessing
@@ -34,23 +36,14 @@ module simulation
 	public :: simulation_init,simulation_run,simulation_final
 	
 	!> Private work arrays
-	real(WP), dimension(:,:,:,:), allocatable :: resSC
-   	real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-	real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-	real(WP), dimension(:,:,:,:,:), allocatable :: gradu  
+	real(WP), dimension(:,:,:,:), 	allocatable :: resSC,SCtmp
+	real(WP), dimension(:,:,:,:,:), allocatable :: gradu 
+   	real(WP), dimension(:,:,:), 	allocatable :: resU,resV,resW
+	real(WP), dimension(:,:,:), 	allocatable :: Ui,Vi,Wi
 	
 	!> Problem definition
 	real(WP), dimension(3) :: center
 	real(WP) :: radius,depth
-	
-	 !> Fluid viscosity (solvent,polymer,total)
-	real(WP) :: visc_s,visc_l,visc_p,visc_g
-
-	!> Artifical diffusivity for conformation tensor
-	real(WP) :: stress_diff
-
-	!> FENE-P model parameters
-	real(WP) :: Lmax,lambda,Beta
 
 contains
 
@@ -76,7 +69,9 @@ contains
 		
 		! Allocate work arrays
 	   allocate_work_arrays: block
-         	allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:2))
+         	allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+			allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+			allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 		   	allocate(resU (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(resV (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
 			allocate(resW (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -107,11 +102,11 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
 			! Create a VOF solver
-         call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF',store_detailed_flux=.true.)
-		   ! Initialize to a droplet and a pool
-		   center=[0.0_WP,0.05_WP,0.0_WP]
-		   radius=0.01_WP
-		   depth =0.025_WP
+         	call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF',store_detailed_flux=.true.)
+		   	! Initialize to a droplet and a pool
+		   	center=[0.0_WP,0.05_WP,0.0_WP]
+		   	radius=0.01_WP
+		   	depth =0.025_WP
 			do k=vf%cfg%kmino_,vf%cfg%kmaxo_
 				do j=vf%cfg%jmino_,vf%cfg%jmaxo_
 					do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -158,14 +153,14 @@ contains
 		
 		
 		! Create a two-phase flow solver without bconds
-	   create_and_initialize_flow_solver: block
-		   use hypre_str_class, only: pcg_pfmg2
-         use mathtools,       only: Pi
+	   	create_and_initialize_flow_solver: block
+			use hypre_str_class, only: pcg_pfmg2
+         	use mathtools,       only: Pi
 			! Create flow solver
 			fs=tpns(cfg=cfg,name='Two-phase NS')
 			! Assign constant viscosity to each phase
-			call param_read('Liquid dynamic viscosity',visc_l); fs%visc_l=visc_l
-			call param_read('Gas dynamic viscosity',  visc_g); fs%visc_g=visc_g
+			call param_read('Liquid dynamic viscosity',fs%visc_l)
+			call param_read('Gas dynamic viscosity',fs%visc_g)
 			! Assign constant density to each phase
 		   	call param_read('Liquid density',fs%rho_l)
 			call param_read('Gas density',fs%rho_g)
@@ -177,57 +172,71 @@ contains
 			call param_read('Gravity',fs%gravity)
 			! Configure pressure solver
 			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
-         ps%maxlevel=10
-         call param_read('Pressure iteration',ps%maxit)
-         call param_read('Pressure tolerance',ps%rcvg)
-         ! Configure implicit velocity solver
-         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
-         ! Setup the solver
+         	ps%maxlevel=10
+         	call param_read('Pressure iteration',ps%maxit)
+         	call param_read('Pressure tolerance',ps%rcvg)
+         	! Configure implicit velocity solver
+         	vs=ddadi(cfg=cfg,name='Velocity',nst=7)
+         	! Setup the solver
 		   call fs%setup(pressure_solver=ps,implicit_solver=vs)
 		   ! Zero initial field
 		   fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
 		   ! Calculate cell-centered velocities and divergence
 		   call fs%interp_vel(Ui,Vi,Wi)
 		   call fs%get_div()
-	   end block create_and_initialize_flow_solver
+	   	end block create_and_initialize_flow_solver
 	   
       
-      	! Create a liquid scalar solver
-      	create_scalar: block
+      	! Create a two phase fene solver
+      	create_fene: block
+		  	use fene_class,		only: fenep
       		integer :: i,j,k
-      		! Create scalar solver
-      		call sc%initialize(cfg=cfg,nscalar=2,name='tpscalar_test')
-      		! Make it liquid and give it a name
-      		sc%SCname=['Zl','Zg']
-      		sc%phase =[  0 ,  1 ]
+      		! Create fene solver
+      		call nn%tpfene_initialize(cfg=cfg,model=fenep,name='fenep')
+			! Maximum extensibility of polymer chain
+			call param_read('Maximum polymer extensibility',nn%Lmax)
+			! Relaxation time for polymer
+			call param_read('Polymer relaxation time',nn%trelax)
+			! Polymer viscosity at zero strain rate
+			call param_read('Polymer viscosity',nn%visc)
       		! Assign zero diffusivity
-      		sc%diff=0.0_WP
+      		nn%diff=0.0_WP
       		! Setup without an implicit solver
-      		call sc%setup()
+      		call nn%setup()
       		! Initialize scalar fields
       		do k=cfg%kmino_,cfg%kmaxo_
-      		   do j=cfg%jmino_,cfg%jmaxo_
-      		      do i=cfg%imino_,cfg%imaxo_
-      		         ! Liquid scalar
-      		         if (vf%VF(i,j,k).gt.0.0_WP) then
-      		            ! We are in the liquid
-      		            if (cfg%ym(j).gt.depth) then
-      		               ! We are above the pool
-      		               sc%SC(i,j,k,1)=1.0_WP
-      		            else
-      		               ! We are in the pool
-      		               sc%SC(i,j,k,1)=2.0_WP
-      		            end if
-      		         end if
-      		         ! Gas scalar
-      		         if (vf%VF(i,j,k).lt.1.0_WP) then
-      		            ! We are in the gas
-      		            sc%SC(i,j,k,2)=(cfg%ym(j)-depth)/(cfg%yL-depth)
-      		         end if
-      		      end do
-      		   end do
+      		   	do j=cfg%jmino_,cfg%jmaxo_
+      		   	   	do i=cfg%imino_,cfg%imaxo_
+      		   	    	! Liquid scalar
+      		   	    	if (vf%VF(i,j,k).gt.0.0_WP) then
+      		   	     	   	! We are in the liquid
+      		   	     	   	if (cfg%ym(j).gt.depth) then
+      		   	     	    	! We are above the pool (trC=15)
+								nn%SC(i,j,k,1)=5.0_WP !< Cxx
+								nn%SC(i,j,k,2)=0.0_WP !< Cxy
+								nn%SC(i,j,k,3)=0.0_WP !< Cxx
+								nn%SC(i,j,k,4)=5.0_WP !< Cyy
+								nn%SC(i,j,k,5)=0.0_WP !< Cyz
+								nn%SC(i,j,k,6)=5.0_WP !< Czz
+      		   	     	   	else
+      		   	     	    	! We are in the pool (trC=I)
+								nn%SC(i,j,:k,1)=1.0_WP !< Cxx
+								nn%SC(i,j,:k,2)=0.0_WP !< Cxy
+								nn%SC(i,j,:k,3)=0.0_WP !< Cxx
+								nn%SC(i,j,:k,4)=1.0_WP !< Cyy
+								nn%SC(i,j,:k,5)=0.0_WP !< Cyz
+								nn%SC(i,j,:k,6)=1.0_WP !< Czz
+      		   	     	   	end if
+      		   	     	end if
+      		   	     	! ! Gas scalar
+						! if (vf%VF(i,j,k).lt.1.0_WP) then
+						! 	! We are in the gas
+						! 	nn%SC(i,j,k,:)=0.0_WP
+						! end if
+      		   	   	end do
+      		   	end do
       		end do
-      	end block create_scalar
+      	end block create_fene
       
       
 	   	! Create surfmesh object for interface polygon output
@@ -251,8 +260,8 @@ contains
 			call ens_out%add_scalar('pressure',fs%P)
 			call ens_out%add_scalar('curvature',vf%curv)
          	call ens_out%add_surface('plic',smesh)
-        	do nsc=1,sc%nscalar
-            	call ens_out%add_scalar(trim(sc%SCname(nsc)),sc%SC(:,:,:,nsc))
+        	do nsc=1,nn%nscalar
+            	call ens_out%add_scalar(trim(nn%SCname(nsc)),nn%SC(:,:,:,nsc))
         	end do
 		   ! Output to ensight
 		   if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -266,7 +275,7 @@ contains
 			call fs%get_cfl(time%dt,time%cfl)
 			call fs%get_max()
 			call vf%get_max()
-         	call sc%get_max(VF=vf%VF)
+         	call nn%get_max(VF=vf%VF)
 			! Create simulation monitor
 			mfile=monitor(fs%cfg%amRoot,'simulation')
 			call mfile%add_column(time%n,'Timestep number')
@@ -297,13 +306,13 @@ contains
 			call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
 			call cflfile%write()
         	! Create scalar monitor
-        	scfile=monitor(sc%cfg%amRoot,'scalar')
+        	scfile=monitor(nn%cfg%amRoot,'scalar')
         	call scfile%add_column(time%n,'Timestep number')
         	call scfile%add_column(time%t,'Time')
-        	do nsc=1,sc%nscalar
-				call scfile%add_column(sc%SCmin(nsc),trim(sc%SCname(nsc))//'_min')
-				call scfile%add_column(sc%SCmax(nsc),trim(sc%SCname(nsc))//'_max')
-				call scfile%add_column(sc%SCint(nsc),trim(sc%SCname(nsc))//'_int')
+        	do nsc=1,nn%nscalar
+				call scfile%add_column(nn%SCmin(nsc),trim(nn%SCname(nsc))//'_min')
+				call scfile%add_column(nn%SCmax(nsc),trim(nn%SCname(nsc))//'_max')
+				call scfile%add_column(nn%SCint(nsc),trim(nn%SCname(nsc))//'_int')
          	end do
          	call scfile%write()
 	   end block create_monitor
@@ -329,7 +338,7 @@ contains
 			vf%VFold=vf%VF
          
          	! Remember old SC
-         	sc%SCold=sc%SC
+         	nn%SCold=nn%SC
          
 			! Remember old velocity
 			fs%Uold=fs%U
@@ -341,28 +350,63 @@ contains
 			
 			! VOF solver step
 		   	call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+
+			! Calculate grad(U)
+			call fs%get_gradU(gradU)
 			
+			! ============= SCALAR SOLVER =======================
+
+			! Explicit calculation of dSC/dt from scalar equation
+			call nn%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+
+			! Add viscoleastic source terms
+            viscoelastic_src: block
+               use fene_class, only: fenep,lptt,eptt
+               integer :: n
+               ! Streching and distortion term
+               call nn%get_CgradU(gradU,SCtmp)
+               do n=1,6
+                  resSC(:,:,:,n)=resSC(:,:,:,n)+vf%VF(:,:,:)*SCtmp(:,:,:,n)
+               end do
+               ! Relaxation term
+               call nn%get_relax(SCtmp,time%dt)
+               do n=1,6
+                  resSC(:,:,:,n)=resSC(:,:,:,n)+vf%VF(:,:,:)*SCtmp(:,:,:,n)
+               end do
+            !    ! Affine term (lPTT and ePTT only)
+            !    if (nn%model.eq.lptt.or.nn%model.eq.eptt) then
+            !       call fs%get_strainrate(SR)
+            !       call nn%get_affine(SR,SCtmp)
+            !       do n=1,6
+            !          resSC(:,:,:,n)=resSC(:,:,:,n)+vf%VF(:,:,:)*SCtmp(:,:,:,n)
+            !       end do
+            !    end if
+            end block viscoelastic_src
+
+			! ! Assemble explicit residual
+            ! resSC=-2.0_WP*(nn%SC-nn%SCold)+time%dt*resSC
+
     		! Now transport our phase-specific scalars
     		advance_scalar: block
-    		   integer :: nsc
-    		   real(WP) :: p,q
-    		   ! Explicit calculation of dSC/dt from scalar equation
-    		   call sc%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
-    		   ! Advance scalar fields
-    		   do nsc=1,sc%nscalar
-    		      p=real(sc%phase(nsc),WP); q=1.0_WP-2.0_WP*p
-    		      where (sc%mask.eq.0.and.vf%VF.ne.p) sc%SC(:,:,:,nsc)=((p+q*vf%VFold)*sc%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/(p+q*vf%VF)
-    		      where (vf%VF.eq.p) sc%SC(:,:,:,nsc)=0.0_WP
-    		   end do
-    		   ! Apply boundary conditions
-    		   call sc%apply_bcond(time%t,time%dt)
+    			integer :: nsc
+    			real(WP) :: p,q
+    			! Advance scalar fields
+    			do nsc=1,nn%nscalar
+    			   p=real(nn%phase(nsc),WP); q=1.0_WP-2.0_WP*p
+    			   where (nn%mask.eq.0.and.vf%VF.ne.p) nn%SC(:,:,:,nsc)=((p+q*vf%VFold)*nn%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/(p+q*vf%VF)
+    			   where (vf%VF.eq.p) nn%SC(:,:,:,nsc)=0.0_WP
+    			end do
     		end block advance_scalar
+
+			! Apply boundary conditions
+			call nn%apply_bcond(time%t,time%dt)
+			! ===================================================
          
 			! Prepare new staggered viscosity (at n+1)
 		   	call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
          
-		   ! Perform sub-iterations
-		   do while (time%it.le.time%itmax)
+		   	! Perform sub-iterations
+		   	do while (time%it.le.time%itmax)
             
 				! Build mid-time velocity
 			   	fs%U=0.5_WP*(fs%U+fs%Uold)
@@ -428,7 +472,7 @@ contains
 			! Perform and output monitoring
 		   	call fs%get_max()
 			call vf%get_max()
-         call sc%get_max(VF=vf%VF)
+         call nn%get_max(VF=vf%VF)
 			call mfile%write()
 			call cflfile%write()
          call scfile%write()
