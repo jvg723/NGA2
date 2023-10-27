@@ -1,105 +1,66 @@
-!> FENE model class
-!> Extends multiscalar class for the calculation of source terms
-module fene_class
-   use multiscalar_class, only: multiscalar
-   use config_class,      only: config
-   use precision,         only: WP
+!> Two-phase viscoelastic model class
+!> Extends tpscalar class for calculation of source terms
+module tpviscoelastic_class
+   use tpscalar_class, only: tpscalar
+   use config_class,   only: config
+   use precision,      only: WP
    implicit none
    private
    
+
    ! Expose type/constructor/methods
-   public :: fene
+   public :: tpviscoelastic
    
+
    ! List of available viscoelastic models
    integer, parameter, public :: fenep =0            !< FENE-P model
    integer, parameter, public :: fenecr=1            !< FENE-CR model
    integer, parameter, public :: clipped_fenecr=2    !< FENE-CR model with clipping
    integer, parameter, public :: oldroydb=3          !< Oldroyd-B model
-   integer, parameter, public :: lptt=4              !< linear Phan-Thien-Tanner model
-   integer, parameter, public :: eptt=5              !< exponential Phan-Thien-Tanner model
+   integer, parameter, public :: lptt=4              !< Linear Phan-Thien-Tanner model
+   integer, parameter, public :: eptt=5              !< Exponential Phan-Thien-Tanner model
    
-   !> Constant density fene solver object definition
-   type, extends(multiscalar) :: fene
+
+   !> Constant density viscoelastic solver object definition
+   type, extends(tpscalar) :: tpviscoelastic
       ! Model parameters
       integer  :: model                                    !< Closure model
-      real(WP) :: ncoeff                                   !< Carreau powerlaw coefficient
-      real(WP) :: alphacoeff                               !< Carreau characteristic timescale
       real(WP) :: trelax                                   !< Polymer relaxation timescale
-      real(WP) :: visc                                     !< Polymer viscosity at zero strain rate
-      real(WP) :: Lmax                                     !< Polymer maximum extensibility
+      real(WP) :: visc                                     !< Polymer viscosity
+      real(WP) :: Lmax                                     !< Polymer maximum extensibility in FENE model
       real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
-      real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in ePTT model
-      ! Polymer viscosity
-      real(WP), dimension(:,:,:), allocatable :: visc_p    !< Polymer viscosity
-      ! SRmag
-      real(WP), dimension(:,:,:), allocatable :: SRmag     !< Strain rate magnitude
-      ! Monitoring info
-      real(WP) :: visc_pmin,visc_pmax                      !< Min and max polymer viscosity
+      real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
    contains
-      procedure :: update_visc_p                           !< Update visc_p given strain rate tensor using Carreau model
-      procedure :: get_CgradU                              !< Add C.gradU source term to residual
-      procedure :: get_relax                               !< Calculate FENE relaxation term
+      procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
+      procedure :: get_CgradU                              !< Calculate streching and distrortion term
+      procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
-      procedure :: get_max=>fene_get_max                   !< Augment multiscalar's default monitoring
-   end type fene
-   
-   !> Declare fene model constructor
-   interface fene
-      procedure construct_fene_from_args
-   end interface fene
+   end type tpviscoelastic
    
    
 contains
    
    
-   !> FENE model constructor from multiscalar
-   function construct_fene_from_args(cfg,model,scheme,name) result(self)
+   !> Viscoelastic model initialization
+   subroutine init(this,cfg,phase,model,name)
       implicit none
-      type(fene) :: self
+      class(tpviscoelastic), intent(inout) :: this
       class(config), target, intent(in) :: cfg
+      integer, intent(in) :: phase
       integer, intent(in) :: model
-      integer, intent(in) :: scheme
       character(len=*), optional :: name
-      ! Create a six-scalar solver for conformation tensor
-      self%multiscalar=multiscalar(cfg=cfg,scheme=scheme,nscalar=6,name=name)
-      self%SCname(1)='Cxx'
-      self%SCname(2)='Cxy'
-      self%SCname(3)='Cxz'
-      self%SCname(4)='Cyy'
-      self%SCname(5)='Cyz'
-      self%SCname(6)='Czz'
-      ! Assign closure model for FENE
-      self%model=model
-      ! Allocate and set polymer viscosity
-      allocate(self%visc_p(self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%visc_p=0.0_WP
-      allocate(self%SRmag (self%cfg%imino_:self%cfg%imaxo_,self%cfg%jmino_:self%cfg%jmaxo_,self%cfg%kmino_:self%cfg%kmaxo_)); self%SRmag =0.0_WP
-   end function construct_fene_from_args
+      ! Create a six-scalar solver for conformation tensor in the liquid
+      call this%tpscalar%initialize(cfg=cfg,nscalar=6,name=name)
+      this%phase=phase; this%SCname=['Cxx','Cxy','Cxz','Cyy','Cyz','Czz']
+      ! Assign closure model for viscoelastic fluid
+      this%model=model
+   end subroutine init
    
    
-   !> Compute visc_p from SR using Carreau model
-   subroutine update_visc_p(this,SR)
-      implicit none
-      class(fene), intent(inout) :: this
-      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: SR
-      ! real(WP) :: SRmag
-      integer :: i,j,k
-      do k=this%cfg%kmino_,this%cfg%kmaxo_
-         do j=this%cfg%jmino_,this%cfg%jmaxo_
-            do i=this%cfg%imino_,this%cfg%imaxo_
-               ! Compute second invariant of strain rate tensor = sqrt(2*SR**2)
-               this%SRmag(i,j,k)=sqrt(2.0_WP*(SR(1,i,j,k)**2+SR(2,i,j,k)**2+SR(3,i,j,k)**2+2.0_WP*(SR(4,i,j,k)**2+SR(5,i,j,k)**2+SR(6,i,j,k)**2)))
-               ! Compute polymer viscosity
-               this%visc_p(i,j,k)=this%visc*(1.0_WP+(this%alphacoeff*this%SRmag(i,j,k))**2)**(0.5_WP*this%ncoeff-0.5_WP)
-            end do
-         end do
-      end do
-   end subroutine update_visc_p
-
-
-   !> Get C.gradU source terms to multiscalar residual
+   !> Get CgradU source terms to add to multiscalar residual
    subroutine get_CgradU(this,gradU,resSC)
       implicit none
-      class(fene), intent(inout) :: this
+      class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
@@ -128,11 +89,12 @@ contains
          end do
       end do
    end subroutine get_CgradU
+   
 
    !> Get S*C terms for PTT equation
    subroutine get_affine(this,SR,resSC)
       implicit none
-      class(fene), intent(inout) :: this
+      class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: SR
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
@@ -163,11 +125,11 @@ contains
    end subroutine get_affine
    
 
-   !> Add fene relaxation source
+   !> Add viscoelastic relaxation source
    subroutine get_relax(this,resSC,dt)
       use messager, only: die
       implicit none
-      class(fene), intent(inout) :: this
+      class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       real(WP), intent(in) :: dt
       integer :: i,j,k
@@ -282,27 +244,9 @@ contains
             end do
          end do
       case default
-         call die('[FENE get_relax] Unknown FENE model selected')
+         call die('[tpviscoelastic get_relax] Unknown viscoelastic model selected')
       end select
    end subroutine get_relax
    
-
-   !> Calculate the min and max of our SC field
-   subroutine fene_get_max(this)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX,MPI_MIN
-      use parallel, only: MPI_REAL_WP
-      implicit none
-      class(fene), intent(inout) :: this
-      integer :: ierr,nsc
-      real(WP) :: my_SCmax,my_SCmin
-      real(WP) :: my_visc_pmax,my_visc_pmin
-      do nsc=1,this%nscalar
-         my_SCmax=maxval(this%SC(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmax,this%SCmax(nsc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-         my_SCmin=minval(this%SC(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmin,this%SCmin(nsc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
-      end do
-      my_visc_pmax=maxval(this%visc_p); call MPI_ALLREDUCE(my_visc_pmax,this%visc_pmax,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      my_visc_pmin=minval(this%visc_p); call MPI_ALLREDUCE(my_visc_pmin,this%visc_pmin,1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
-   end subroutine fene_get_max
-
-
-end module fene_class
+   
+end module tpviscoelastic_class

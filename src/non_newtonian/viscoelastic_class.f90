@@ -1,43 +1,28 @@
-!> viscoelastic fluid model class
-!> Extends tpscalar/multiscalar class for calculation of source terms
+!> Viscoelastic model class
+!> Extends scalar class for calculation of source terms
 module viscoelastic_class
-   ! use multiscalar_class, only: multiscalar
-   use tpscalar_class,    only: tpscalar
+   use multiscalar_class, only: multiscalar
    use config_class,      only: config
    use precision,         only: WP
    implicit none
    private
    
+
    ! Expose type/constructor/methods
    public :: viscoelastic
    
+
    ! List of available viscoelastic models
    integer, parameter, public :: fenep =0            !< FENE-P model
    integer, parameter, public :: fenecr=1            !< FENE-CR model
    integer, parameter, public :: clipped_fenecr=2    !< FENE-CR model with clipping
    integer, parameter, public :: oldroydb=3          !< Oldroyd-B model
-   integer, parameter, public :: lptt=4              !< linear Phan-Thien-Tanner model
-   integer, parameter, public :: eptt=5              !< exponential Phan-Thien-Tanner model
+   integer, parameter, public :: lptt=4              !< Linear Phan-Thien-Tanner model
+   integer, parameter, public :: eptt=5              !< Exponential Phan-Thien-Tanner model
    
-   ! !> Constant density viscoelastic solver object definition
-   ! type, extends(multiscalar) :: viscoelastic
-   !    ! Model parameters
-   !    integer  :: model                                    !< Closure model
-   !    real(WP) :: trelax                                   !< Polymer relaxation timescale
-   !    real(WP) :: visc_p                                   !< Polymer viscosity
-   !    real(WP) :: Lmax                                     !< Polymer maximum extensibility in FENE model
-   !    real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
-   !    real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
-   ! contains
-   !    procedure :: initialize                              !< Initialization of viscoelastic class   
-   !    procedure :: get_CgradU                              !< Calculate streching and distrortion term
-   !    procedure :: get_relax                               !< Calculate relaxation term
-   !    procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
-   !    procedure :: get_max=>viscoelastic_get_max           !< Augment multiscalar's default monitoring
-   ! end type viscoelastic
 
    !> Constant density viscoelastic solver object definition
-   type, extends(tpscalar) :: viscoelastic
+   type, extends(multiscalar) :: viscoelastic
       ! Model parameters
       integer  :: model                                    !< Closure model
       real(WP) :: trelax                                   !< Polymer relaxation timescale
@@ -46,7 +31,7 @@ module viscoelastic_class
       real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
       real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
    contains
-      procedure :: ve_initialize                           !< Initialization of viscoelastic class   
+      procedure :: init                                    !< Viscoelastic model initialization (different name is used because of extension)
       procedure :: get_CgradU                              !< Calculate streching and distrortion term
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
@@ -55,48 +40,23 @@ module viscoelastic_class
    
 contains
    
-   ! !> Viscoelastic model initialization
-   ! subroutine initialize(this,cfg,model,scheme,name)
-   !    implicit none
-   !    class(viscoelastic) :: this
-   !    class(config), target, intent(in) :: cfg
-   !    integer, intent(in) :: model
-   !    integer, intent(in) :: scheme
-   !    character(len=*), optional :: name
-   !    ! Create a six-scalar solver for conformation tensor
-   !    call this%initialize(cfg=cfg,scheme=scheme,nscalar=6,name=name)
-   !    this%SCname(1)='Cxx'
-   !    this%SCname(2)='Cxy'
-   !    this%SCname(3)='Cxz'
-   !    this%SCname(4)='Cyy'
-   !    this%SCname(5)='Cyz'
-   !    this%SCname(6)='Czz'
-   !    ! Assign closure model for viscoelastic fluid
-   !    this%model=model
-   ! end subroutine initialize
-
    
    !> Viscoelastic model initialization
-   subroutine ve_initialize(this,cfg,name,model)
+   subroutine init(this,cfg,model,scheme,name)
       implicit none
-      class(viscoelastic) :: this
+      class(viscoelastic), intent(inout) :: this
       class(config), target, intent(in) :: cfg
-      character(len=*), optional :: name
       integer, intent(in) :: model
-      ! Create a six-scalar solver for conformation tensor
-      call this%initialize(cfg=cfg,nscalar=6,name=name)
-      this%SCname(1)='Cxx'; this%phase(1)=0
-      this%SCname(2)='Cxy'; this%phase(2)=0
-      this%SCname(3)='Cxz'; this%phase(3)=0
-      this%SCname(4)='Cyy'; this%phase(4)=0
-      this%SCname(5)='Cyz'; this%phase(4)=0
-      this%SCname(6)='Czz'; this%phase(6)=0
+      integer, intent(in) :: scheme
+      character(len=*), optional :: name
+      ! Create a six-scalar solver for conformation tensor in the liquid
+      call this%multiscalar%initialize(cfg=cfg,scheme=scheme,nscalar=6,name=name)
+      this%SCname=['Cxx','Cxy','Cxz','Cyy','Cyz','Czz']
       ! Assign closure model for viscoelastic fluid
       this%model=model
-   end subroutine ve_initialize
-
-
-
+   end subroutine init
+   
+   
    !> Get CgradU source terms to add to multiscalar residual
    subroutine get_CgradU(this,gradU,resSC)
       implicit none
@@ -129,6 +89,7 @@ contains
          end do
       end do
    end subroutine get_CgradU
+   
 
    !> Get S*C terms for PTT equation
    subroutine get_affine(this,SR,resSC)
@@ -283,8 +244,9 @@ contains
             end do
          end do
       case default
-         call die('[Viscoelastic get_relax] Unknown viscoelastic model selected')
+         call die('[tpviscoelastic get_relax] Unknown viscoelastic model selected')
       end select
    end subroutine get_relax
-
+   
+   
 end module viscoelastic_class
