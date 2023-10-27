@@ -1,7 +1,8 @@
 !> viscoelastic fluid model class
-!> Extends multiscalar class for the calculation of source terms
+!> Extends tpscalar/multiscalar class for calculation of source terms
 module viscoelastic_class
-   use multiscalar_class, only: multiscalar
+   ! use multiscalar_class, only: multiscalar
+   use tpscalar_class,    only: tpscalar
    use config_class,      only: config
    use precision,         only: WP
    implicit none
@@ -18,50 +19,82 @@ module viscoelastic_class
    integer, parameter, public :: lptt=4              !< linear Phan-Thien-Tanner model
    integer, parameter, public :: eptt=5              !< exponential Phan-Thien-Tanner model
    
+   ! !> Constant density viscoelastic solver object definition
+   ! type, extends(multiscalar) :: viscoelastic
+   !    ! Model parameters
+   !    integer  :: model                                    !< Closure model
+   !    real(WP) :: trelax                                   !< Polymer relaxation timescale
+   !    real(WP) :: visc_p                                   !< Polymer viscosity
+   !    real(WP) :: Lmax                                     !< Polymer maximum extensibility in FENE model
+   !    real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
+   !    real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
+   ! contains
+   !    procedure :: initialize                              !< Initialization of viscoelastic class   
+   !    procedure :: get_CgradU                              !< Calculate streching and distrortion term
+   !    procedure :: get_relax                               !< Calculate relaxation term
+   !    procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
+   !    procedure :: get_max=>viscoelastic_get_max           !< Augment multiscalar's default monitoring
+   ! end type viscoelastic
+
    !> Constant density viscoelastic solver object definition
-   type, extends(multiscalar) :: viscoelastic
+   type, extends(tpscalar) :: viscoelastic
       ! Model parameters
       integer  :: model                                    !< Closure model
       real(WP) :: trelax                                   !< Polymer relaxation timescale
-      real(WP) :: visc_p                                   !< Polymer viscosity
+      real(WP) :: visc                                     !< Polymer viscosity
       real(WP) :: Lmax                                     !< Polymer maximum extensibility in FENE model
       real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
       real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
    contains
+      procedure :: ve_initialize                           !< Initialization of viscoelastic class   
       procedure :: get_CgradU                              !< Calculate streching and distrortion term
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
-      procedure :: get_max=>viscoelastic_get_max           !< Augment multiscalar's default monitoring
    end type viscoelastic
-   
-   !> Declare viscoelastic model constructor
-   interface viscoelastic
-      procedure construct_viscoelastic_from_args
-   end interface viscoelastic
    
    
 contains
    
+   ! !> Viscoelastic model initialization
+   ! subroutine initialize(this,cfg,model,scheme,name)
+   !    implicit none
+   !    class(viscoelastic) :: this
+   !    class(config), target, intent(in) :: cfg
+   !    integer, intent(in) :: model
+   !    integer, intent(in) :: scheme
+   !    character(len=*), optional :: name
+   !    ! Create a six-scalar solver for conformation tensor
+   !    call this%initialize(cfg=cfg,scheme=scheme,nscalar=6,name=name)
+   !    this%SCname(1)='Cxx'
+   !    this%SCname(2)='Cxy'
+   !    this%SCname(3)='Cxz'
+   !    this%SCname(4)='Cyy'
+   !    this%SCname(5)='Cyz'
+   !    this%SCname(6)='Czz'
+   !    ! Assign closure model for viscoelastic fluid
+   !    this%model=model
+   ! end subroutine initialize
+
    
-   !> Viscoelastic model constructor from multiscalar
-   function construct_viscoelastic_from_args(cfg,model,scheme,name) result(self)
+   !> Viscoelastic model initialization
+   subroutine ve_initialize(this,cfg,name,model)
       implicit none
-      type(viscoelastic) :: self
+      class(viscoelastic) :: this
       class(config), target, intent(in) :: cfg
-      integer, intent(in) :: model
-      integer, intent(in) :: scheme
       character(len=*), optional :: name
+      integer, intent(in) :: model
       ! Create a six-scalar solver for conformation tensor
-      self%multiscalar=multiscalar(cfg=cfg,scheme=scheme,nscalar=6,name=name)
-      self%SCname(1)='Cxx'
-      self%SCname(2)='Cxy'
-      self%SCname(3)='Cxz'
-      self%SCname(4)='Cyy'
-      self%SCname(5)='Cyz'
-      self%SCname(6)='Czz'
+      call this%initialize(cfg=cfg,nscalar=6,name=name)
+      this%SCname(1)='Cxx'; this%phase(1)=0
+      this%SCname(2)='Cxy'; this%phase(2)=0
+      this%SCname(3)='Cxz'; this%phase(3)=0
+      this%SCname(4)='Cyy'; this%phase(4)=0
+      this%SCname(5)='Cyz'; this%phase(4)=0
+      this%SCname(6)='Czz'; this%phase(6)=0
       ! Assign closure model for viscoelastic fluid
-      self%model=model
-   end function construct_viscoelastic_from_args
+      this%model=model
+   end subroutine ve_initialize
+
 
 
    !> Get CgradU source terms to add to multiscalar residual
@@ -253,21 +286,5 @@ contains
          call die('[Viscoelastic get_relax] Unknown viscoelastic model selected')
       end select
    end subroutine get_relax
-   
 
-   !> Calculate the min and max of our SC field
-   subroutine viscoelastic_get_max(this)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX,MPI_MIN
-      use parallel, only: MPI_REAL_WP
-      implicit none
-      class(viscoelastic), intent(inout) :: this
-      integer :: ierr,nsc
-      real(WP) :: my_SCmax,my_SCmin
-      do nsc=1,this%nscalar
-         my_SCmax=maxval(this%SC(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmax,this%SCmax(nsc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-         my_SCmin=minval(this%SC(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmin,this%SCmin(nsc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
-      end do
-   end subroutine viscoelastic_get_max
-
-
-end module viscoelastic_class_class
+end module viscoelastic_class
