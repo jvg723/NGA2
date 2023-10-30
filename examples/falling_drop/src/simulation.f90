@@ -219,7 +219,7 @@ contains
 								nn%SC(i,j,k,5)=0.0_WP !< Cyz
 								nn%SC(i,j,k,6)=5.0_WP !< Czz
       		   	     	   	else
-      		   	     	    	! We are in the pool (trC=I)
+      		   	     	    	! We are in the pool (trC=3)
 								nn%SC(i,j,:k,1)=1.0_WP !< Cxx
 								nn%SC(i,j,:k,2)=0.0_WP !< Cxy
 								nn%SC(i,j,:k,3)=0.0_WP !< Cxx

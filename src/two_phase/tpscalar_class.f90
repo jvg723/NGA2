@@ -74,7 +74,7 @@ module tpscalar_class
       
    contains
       procedure :: initialize                             !< Initialization of the scalar solver
-      procedure :: print=>multiscalar_print               !< Output solver to the screen
+      procedure :: print=>tpscalar_print                  !< Output solver to the screen
       procedure, private :: init_metrics                  !< Initialize metrics
       procedure, private :: adjust_metrics                !< Adjust metrics
       procedure :: setup                                  !< Finish configuring the scalar solver
