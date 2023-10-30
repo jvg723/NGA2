@@ -26,9 +26,7 @@ Carreau powerlaw exponent :     1.0         # 0.33          # 0.57
 Carreau reference timescale :   0.203        
 Polymer viscosity :             1.513     # 1.5122        # 0.096511
 Polymer relaxation time :       0.203         # 1.4           # 0.45
-Maximum polymer extensibility : 0
-Extensional viscosity parameter : 0.05
-Affine parameter                : 0.12
+Maximum polymer extensibility : 10
 
 # Time integration
 Max timestep size : 2e-4

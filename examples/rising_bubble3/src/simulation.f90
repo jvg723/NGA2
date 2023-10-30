@@ -6,7 +6,7 @@ module simulation
    use ddadi_class,           only: ddadi
    use tpns_class,            only: tpns
    use vfs_class,             only: vfs
-   use viscoelastic_class,    only: viscoelastic
+   use tpviscoelastic_class,  only: tpviscoelastic
    use timetracker_class,     only: timetracker
    use ensight_class,         only: ensight
    use event_class,           only: event
@@ -15,12 +15,12 @@ module simulation
    private
    
    !> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
-   type(hypre_str),     public :: ps
-   type(ddadi),         public :: vs
-   type(tpns),          public :: fs
-   type(vfs),           public :: vf
-   type(viscoelastic),  public :: ve
-   type(timetracker),   public :: time
+   type(hypre_str),        public :: ps
+   type(ddadi),            public :: vs
+   type(tpns),             public :: fs
+   type(vfs),              public :: vf
+   type(tpviscoelastic),   public :: ve
+   type(timetracker),      public :: time
    
    !> Ensight postprocessing
    type(ensight)  :: ens_out
@@ -32,9 +32,9 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: resSC,SCtmp,SR
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
@@ -212,7 +212,7 @@ contains
          use viscoelastic_class,    only: fenecr
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%ve_initialize(cfg=cfg,name='viscoelastic',model=fenecr)
+         call ve%init(cfg=cfg,model=fenecr,phase=0,name='viscoelastic')
          ! Maximum extensibility of polymer chain
          call param_read('Maximum polymer extensibility',ve%Lmax)
          ! Relaxation time for polymer
@@ -365,7 +365,7 @@ contains
 
 			! Add viscoleastic source terms
             viscoelastic_src: block
-               use fene_class, only: fenep,lptt,eptt
+               use tpviscoelastic_class, only: fenep,lptt,eptt
                integer :: n
                ! Streching and distortion term
                call ve%get_CgradU(gradU,SCtmp)
@@ -472,7 +472,7 @@ contains
             
             ! Add polymer stress term
             polymer_stress: block
-               use fene_class, only: fenecr,oldroydb,lptt,eptt
+               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt
                integer :: i,j,k,n
                real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
                real(WP), dimension(:,:,:,:), allocatable :: stress
