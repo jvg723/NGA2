@@ -9,7 +9,7 @@ module ligament_class
    use hypre_str_class,     only: hypre_str
    use ddadi_class,         only: ddadi
    use vfs_class,           only: vfs
-   use fene_class,          only: fene
+   use carreau_class,       only: carreau
    use lpt_class,           only: lpt
    use tpns_class,          only: tpns
    use transfermodel_class, only: transfermodels
@@ -33,7 +33,7 @@ module ligament_class
       type(hypre_str)   :: ps    !< Structured Hypre linear solver for pressure
       type(ddadi)       :: vs    !< DDADI solver for velocity 
       type(ddadi)       :: ss    !< DDADI solver for scalar
-      type(fene)        :: nn    !< FENE model for polymer stress
+      type(carreau)     :: nn
       type(timetracker) :: time  !< Time info
       type(event)       :: ppevt
       
@@ -58,7 +58,6 @@ module ligament_class
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
-      real(WP), dimension(:,:,:),     allocatable :: visc_total          !< Total liquid viscosity (visc_l+visc_p)
       real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU
       
@@ -162,7 +161,6 @@ contains
          allocate(this%Ui        (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vi        (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wi        (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%visc_total(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%resSC     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
@@ -275,40 +273,38 @@ contains
          call this%fs%get_div()
       end block create_flow_solver
 
-     ! Create a FENE model 
-      create_fene: block 
-         use multiscalar_class, only: bquick
-         use fene_class,        only: fenecr,oldroydb
-         use param,             only: param_read
-         integer :: i,j,k
-         ! Create FENE model solver
-         this%nn=fene(cfg=this%cfg,model=fenecr,scheme=bquick,name='FENE')
-         ! Assign unity density for simplicity
-         this%nn%rho=1.0_WP
-         ! Maximum extensibility of polymer chain
-         call param_read('Maximum polymer extensibility',this%nn%Lmax)
-         ! Relaxation time for polymer
-         call param_read('Polymer relaxation time',this%nn%trelax)
-         ! Polymer viscosity at zero strain rate
-         call param_read('Polymer viscosity ratio',this%nn%visc); this%nn%visc=this%fs%visc_g*this%nn%visc; this%nn%visc_p=this%nn%visc
-         ! Powerlaw coefficient in Carreau model
+     ! Create a viscoleastic model
+      create_viscoelastic: block
+         use param,           only: param_read
+         ! use viscoelastic_class, only: fenecr
+         ! integer :: i,j,k
+         ! ! Create viscoelastic model solver
+         ! call ve%init(cfg=cfg,model=fenecr,phase=0,name='viscoelastic')
+         ! ! Maximum extensibility of polymer chain
+         ! call param_read('Maximum polymer extensibility',ve%Lmax)
+         ! ! Relaxation time for polymer
+         ! call param_read('Polymer relaxation time',ve%trelax)
+         ! ! Setup without an implicit solver
+         ! call ve%setup()
+         ! ! Initialize scalar fields
+         ! do k=cfg%kmino_,cfg%kmaxo_
+         !    do j=cfg%jmino_,cfg%jmaxo_
+         !       do i=cfg%imino_,cfg%imaxo_
+         !          if (vf%VF(i,j,k).gt.0.0_WP) then
+         !             ve%SC(i,j,k,1)=1.0_WP !< Cxx
+         !             ve%SC(i,j,k,4)=1.0_WP !< Cyy
+         !             ve%SC(i,j,k,6)=1.0_WP !< Czz
+         !          end if
+         !       end do
+         !    end do
+         ! end do
+         ! Create Carreau model
+         call this%nn%initialize(cfg=this%cfg)
+         call param_read('Polymer viscosity ratio',this%nn%visc_zero); this%nn%visc_zero=this%fs%visc_g*this%nn%visc_zero; this%nn%visc=this%nn%visc_zero
          call param_read('Carreau powerlaw',this%nn%ncoeff)
-         ! Reference time scale in in Carreau model
-         call param_read('Carreau reference timescale',this%nn%alphacoeff)
-         ! Configure implicit scalar solver
-         this%ss=ddadi(cfg=this%cfg,name='scalar',nst=13)
-         ! Setup the solver
-         call this%nn%setup(implicit_solver=this%ss)
-         ! Initialize conformation tensor to identity
-         this%nn%SC(:,:,:,1)=1.0_WP !< Cxx
-         this%nn%SC(:,:,:,4)=1.0_WP !< Cyy
-         this%nn%SC(:,:,:,6)=1.0_WP !< Czz
-      end block create_fene
-
-      ! Total liquid viscosity
-      total_viscosity: block
-         this%visc_total=this%fs%visc_l+this%nn%visc_p
-      end block total_viscosity
+         call param_read('Carreau reference timescale',this%nn%tref)
+         ! nn%tref=ve%trelax
+      end block create_viscoelastic
 
       ! Create a Lagrangian spray tracker
       create_lpt: block
@@ -333,20 +329,13 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=13,name='plic')
+         this%smesh=surfmesh(nvar=6,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='curv'
          this%smesh%varname(3)='edge_sensor'
          this%smesh%varname(4)='thin_sensor'
          this%smesh%varname(5)='thickness'
-         this%smesh%varname(6)='x_velocity'
-         this%smesh%varname(7)='y_velocity'
-         this%smesh%varname(8)='z_velocity'
-         this%smesh%varname(9)='visc_l'
-         this%smesh%varname(10)='SRmag'
-         this%smesh%varname(11)='cxx'
-         this%smesh%varname(12)='cyy'
-         this%smesh%varname(13)='czz'
+         this%smesh%varname(6)='visc_p'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -357,13 +346,6 @@ contains
          this%smesh%var(4,:)=0.0_WP
          this%smesh%var(5,:)=0.0_WP
          this%smesh%var(6,:)=0.0_WP
-         this%smesh%var(7,:)=0.0_WP
-         this%smesh%var(8,:)=0.0_WP
-         this%smesh%var(9,:)=0.0_WP
-         this%smesh%var(10,:)=0.0_WP
-         this%smesh%var(11,:)=0.0_WP
-         this%smesh%var(12,:)=0.0_WP
-         this%smesh%var(13,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -375,14 +357,7 @@ contains
                         this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
                         this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
                         this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                        this%smesh%var(6,np)=this%Ui(i,j,k)
-                        this%smesh%var(7,np)=this%Vi(i,j,k)
-                        this%smesh%var(8,np)=this%Wi(i,j,k)
-                        this%smesh%var(9,np)=this%visc_total(i,j,k)
-                        this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
-                        this%smesh%var(11,np)=this%nn%SC(i,j,k,1)
-                        this%smesh%var(12,np)=this%nn%SC(i,j,k,4)
-                        this%smesh%var(13,np)=this%nn%SC(i,j,k,6)
+                        this%smesh%var(6,np)=this%nn%visc(i,j,k)
                      end if
                   end do
                end do
@@ -425,12 +400,10 @@ contains
          call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
          call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
-         call this%ens_out%add_scalar('visc_l',this%visc_total)
-         do nsc=1,this%nn%nscalar
-            call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
-         end do
+         ! do nsc=1,this%nn%nscalar
+         !    call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
+         ! end do
          call this%ens_out%add_particle('spray',this%pmesh)
-         call this%ens_out%add_scalar('SRmag',this%nn%SRmag)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -443,7 +416,7 @@ contains
          call this%fs%get_max()
          call this%vf%get_max()
          call this%lp%get_max()
-         call this%nn%get_max()
+         ! call this%nn%get_max()
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -476,14 +449,14 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
          ! Create scalar monitor
-         this%scfile=monitor(this%nn%cfg%amRoot,'scalar')
-         call this%scfile%add_column(this%time%n,'Timestep number')
-         call this%scfile%add_column(this%time%t,'Time')
-         do nsc=1,this%nn%nscalar
-            call this%scfile%add_column(this%nn%SCmin(nsc),trim(this%nn%SCname(nsc))//'_min')
-            call this%scfile%add_column(this%nn%SCmax(nsc),trim(this%nn%SCname(nsc))//'_max')
-         end do
-         call this%scfile%write()
+         ! this%scfile=monitor(this%nn%cfg%amRoot,'scalar')
+         ! call this%scfile%add_column(this%time%n,'Timestep number')
+         ! call this%scfile%add_column(this%time%t,'Time')
+         ! do nsc=1,this%nn%nscalar
+         !    call this%scfile%add_column(this%nn%SCmin(nsc),trim(this%nn%SCname(nsc))//'_min')
+         !    call this%scfile%add_column(this%nn%SCmax(nsc),trim(this%nn%SCname(nsc))//'_max')
+         ! end do
+         ! call this%scfile%write()
          ! Create a spray monitor
          this%sprayfile=monitor(amroot=this%lp%cfg%amRoot,name='spray')
          call this%sprayfile%add_column(this%time%n,'Timestep number')
@@ -573,8 +546,8 @@ contains
       this%fs%Vold=this%fs%V
       this%fs%Wold=this%fs%W
 
-      ! Remember old scalars
-      this%nn%SCold=this%nn%SC
+      ! ! Remember old scalars
+      ! this%nn%SCold=this%nn%SC
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
@@ -688,7 +661,7 @@ contains
             ! Calculate strain rate
             call this%fs%get_strainrate(SR)
             ! Update polymer viscosity using Carreau model
-            call this%nn%update_visc_p(SR)
+            call this%nn%update_visc(SR)
             ! Handle mixture viscosity
             do k=this%fs%cfg%kmino_+1,this%fs%cfg%kmaxo_
                do j=this%fs%cfg%jmino_+1,this%fs%cfg%jmaxo_
@@ -697,31 +670,29 @@ contains
                      liq_vol=sum(this%vf%Lvol(:,:,:,i,j,k))
                      gas_vol=sum(this%vf%Gvol(:,:,:,i,j,k))
                      tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+this%nn%visc_p(i,j,k)
+                     visc_l=this%fs%visc_l+this%nn%visc(i,j,k)
                      this%fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
                      ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
                      liq_vol=sum(this%vf%Lvol(0,0,:,i,j,k))+sum(this%vf%Lvol(1,0,:,i-1,j,k))+sum(this%vf%Lvol(0,1,:,i,j-1,k))+sum(this%vf%Lvol(1,1,:,i-1,j-1,k))
                      gas_vol=sum(this%vf%Gvol(0,0,:,i,j,k))+sum(this%vf%Gvol(1,0,:,i-1,j,k))+sum(this%vf%Gvol(0,1,:,i,j-1,k))+sum(this%vf%Gvol(1,1,:,i-1,j-1,k))
                      tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+sum(this%fs%itp_xy(:,:,i,j,k)*this%nn%visc_p(i-1:i,j-1:j,k))
+                     visc_l=this%fs%visc_l+sum(this%fs%itp_xy(:,:,i,j,k)*this%nn%visc(i-1:i,j-1:j,k))
                      this%fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_xy(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
                      ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
                      liq_vol=sum(this%vf%Lvol(:,0,0,i,j,k))+sum(this%vf%Lvol(:,1,0,i,j-1,k))+sum(this%vf%Lvol(:,0,1,i,j,k-1))+sum(this%vf%Lvol(:,1,1,i,j-1,k-1))
                      gas_vol=sum(this%vf%Gvol(:,0,0,i,j,k))+sum(this%vf%Gvol(:,1,0,i,j-1,k))+sum(this%vf%Gvol(:,0,1,i,j,k-1))+sum(this%vf%Gvol(:,1,1,i,j-1,k-1))
                      tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+sum(this%fs%itp_yz(:,:,i,j,k)*this%nn%visc_p(i,j-1:j,k-1:k))
+                     visc_l=this%fs%visc_l+sum(this%fs%itp_yz(:,:,i,j,k)*this%nn%visc(i,j-1:j,k-1:k))
                      this%fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_yz(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
                      ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
                      liq_vol=sum(this%vf%Lvol(0,:,0,i,j,k))+sum(this%vf%Lvol(0,:,1,i,j,k-1))+sum(this%vf%Lvol(1,:,0,i-1,j,k))+sum(this%vf%Lvol(1,:,1,i-1,j,k-1))
                      gas_vol=sum(this%vf%Gvol(0,:,0,i,j,k))+sum(this%vf%Gvol(0,:,1,i,j,k-1))+sum(this%vf%Gvol(1,:,0,i-1,j,k))+sum(this%vf%Gvol(1,:,1,i-1,j,k-1))
                      tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+sum(this%fs%itp_xz(:,:,i,j,k)*this%nn%visc_p(i-1:i,j,k-1:k))
+                     visc_l=this%fs%visc_l+sum(this%fs%itp_xz(:,:,i,j,k)*this%nn%visc(i-1:i,j,k-1:k))
                      this%fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_zx(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
                   end do
                end do
             end do
-            ! Total liquid viscosity
-            this%visc_total=this%fs%visc_l+this%nn%visc_p
             ! Deallocate SR array
             deallocate(SR)
          end block shear_thinning
@@ -851,13 +822,6 @@ contains
             this%smesh%var(4,:)=0.0_WP
             this%smesh%var(5,:)=0.0_WP
             this%smesh%var(6,:)=0.0_WP
-            this%smesh%var(7,:)=0.0_WP
-            this%smesh%var(8,:)=0.0_WP
-            this%smesh%var(9,:)=0.0_WP
-            this%smesh%var(10,:)=0.0_WP
-            this%smesh%var(11,:)=0.0_WP
-            this%smesh%var(12,:)=0.0_WP
-            this%smesh%var(13,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -869,14 +833,7 @@ contains
                            this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
                            this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
                            this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                           this%smesh%var(6,np)=this%Ui(i,j,k)
-                           this%smesh%var(7,np)=this%Vi(i,j,k)
-                           this%smesh%var(8,np)=this%Wi(i,j,k)
-                           this%smesh%var(9,np)=this%visc_total(i,j,k)
-                           this%smesh%var(10,np)=this%nn%SRmag(i,j,k)
-                           this%smesh%var(11,np)=this%nn%SC(i,j,k,1)
-                           this%smesh%var(12,np)=this%nn%SC(i,j,k,4)
-                           this%smesh%var(13,np)=this%nn%SC(i,j,k,6)
+                           this%smesh%var(6,np)=this%nn%visc(i,j,k)
                         end if
                      end do
                   end do
@@ -906,7 +863,7 @@ contains
       call this%fs%get_max()
       call this%vf%get_max()
       call this%lp%get_max()
-      call this%nn%get_max()
+      ! call this%nn%get_max()
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()
