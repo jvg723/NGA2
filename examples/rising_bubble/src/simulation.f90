@@ -34,15 +34,15 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
    real(WP), dimension(3) :: center,gravity
    real(WP) :: radius,Ycent,Vrise
-   
+
 contains
 
 
@@ -128,10 +128,10 @@ contains
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF',store_detailed_flux=.true.)
          ! Initialize a bubble
          call param_read('Bubble position',center)
-         ! call param_read('Bubble volume',radius)
-         ! radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)*0.001_WP
-         call param_read('Bubble diameter',radius)
-         radius=0.5_WP*radius
+         call param_read('Bubble volume',radius)
+         radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)*0.001_WP
+         ! call param_read('Bubble diameter',radius)
+         ! radius=0.5_WP*radius
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -235,9 +235,10 @@ contains
          end do
          ! Create Carreau model
          call nn%initialize(cfg=cfg)
-         call param_read('Polymer viscosity',nn%visc_zero)
+         call param_read('Polymer viscosity',nn%visc_zero); nn%visc=nn%visc_zero
          call param_read('Carreau powerlaw',nn%ncoeff)
-         nn%tref=ve%trelax
+         call param_read('Carreau reference timescale',nn%tref)
+         ! nn%tref=ve%trelax
       end block create_viscoelastic
       
       
@@ -258,7 +259,7 @@ contains
          do nsc=1,ve%nscalar
             call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
          end do
-         call ens_out%add_scalar('visc_p',nn%visc_p)
+         call ens_out%add_scalar('visc_p',nn%visc)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight

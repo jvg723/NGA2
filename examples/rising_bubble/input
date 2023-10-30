@@ -3,33 +3,34 @@ Partition :	1 8 1
 
 # Mesh definition
 Lx :	0.025
-Ly :	0.1
+Ly :	0.05
 Lz :	0.00025
-nx :	128
-ny :	512
+nx :	64
+ny :	128
 nz :	1
 
-# Fluid properties                              # (Owkes and Desjardins 2016)
-Gravity :                     0 -9.81 0         # Case 1              Case 2
-Liquid dynamic viscosity :    2.800             # 2.8      (N*s/m^2)  1.314      (N*s/m^2) 
-Gas dynamic viscosity :       1.780e-5          # 1.780e-5 (N*s/m^2)  1.780e-5 (N*s/m^2) 
-Liquid density :              1390              # 1390     (kg/m^3)   1390     (kg/m^3)
-Gas density :                 1.226             # 1.226    (kg/m^3)   1.226    (kg/m^3)
-Surface tension coefficient : 0.08              # 0.08     (N/m)      0.08     (N/m)
+# Fluid properties
+Gravity :                     0 -9.81 0
+Liquid dynamic viscosity :    0.018
+Gas dynamic viscosity :       1.780e-5
+Liquid density :              1000.9
+Gas density :                 1.226
+Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   45    # in mm^3
+Bubble volume :   45.8    # in mm^3
 Bubble position : 0 0.01 0
 
-# Non-Newtonian modeling                    # w=0.8 case    # w=0.3 case
-Carreau powerlaw :              1.0         # 0.33          # 0.57
-Polymer viscosity :             0          # 1.5122        # 0.096511
-Polymer relaxation time :       0.3         # 1.4           # 0.45
+# Non-Newtonian modeling                     # w=0.8 case    # w=0.3 case
+Carreau powerlaw :              0.33         # 0.33          # 0.57
+Carreau reference timescale :   1.400        
+Polymer viscosity :             1.512     # 1.5122        # 0.096511
+Polymer relaxation time :       0.207         # 1.4           # 0.45
 Maximum polymer extensibility : 10
 
 # Time integration
-Max timestep size : 1e-4
-Max cfl number :    2.5
+Max timestep size : 2e-4
+Max cfl number :    0.9
 Max time :          2
 
 # Pressure solver
