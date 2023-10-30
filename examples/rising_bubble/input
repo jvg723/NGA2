@@ -18,9 +18,8 @@ Gas density :                 1.226             # 1.226    (kg/m^3)   1.226    (
 Surface tension coefficient : 0.08              # 0.08     (N/m)      0.08     (N/m)
 
 # Bubble definition
-# Bubble volume :   9300    # in mm^3
-Bubble diameter : 0.02609
-Bubble position : 0 0.078 0
+Bubble volume :   45    # in mm^3
+Bubble position : 0 0.01 0
 
 # Non-Newtonian modeling                    # w=0.8 case    # w=0.3 case
 Carreau powerlaw :              1.0         # 0.33          # 0.57
@@ -29,7 +28,7 @@ Polymer relaxation time :       0.3         # 1.4           # 0.45
 Maximum polymer extensibility : 10
 
 # Time integration
-Max timestep size : 2e-4
+Max timestep size : 1e-4
 Max cfl number :    2.5
 Max time :          2
 

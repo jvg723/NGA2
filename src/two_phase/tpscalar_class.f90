@@ -42,7 +42,7 @@ module tpscalar_class
       character(len=str_medium) :: name='UNNAMED_SCALAR'  !< Solver name (default=UNNAMED_SCALAR)
       
       ! Constant property fluid, but diffusivity is still a field due to LES modeling
-      integer, dimension(:), allocatable :: phase         !< This is the phase for each scalar (0=gas, 1=liquid)
+      integer, dimension(:), allocatable :: phase         !< This is the phase for each scalar (0=liquid, 1=gas)
       real(WP), dimension(:,:,:,:), allocatable :: diff   !< These is our constant+SGS dynamic diffusivity for the scalar
       
       ! Boundary condition list
@@ -697,7 +697,7 @@ contains
    end subroutine solve_implicit
    
    
-   !> Print out info for multiscalar solver
+   !> Print out info for tpscalar solver
    subroutine tpscalar_print(this)
       use, intrinsic :: iso_fortran_env, only: output_unit
       implicit none
