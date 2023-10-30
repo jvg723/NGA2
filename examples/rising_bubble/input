@@ -2,12 +2,12 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.025
-Ly :	0.05
-Lz :	0.00025
-nx :	128
-ny :	256
-nz :	1
+Lx :	0.0222
+Ly :	0.0222
+Lz :	0.0222
+nx :	128 
+ny :	128 
+nz :	128 
 
 # Fluid properties
 Gravity :                     0 -9.81 0
@@ -19,7 +19,7 @@ Surface tension coefficient : 0.07555
 
 # Bubble definition
 Bubble volume :   45.8    # in mm^3
-Bubble position : 0 0.01 0
+Bubble position : 0 0.0111 0
 
 # Non-Newtonian modeling                     # w=0.8 case    # w=0.3 case
 Carreau powerlaw :              0.33         # 0.33          # 0.57
@@ -39,3 +39,8 @@ Pressure iteration : 100
 
 # Ensight output
 Ensight output period : 1e-2
+
+# Controller constants
+Controller gain:            100
+Integral reset time :       0.01
+Derivative time constant :  0.0

@@ -29,7 +29,7 @@ module simulation
    type(event)   :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,scfile
+   type(monitor) :: mfile,cflfile,scfile,ctfile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -41,7 +41,10 @@ module simulation
    
    !> Problem definition
    real(WP), dimension(3) :: center,gravity
-   real(WP) :: radius,Ycent,Vrise
+   real(WP) :: radius,Vrise,Uin,Uin_old
+   real(WP) :: Ycent,Ycent_old,Ycent_0
+   real(WP) :: Kc,tau_i,tau_d
+   real(WP) :: ek,e_sum
 
 contains
 
@@ -55,6 +58,28 @@ contains
       ! Create the bubble
       G=-radius+sqrt(sum((xyz-center)**2))
    end function levelset_rising_bubble
+
+   !> Function that localizes the y+ side of the domain
+   function yp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmax+1) isIn=.true.
+   end function yp_locator
+
+   !> Function that localizes the y- side of the domain
+   function ym_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmin) isIn=.true.
+   end function ym_locator
    
    
    !> Routine that computes rise velocity
@@ -64,8 +89,8 @@ contains
       implicit none
       integer :: i,j,k,ierr
       real(WP) :: myYcent,myVrise,myvol,bubble_vol
-      myVrise=0.0_WP
-      myvol=0.0_WP
+      myVrise=0.0_WP; myYcent=0.0_WP; myvol=0.0_WP
+      Vrise=0.0_WP; Ycent=0.0_WP; bubble_vol=0.0_WP
       do k=vf%cfg%kmin_,vf%cfg%kmax_
          do j=vf%cfg%jmin_,vf%cfg%jmax_
             do i=vf%cfg%imin_,vf%cfg%imax_
@@ -81,6 +106,21 @@ contains
       Ycent=Ycent/bubble_vol
       Vrise=Vrise/bubble_vol
    end subroutine
+
+   !> Controller to calcualte inflow velocity to keep bubble y centroid constant
+   function controller(ek,Kc,tau_i,e_sum,tau_d,PV,PV_old,dt) result(uk)
+      real(WP), intent(in) :: ek       !< Error at current time step
+      real(WP), intent(in) :: Kc       !< Controller gain
+      real(WP), intent(in) :: tau_i    !< Integral time constant
+      real(WP), intent(in) :: e_sum    !< Summation of error
+      real(WP), intent(in) :: tau_d    !< Derivative time constant
+      real(WP), intent(in) :: PV       !< Process variable at current time step
+      real(WP), intent(in) :: PV_old   !< Process variable at previous time step
+      real(WP), intent(in) :: dt       !< Current time step
+      real(WP) :: uk                   !< controller output at current time step
+      ! Controller output
+      uk=Kc*ek+(Kc/tau_i)*e_sum-Kc*tau_d*(Pv-PV_old)/dt
+   end function controller
    
    
    !> Initialization of problem solver
@@ -175,11 +215,26 @@ contains
          ! Reset moments to guarantee compatibility with interface reconstruction
          call vf%reset_volume_moments()
       end block create_and_initialize_vof
+
+      ! Initialize controler
+      control_variables: block
+         ! Controller paramters
+         call param_read('Controller gain',Kc)
+         call param_read('Integral reset time',tau_i)
+         call param_read('Derivative time constant',tau_d)
+         ! Get original bubble y centroid
+         call rise_vel(); Ycent_0=Ycent; Ycent_old=Ycent
+         ! Error terms
+         ek=0.0_WP; e_sum=0.0_WP
+      end block control_variables 
       
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use hypre_str_class, only: pcg_pfmg2
+         use tpns_class,      only: bcond,clipped_neumann,dirichlet
+         type(bcond), pointer :: mybc
+         integer :: n,i,j,k
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
@@ -192,6 +247,10 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          ! Assign acceleration of gravity
          call param_read('Gravity',gravity); fs%gravity=gravity
+         ! Dirichlet inflow at the top
+         call fs%add_bcond(name='inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+         ! Outflow at the bottom
+         call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
@@ -203,6 +262,24 @@ contains
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
+         ! Error at current time step
+         ek=Ycent_0-Ycent
+         ! Sum errors up to current time
+         e_sum=e_sum+ek*time%dt
+         ! Rember old inflow velocity at preivous time step
+         Uin_old=0.0_WP
+         ! Inflow velocity
+         Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+         ! Setup inflow at top of domain
+         call fs%get_bcond('inflow',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%V(i,j,k)=Uin
+         end do
+         ! Apply other boundary conditions
+         call fs%apply_bcond(time%t,time%dt)
+         ! Adjust MFR for global mass balance
+         call fs%correct_mfr()
          ! Calculate cell-centered velocities and divergence
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
@@ -305,6 +382,15 @@ contains
          call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
          call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
          call cflfile%write()
+         ! Create controller monitor
+         ctfile=monitor(fs%cfg%amRoot,'controller')
+         call ctfile%add_column(time%n,'Timestep number')
+         call ctfile%add_column(time%t,'Time')
+         call ctfile%add_column(time%dt,'Timestep size')
+         call ctfile%add_column(Ycent,'Y centroid')
+         call ctfile%add_column(ek,'Error')
+         call ctfile%add_column(Uin,'Inflow velocity')
+         call ctfile%write()
          ! Create scalar monitor
          scfile=monitor(ve%cfg%amRoot,'scalar')
          call scfile%add_column(time%n,'Timestep number')
@@ -333,6 +419,27 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call time%adjust_dt()
          call time%increment()
+
+         ! Apply time-varying Dirichlet conditions
+         reapply_dirichlet: block
+            use tpns_class, only: bcond
+            type(bcond), pointer :: mybc
+            integer  :: n,i,j,k
+            ! Error at current time step
+            ek=Ycent_0-Ycent
+            ! Sum errors up to current time
+            e_sum=e_sum+ek*time%dt
+            ! Rember old inflow velocity at preivous time step
+            Uin_old=Uin
+            ! Inflow velocity
+            Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+            ! Setup inflow at top of domain
+            call fs%get_bcond('inflow',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               fs%V(i,j,k)=Uin
+            end do
+         end block reapply_dirichlet
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -439,6 +546,18 @@ contains
             
             ! Add momentum source terms - adjust gravity if accelerating frame of reference
             call fs%addsrc_gravity(resU,resV,resW)
+
+            ! Body forcing from non-inertial frame
+            moving_frame: block
+               integer :: i,j,k
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
+                     end do
+                  end do
+               end do
+            end block moving_frame
             
             ! Add polymer stress term
             polymer_stress: block
@@ -531,15 +650,21 @@ contains
          
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
+
+         ! Store old bubble y center
+         Ycent_old=Ycent
+         
+         ! Rise velocity and bubble center
+         call rise_vel()
          
          ! Perform and output monitoring
          call ve%get_max(vf%VF)
          call fs%get_max()
          call vf%get_max()
-         call rise_vel()
          call mfile%write()
          call cflfile%write()
          call scfile%write()
+         call ctfile%write()
          
       end do
       
