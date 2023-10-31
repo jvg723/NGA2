@@ -247,10 +247,10 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          ! Assign acceleration of gravity
          call param_read('Gravity',gravity); fs%gravity=gravity
-         ! Dirichlet inflow at the top
-         call fs%add_bcond(name='inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
-         ! Outflow at the bottom
-         call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         ! ! Dirichlet inflow at the top
+         ! call fs%add_bcond(name='inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+         ! ! Outflow at the bottom
+         ! call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
@@ -262,20 +262,20 @@ contains
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-         ! Error at current time step
-         ek=Ycent_0-Ycent
-         ! Sum errors up to current time
-         e_sum=e_sum+ek*time%dt
-         ! Rember old inflow velocity at preivous time step
-         Uin_old=0.0_WP
-         ! Inflow velocity
-         Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-         ! Setup inflow at top of domain
-         call fs%get_bcond('inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=Uin
-         end do
+         ! ! Error at current time step
+         ! ek=Ycent_0-Ycent
+         ! ! Sum errors up to current time
+         ! e_sum=e_sum+ek*time%dt
+         ! ! Rember old inflow velocity at preivous time step
+         ! Uin_old=0.0_WP
+         ! ! Inflow velocity
+         ! Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+         ! ! Setup inflow at top of domain
+         ! call fs%get_bcond('inflow',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    fs%V(i,j,k)=Uin
+         ! end do
          ! Apply other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
          ! Adjust MFR for global mass balance
@@ -420,26 +420,26 @@ contains
          call time%adjust_dt()
          call time%increment()
 
-         ! Apply time-varying Dirichlet conditions
-         reapply_dirichlet: block
-            use tpns_class, only: bcond
-            type(bcond), pointer :: mybc
-            integer  :: n,i,j,k
-            ! Error at current time step
-            ek=Ycent_0-Ycent
-            ! Sum errors up to current time
-            e_sum=e_sum+ek*time%dt
-            ! Rember old inflow velocity at preivous time step
-            Uin_old=Uin
-            ! Inflow velocity
-            Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-            ! Setup inflow at top of domain
-            call fs%get_bcond('inflow',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=Uin
-            end do
-         end block reapply_dirichlet
+         ! ! Apply time-varying Dirichlet conditions
+         ! reapply_dirichlet: block
+         !    use tpns_class, only: bcond
+         !    type(bcond), pointer :: mybc
+         !    integer  :: n,i,j,k
+         !    ! Error at current time step
+         !    ek=Ycent_0-Ycent
+         !    ! Sum errors up to current time
+         !    e_sum=e_sum+ek*time%dt
+         !    ! Rember old inflow velocity at preivous time step
+         !    Uin_old=Uin
+         !    ! Inflow velocity
+         !    Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+         !    ! Setup inflow at top of domain
+         !    call fs%get_bcond('inflow',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       fs%V(i,j,k)=Uin
+         !    end do
+         ! end block reapply_dirichlet
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -547,17 +547,17 @@ contains
             ! Add momentum source terms - adjust gravity if accelerating frame of reference
             call fs%addsrc_gravity(resU,resV,resW)
 
-            ! Body forcing from non-inertial frame
-            moving_frame: block
-               integer :: i,j,k
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
-                     end do
-                  end do
-               end do
-            end block moving_frame
+            ! ! Body forcing from non-inertial frame
+            ! moving_frame: block
+            !    integer :: i,j,k
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
+            !          end do
+            !       end do
+            !    end do
+            ! end block moving_frame
             
             ! Add polymer stress term
             polymer_stress: block
