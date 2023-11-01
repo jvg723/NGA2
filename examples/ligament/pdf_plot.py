@@ -77,6 +77,7 @@ os.chdir('/Users/josephgiliberto/Builds/NGA2/examples/ligament/DONTDELETE_pdf_da
 fig1, ax1 = plt.subplots(dpi=300,figsize=[6,5]) 
 fig2, ax2 = plt.subplots(dpi=300,figsize=[6,5]) 
 fig3, ax3 = plt.subplots(dpi=300,figsize=[6,5]) 
+fig4, ax4 = plt.subplots(dpi=300,figsize=[6,5]) 
 
 #02_lig (viscr=50,Case 1)
 diam=0.0; weights=0.0; vals2=0.0; edges2=0.0; edgemed2=0.0
@@ -136,6 +137,7 @@ vals2,edges2 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  #
 edgemed2 = (edges2[:-1]+edges2[1:])/2
 ax2.plot(edgemed2,vals2,'-x',linewidth=2.0,label='Case 3')
 ax3.plot(edgemed2,vals2,'r-o',linewidth=2.0)
+ax4.plot(edgemed2,vals2,'k-o',linewidth=2.0,label=r'$n=1.0$')
 
 # Figure 2: visc_r=50 comparison
 ax2.set_xlabel(dimless_x_label)
@@ -149,4 +151,29 @@ ax3.set_xlabel(dimless_x_label)
 ax3.set_ylabel(r'volume weighted PDF')
 ax3.legend()
 fig3.suptitle(r'$\mu_l/\mu_g-comparison$',fontsize=20)
-fig3.savefig(plot_name+'_viscr_comparison.png') 
+fig3.savefig(plot_name+'_viscr_comparison.png')
+
+### Shear thinning data
+
+#11_lig (viscr=500,n=0.8)
+diam=0.0; weights=0.0; vals4=0.0; edges4=0.0; edgemed4=0.0
+diam,u,v,w,vel_total = np.genfromtxt('lig_11_st.txt',skip_header=1,usecols=(0,1,2,3,4),unpack=True)
+weights = np.pi/6.0*diam**3.0 # Weight by volume
+vals4,edges4 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  # arguments are passed to np.histogram
+edgemed4 = (edges4[:-1]+edges4[1:])/2
+ax4.plot(edgemed4,vals4,'r-o',linewidth=2.0,label=r'$n=0.8$')
+
+#11_lig (viscr=500,n=0.8)
+diam=0.0; weights=0.0; vals4=0.0; edges4=0.0; edgemed4=0.0
+diam,u,v,w,vel_total = np.genfromtxt('lig_12_st.txt',skip_header=1,usecols=(0,1,2,3,4),unpack=True)
+weights = np.pi/6.0*diam**3.0 # Weight by volume
+vals4,edges4 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  # arguments are passed to np.histogram
+edgemed4 = (edges4[:-1]+edges4[1:])/2
+ax4.plot(edgemed4,vals4,'b-o',linewidth=2.0,label=r'$n=0.5$')
+
+# Figure 4: Shear-thinning comparison
+ax4.set_xlabel(dimless_x_label)
+ax4.set_ylabel(r'volume weighted PDF')
+ax4.legend()
+fig4.suptitle('Impact of n',fontsize=20)
+fig4.savefig(plot_name+'_n_comparison.png')
