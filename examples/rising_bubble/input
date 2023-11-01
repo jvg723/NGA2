@@ -2,31 +2,33 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.05
-Ly :	0.1
-Lz :	0.0005
-nx :	256 
-ny :	512 
-nz :	1
+Lx :	0.021
+Ly :	0.021
+Lz :	0.000021
+nx :	128 
+ny :	128 
+nz :	1 
 
 # Fluid properties
 Gravity :                     0 -9.81 0
-Liquid dynamic viscosity :    0.018
+Liquid dynamic viscosity :    0.03
 Gas dynamic viscosity :       1.780e-5
 Liquid density :              1000.9
 Gas density :                 1.226
 Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   91.6    # in mm^3
-Bubble position : 0 0.02 0
+Bubble volume :   40    # in mm^3
+Bubble position : 0 0.0105 0
 
 # Non-Newtonian modeling                     # w=0.8 case    # w=0.3 case
-Carreau powerlaw :              0.33         # 0.33          # 0.57
-Carreau reference timescale :   1.400        
-Polymer viscosity :             1.512     # 1.5122        # 0.096511
+Carreau powerlaw :              1.0         # 0.33          # 0.57
+Carreau reference timescale :   0.0        
+Polymer viscosity :             1.483     # 1.5122        # 0.096511
 Polymer relaxation time :       0.207         # 1.4           # 0.45
-Maximum polymer extensibility : 10
+Maximum polymer extensibility : 0
+Extensional viscosity parameter : 0.05
+Affine parameter                : 0.12
 
 # Time integration
 Max timestep size : 2e-4
