@@ -2,9 +2,9 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.0193
-Ly :	0.0386
-Lz :	0.000193
+Lx :	0.02556
+Ly :	0.05112
+Lz :	0.0002556
 nx :	128 
 ny :	256 
 nz :	1 
@@ -18,7 +18,7 @@ Gas density :                 1.226
 Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   30    # in mm^3
+Bubble volume :   70    # in mm^3
 Bubble position : 0 0.005 0
 
 # Non-Newtonian modeling                     
