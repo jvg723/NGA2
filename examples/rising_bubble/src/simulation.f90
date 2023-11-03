@@ -695,8 +695,8 @@ contains
          ! ! Store old bubble y center
          ! Ycent_old=Ycent
          
-         ! ! Rise velocity and bubble center
-         ! call rise_vel()
+         ! Rise velocity and bubble center
+         call rise_vel()
          
          ! Perform and output monitoring
          call ve%get_max(vf%VF)
