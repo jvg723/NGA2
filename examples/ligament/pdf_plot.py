@@ -150,7 +150,7 @@ fig2.savefig(plot_name+'_viscr_500.png')
 ax3.set_xlabel(dimless_x_label)
 ax3.set_ylabel(r'volume weighted PDF')
 ax3.legend()
-fig3.suptitle(r'$\mu_l/\mu_g-comparison$',fontsize=20)
+fig3.suptitle(r'Impact of viscoisty',fontsize=20)
 fig3.savefig(plot_name+'_viscr_comparison.png')
 
 ### Shear thinning data
@@ -163,13 +163,29 @@ vals4,edges4 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  #
 edgemed4 = (edges4[:-1]+edges4[1:])/2
 ax4.plot(edgemed4,vals4,'r-o',linewidth=2.0,label=r'$n=0.8$')
 
-#11_lig (viscr=500,n=0.8)
+#12_lig (viscr=500,n=0.5)
 diam=0.0; weights=0.0; vals4=0.0; edges4=0.0; edgemed4=0.0
 diam,u,v,w,vel_total = np.genfromtxt('lig_12_st.txt',skip_header=1,usecols=(0,1,2,3,4),unpack=True)
 weights = np.pi/6.0*diam**3.0 # Weight by volume
 vals4,edges4 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  # arguments are passed to np.histogram
 edgemed4 = (edges4[:-1]+edges4[1:])/2
 ax4.plot(edgemed4,vals4,'b-o',linewidth=2.0,label=r'$n=0.5$')
+
+#13_lig (viscr=500,n=0.1)
+diam=0.0; weights=0.0; vals4=0.0; edges4=0.0; edgemed4=0.0
+diam,u,v,w,vel_total = np.genfromtxt('lig_13_st.txt',skip_header=1,usecols=(0,1,2,3,4),unpack=True)
+weights = np.pi/6.0*diam**3.0 # Weight by volume
+vals4,edges4 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  # arguments are passed to np.histogram
+edgemed4 = (edges4[:-1]+edges4[1:])/2
+ax4.plot(edgemed4,vals4,'g-o',linewidth=2.0,label=r'$n=0.1$')
+
+#14_lig (viscr=500,n=0.01)
+diam=0.0; weights=0.0; vals4=0.0; edges4=0.0; edgemed4=0.0
+diam,u,v,w,vel_total = np.genfromtxt('lig_14_st.txt',skip_header=1,usecols=(0,1,2,3,4),unpack=True)
+weights = np.pi/6.0*diam**3.0 # Weight by volume
+vals4,edges4 = np.histogram(diam/D,bins=logbins,weights=weights,density=True)  # arguments are passed to np.histogram
+edgemed4 = (edges4[:-1]+edges4[1:])/2
+ax4.plot(edgemed4,vals4,'y-o',linewidth=2.0,label=r'$n=0.01$')
 
 # Figure 4: Shear-thinning comparison
 ax4.set_xlabel(dimless_x_label)
