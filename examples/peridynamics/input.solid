@@ -4,17 +4,17 @@ Partition :	8 1 1
 # Mesh definition
 Lx :	5
 Ly :	2
-Lz :	0.025
+Lz :	2
 nx :	200
 ny :	80
-nz :	1
+nz :	80
 
 # Solid model
 Solid dx : 0.0125
-Elastic Modulus : 192.0e9
+Elastic Modulus : 2000
 Poisson Ratio : 0.25
-Density : 8000.0
-Critical Energy Release Rate : 147456.0
+Density : 1000
+Critical Energy Release Rate : 1000
 
 # Time integration
 Max timestep size : 1e-2
