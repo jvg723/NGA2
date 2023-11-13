@@ -566,17 +566,17 @@ contains
             ! Add momentum source terms - adjust gravity if accelerating frame of reference
             call fs%addsrc_gravity(resU,resV,resW)
 
-            ! Body forcing from non-inertial frame
-            moving_frame: block
-               integer :: i,j,k
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
-                     end do
-                  end do
-               end do
-            end block moving_frame
+            ! ! Body forcing from non-inertial frame
+            ! moving_frame: block
+            !    integer :: i,j,k
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
+            !          end do
+            !       end do
+            !    end do
+            ! end block moving_frame
             
             ! Add polymer stress term
             polymer_stress: block
