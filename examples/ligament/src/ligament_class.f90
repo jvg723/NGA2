@@ -1,21 +1,22 @@
 !> Definition for a ligament atomization class
 module ligament_class
-   use precision,           only: WP
-   use config_class,        only: config
-   use iterator_class,      only: iterator
-   use ensight_class,       only: ensight
-   use surfmesh_class,      only: surfmesh
-   use partmesh_class,      only: partmesh
-   use hypre_str_class,     only: hypre_str
-   use ddadi_class,         only: ddadi
-   use vfs_class,           only: vfs
-   use carreau_class,       only: carreau
-   use lpt_class,           only: lpt
-   use tpns_class,          only: tpns
-   use transfermodel_class, only: transfermodels
-   use timetracker_class,   only: timetracker
-   use event_class,         only: event
-   use monitor_class,       only: monitor
+   use precision,            only: WP
+   use config_class,         only: config
+   use iterator_class,       only: iterator
+   use ensight_class,        only: ensight
+   use surfmesh_class,       only: surfmesh
+   use partmesh_class,       only: partmesh
+   use hypre_str_class,      only: hypre_str
+   use ddadi_class,          only: ddadi
+   use vfs_class,            only: vfs
+   use carreau_class,        only: carreau
+   use tpviscoelastic_class, only: tpviscoelastic
+   use lpt_class,            only: lpt
+   use tpns_class,           only: tpns
+   use transfermodel_class,  only: transfermodels
+   use timetracker_class,    only: timetracker
+   use event_class,          only: event
+   use monitor_class,        only: monitor
    implicit none
    private
    
@@ -28,14 +29,15 @@ module ligament_class
       type(config) :: cfg
       
       !> Flow solver
-      type(vfs)         :: vf    !< Volume fraction solver
-      type(tpns)        :: fs    !< Two-phase flow solver
-      type(hypre_str)   :: ps    !< Structured Hypre linear solver for pressure
-      type(ddadi)       :: vs    !< DDADI solver for velocity 
-      type(ddadi)       :: ss    !< DDADI solver for scalar
-      type(carreau)     :: nn
-      type(timetracker) :: time  !< Time info
-      type(event)       :: ppevt
+      type(vfs)            :: vf    !< Volume fraction solver
+      type(tpns)           :: fs    !< Two-phase flow solver
+      type(hypre_str)      :: ps    !< Structured Hypre linear solver for pressure
+      type(ddadi)          :: vs    !< DDADI solver for velocity 
+      type(ddadi)          :: ss    !< DDADI solver for scalar
+      type(tpviscoelastic) :: ve
+      type(carreau)        :: nn
+      type(timetracker)    :: time  !< Time info
+      type(event)          :: ppevt
       
       !> Break-up modeling
       type(lpt)            :: lp    !< Lagrangian particle solver
@@ -178,7 +180,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,name='VOF',store_detailed_flux=.true.)
          ! Initialize to a ligament
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
@@ -275,29 +277,29 @@ contains
 
      ! Create a viscoleastic model
       create_viscoelastic: block
-         use param,           only: param_read
-         ! use viscoelastic_class, only: fenecr
-         ! integer :: i,j,k
-         ! ! Create viscoelastic model solver
-         ! call ve%init(cfg=cfg,model=fenecr,phase=0,name='viscoelastic')
-         ! ! Maximum extensibility of polymer chain
-         ! call param_read('Maximum polymer extensibility',ve%Lmax)
-         ! ! Relaxation time for polymer
-         ! call param_read('Polymer relaxation time',ve%trelax)
-         ! ! Setup without an implicit solver
-         ! call ve%setup()
-         ! ! Initialize scalar fields
-         ! do k=cfg%kmino_,cfg%kmaxo_
-         !    do j=cfg%jmino_,cfg%jmaxo_
-         !       do i=cfg%imino_,cfg%imaxo_
-         !          if (vf%VF(i,j,k).gt.0.0_WP) then
-         !             ve%SC(i,j,k,1)=1.0_WP !< Cxx
-         !             ve%SC(i,j,k,4)=1.0_WP !< Cyy
-         !             ve%SC(i,j,k,6)=1.0_WP !< Czz
-         !          end if
-         !       end do
-         !    end do
-         ! end do
+         use param,              only: param_read
+         use viscoelastic_class, only: fenecr
+         integer :: i,j,k
+         ! Create viscoelastic model solver
+         call this%ve%init(cfg=this%cfg,phase=0,model=fenecr,name='viscoelastic')
+         ! Maximum extensibility of polymer chain
+         call param_read('Maximum polymer extensibility',this%ve%Lmax)
+         ! Relaxation time for polymer
+         call param_read('Polymer relaxation time',this%ve%trelax)
+         ! Setup without an implicit solver
+         call this%ve%setup()
+         ! Initialize scalar fields
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%vf%VF(i,j,k).gt.0.0_WP) then
+                     this%ve%SC(i,j,k,1)=1.0_WP !< Cxx
+                     this%ve%SC(i,j,k,4)=1.0_WP !< Cyy
+                     this%ve%SC(i,j,k,6)=1.0_WP !< Czz
+                  end if
+               end do
+            end do
+         end do
          ! Create Carreau model
          call this%nn%initialize(cfg=this%cfg)
          call param_read('Polymer viscosity ratio',this%nn%visc_zero); this%nn%visc_zero=this%fs%visc_g*this%nn%visc_zero; this%nn%visc=this%nn%visc_zero
@@ -400,9 +402,9 @@ contains
          call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
          call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
-         ! do nsc=1,this%nn%nscalar
-         !    call this%ens_out%add_scalar(trim(this%nn%SCname(nsc)),this%nn%SC(:,:,:,nsc))
-         ! end do
+         do nsc=1,this%ve%nscalar
+            call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SC(:,:,:,nsc))
+         end do
          call this%ens_out%add_particle('spray',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
@@ -416,7 +418,7 @@ contains
          call this%fs%get_max()
          call this%vf%get_max()
          call this%lp%get_max()
-         ! call this%nn%get_max()
+         call this%ve%get_max(this%vf%VF)
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -449,14 +451,16 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
          ! Create scalar monitor
-         ! this%scfile=monitor(this%nn%cfg%amRoot,'scalar')
-         ! call this%scfile%add_column(this%time%n,'Timestep number')
-         ! call this%scfile%add_column(this%time%t,'Time')
-         ! do nsc=1,this%nn%nscalar
-         !    call this%scfile%add_column(this%nn%SCmin(nsc),trim(this%nn%SCname(nsc))//'_min')
-         !    call this%scfile%add_column(this%nn%SCmax(nsc),trim(this%nn%SCname(nsc))//'_max')
-         ! end do
-         ! call this%scfile%write()
+         this%scfile=monitor(this%nn%cfg%amRoot,'scalar')
+         call this%scfile%add_column(this%time%n,'Timestep number')
+         call this%scfile%add_column(this%time%t,'Time')
+         call this%scfile%add_column(this%nn%visc_max,'Maximum visc_p')
+         call this%scfile%add_column(this%nn%visc_min,'Minimum visc_p')
+         do nsc=1,this%ve%nscalar
+            call this%scfile%add_column(this%ve%SCmin(nsc),trim(this%ve%SCname(nsc))//'_min')
+            call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
+         end do
+         call this%scfile%write()
          ! Create a spray monitor
          this%sprayfile=monitor(amroot=this%lp%cfg%amRoot,name='spray')
          call this%sprayfile%add_column(this%time%n,'Timestep number')
@@ -545,9 +549,6 @@ contains
       this%fs%Uold=this%fs%U
       this%fs%Vold=this%fs%V
       this%fs%Wold=this%fs%W
-
-      ! ! Remember old scalars
-      ! this%nn%SCold=this%nn%SC
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
@@ -560,87 +561,29 @@ contains
 
       ! Calculate grad(U)
       call this%fs%get_gradU(this%gradU)
+
+      ! Transport our liquid conformation tensor
+      advance_scalar: block
+         integer :: nsc
+         ! First add streching/distortion term and relaxation term
+         call this%ve%get_CgradU(this%gradU,this%SCtmp);  this%resSC=this%SCtmp
+         call this%ve%get_relax(this%SCtmp,this%time%dt); this%resSC=this%resSC+this%SCtmp
+         this%ve%SC=this%ve%SC+this%time%dt*this%resSC
+         call this%ve%apply_bcond(this%time%t,this%time%dt)
+         this%ve%SCold=this%ve%SC
+         ! Explicit calculation of dSC/dt from scalar equation
+         call this%ve%get_dSCdt(dSCdt=this%resSC,U=this%fs%U,V=this%fs%V,W=this%fs%W,VFold=this%vf%VFold,VF=this%vf%VF,detailed_face_flux=this%vf%detailed_face_flux,dt=this%time%dt)
+         ! Update our scalars
+         do nsc=1,this%ve%nscalar
+            where (this%ve%mask.eq.0.and.this%vf%VF.ne.0.0_WP) this%ve%SC(:,:,:,nsc)=(this%vf%VFold*this%ve%SCold(:,:,:,nsc)+this%time%dt*this%resSC(:,:,:,nsc))/this%vf%VF
+            where (this%vf%VF.eq.0.0_WP) this%ve%SC(:,:,:,nsc)=0.0_WP
+         end do
+         ! Apply boundary conditions
+         call this%ve%apply_bcond(this%time%t,this%time%dt)
+      end block advance_scalar
       
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
-
-         ! ! ============= SCALAR SOLVER =======================
-            
-         ! ! Reset interpolation metrics to QUICK scheme
-         ! call this%nn%metric_reset()
-            
-         ! ! Build mid-time scalar
-         ! this%nn%SC=0.5_WP*(this%nn%SC+this%nn%SCold)
-         
-         ! ! Explicit calculation of drhoSC/dt from scalar equation
-         ! call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
-         
-         ! ! Perform bquick procedure
-         ! bquick: block
-         !    integer :: i,j,k
-         !    logical, dimension(:,:,:), allocatable :: flag
-         !    ! Allocate work array
-         !    allocate(flag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    ! Assemble explicit residual
-         !    this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
-         !    ! Apply it to get explicit scalar prediction
-         !    this%SCtmp=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
-         !    ! Check cells that require bquick
-         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-         !             if (this%SCtmp(i,j,k,1).le.0.0_WP.or.this%SCtmp(i,j,k,4).le.0.0_WP.or.this%SCtmp(i,j,k,6).le.0.0_WP.or.&
-         !             &   this%SCtmp(i,j,k,1)+this%SCtmp(i,j,k,4)+this%SCtmp(i,j,k,6).ge.this%nn%Lmax**2) then
-         !                flag(i,j,k)=.true.
-         !             else
-         !                flag(i,j,k)=.false.
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         !    ! Adjust metrics
-         !    call this%nn%metric_adjust(this%SCtmp,flag)
-         !    ! Clean up
-         !    deallocate(flag)
-         !    ! Recompute drhoSC/dt
-         !    call this%nn%get_drhoSCdt(this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
-         ! end block bquick
-         
-         ! ! Add fene sources
-         ! call this%nn%addsrc_CgradU(this%gradU,this%resSC)
-         ! call this%nn%addsrc_relax(this%resSC,this%time%dt)
-         
-         ! ! Assemble explicit residual
-         ! this%resSC=-2.0_WP*(this%nn%SC-this%nn%SCold)+this%time%dt*this%resSC
-         
-         ! ! Form implicit residual
-         ! call this%nn%solve_implicit(this%time%dt,this%resSC,this%fs%Uold,this%fs%Vold,this%fs%Wold)
-         
-         ! ! Update scalars
-         ! this%nn%SC=2.0_WP*this%nn%SC-this%nn%SCold+this%resSC
-         
-         ! ! Force the gas scalar to identity
-         ! gas_scalar_forcing: block
-         !    integer :: i,j,k
-         !    do k=this%nn%cfg%kmino_,this%nn%cfg%kmaxo_
-         !       do j=this%nn%cfg%jmino_,this%nn%cfg%jmaxo_
-         !          do i=this%nn%cfg%imino_,this%nn%cfg%imaxo_
-         !             if (this%nn%mask(i,j,k).eq.0) then
-         !                this%nn%SC(i,j,k,1)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,1)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-         !                this%nn%SC(i,j,k,2)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,2)
-         !                this%nn%SC(i,j,k,3)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,3)
-         !                this%nn%SC(i,j,k,4)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,4)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-         !                this%nn%SC(i,j,k,5)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,5)
-         !                this%nn%SC(i,j,k,6)=this%vf%VF(i,j,k)*this%nn%SC(i,j,k,6)+(1.0_WP-this%vf%VF(i,j,k))*1.0_WP
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         ! end block gas_scalar_forcing
-
-         ! ! Apply all other boundary conditions on the resulting field
-         ! call this%nn%apply_bcond(this%time%t,this%time%dt)
-         ! ! ===================================================
          
          ! ============ VELOCITY SOLVER ======================
 
@@ -703,51 +646,56 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         ! ! Add polymer stress term
-         ! polymer_stress: block
-         !    integer :: i,j,k,n
-         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-         !    real(WP), dimension(:,:,:,:), allocatable :: stress
-         !    ! Allocate work arrays
-         !    allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-         !    allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    ! Calculate the polymer relaxation
-         !    stress=0.0_WP; call this%nn%addsrc_relax(stress,this%time%dt)
-         !    ! Build liquid stress tensor
-         !    do n=1,6
-         !       stress(:,:,:,n)=-this%nn%visc_p(:,:,:)*this%vf%VF*stress(:,:,:,n)
-         !    end do
-         !    ! Interpolate tensor components to cell edges
-         !    do k=this%cfg%kmin_,this%cfg%kmax_+1
-         !       do j=this%cfg%jmin_,this%cfg%jmax_+1
-         !          do i=this%cfg%imin_,this%cfg%imax_+1
-         !             Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-         !             Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-         !             Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-         !          end do
-         !       end do
-         !    end do
-         !    ! Add divergence of stress to residual
-         !    do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-         !       do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-         !          do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-         !             if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-         !             &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-         !             &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-         !             if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-         !             &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-         !             &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-         !             if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-         !             &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-         !             &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-         !          end do
-         !       end do
-         !    end do
-         !    ! Clean up
-         !    deallocate(stress,Txy,Tyz,Tzx)
-         ! end block polymer_stress
+         ! Add polymer stress term
+         polymer_stress: block
+            use tpviscoelastic_class, only: fenecr,oldroydb
+            integer :: i,j,k,n
+            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+            real(WP), dimension(:,:,:,:), allocatable :: stress
+            real(WP) :: coeff
+            ! Allocate work arrays
+            allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+            allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            select case (this%ve%model)
+            case (oldroydb,fenecr)
+               ! Calculate the polymer relaxation
+               call this%ve%get_relax(stress,this%time%dt)
+               ! Build liquid stress tensor
+               do n=1,6
+                  stress(:,:,:,n)=-this%nn%visc(:,:,:)*this%vf%VF*stress(:,:,:,n)
+               end do
+            end select
+            ! Interpolate tensor components to cell edges
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+                     Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+                     Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+                  end do
+               end do
+            end do
+            ! Add divergence of stress to residual
+            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+                     if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                     &                                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+                     &                                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+                     if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                     &                                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+                     &                                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+                     if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                     &                                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+                     &                                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+                  end do
+               end do
+            end do
+            ! Clean up
+            deallocate(stress,Txy,Tyz,Tzx)
+         end block polymer_stress
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
@@ -863,7 +811,7 @@ contains
       call this%fs%get_max()
       call this%vf%get_max()
       call this%lp%get_max()
-      ! call this%nn%get_max()
+      call this%ve%get_max(this%vf%VF) 
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()

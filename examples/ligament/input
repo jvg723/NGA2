@@ -6,9 +6,9 @@ X ligament : 2
 Lx : 20  !40
 Ly : 10  !20
 Lz : 10  !20
-nx : 64 !512
-ny : 32 !256
-nz : 32 !256
+nx : 160 !512
+ny : 80 !256
+nz : 80 !256
 
 # Flow conditions
 Reynolds number :      100
@@ -22,8 +22,8 @@ Turbulence intensity : 0.1
 Carreau powerlaw :              0.5
 Carreau reference timescale :   1.0
 Polymer viscosity ratio :       500
-Polymer relaxation time :       0
-Maximum polymer extensibility : 0
+Polymer relaxation time :       1
+Maximum polymer extensibility : 10
 
 # Time integration
 Max timestep size : 2.5e-2
