@@ -12,19 +12,22 @@ module geometry
    type(ibconfig), target, public :: cfg1
    !> Block 2 (b2) -> Swirl atomizer, two-phase wtih VOF
    type(config),   target, public :: cfg2
+   !> Block 3 (b3) -> zoomed out, Euler-Lagrange
+   type(config),   target, public :: cfg3
 
    !> Public declarations
    public :: geometry_init,Din,Dout
    public :: group1,isInGrp1
    public :: group2,isInGrp2
+   public :: group3,isInGrp3
 
    !> Pipe diameter 
    real(WP) :: Dout,Din
 
    !> Two groups and partitions, along with logicals
-   integer, dimension(3) :: partition1,partition2
-   logical :: isInGrp1,isInGrp2
-   type(MPI_Group) :: group1,group2
+   integer, dimension(3) :: partition1,partition2,partition3
+   logical :: isInGrp1,isInGrp2,isInGrp3
+   type(MPI_Group) :: group1,group2,group3
    
 
 contains
@@ -45,14 +48,19 @@ contains
          ! Read in partition
          call param_read('1 Partition',partition1,short='p')
          call param_read('2 Partition',partition2,short='p')
-         ! Create an MPI group along with logical for the first grid on the lowest ranks
+         call param_read('3 Partition',partition3,short='p')
+         ! Create an MPI group along with logical for the turbulent pipe on the lowest ranks
          grange(:,1)=[0,product(partition1)-1,1]
          call MPI_Group_range_incl(group,1,grange,group1,ierr)
          isInGrp1=.false.; if (rank.le.product(partition1)-1) isInGrp1=.true.
-         ! Create an MPI group along with logical for the second grid on the highest ranks
+         ! Create an MPI group along with logical for the swirl atomizer on the highest ranks
          grange(:,1)=[nproc-product(partition2),nproc-1,1]
          call MPI_Group_range_incl(group,1,grange,group2,ierr)
          isInGrp2=.false.; if (rank.ge.nproc-product(partition2)) isInGrp2=.true.
+         ! Create an MPI group along with logical for particle tracking on the lowest ranks
+         grange(:,1)=[0,product(partition3)-1,1]
+         call MPI_Group_range_incl(group,1,grange,group3,ierr)
+         isInGrp3=.false.; if (rank.le.product(partition3)-1) isInGrp3=.true.
       end block mpi_groups
 
       ! Initialize grid 1
@@ -146,6 +154,38 @@ contains
             ! Create masks for this config
             cfg2%VF=1.0_WP
          end block create_block2
+      end if
+
+      ! Initialize grid 3
+      if (isInGrp3) then
+         ! Create config for block 3
+         create_block3: block
+            use sgrid_class, only: cartesian
+            use parallel, only: group
+            integer :: i,j,k,nx,ny,nz
+            real(WP) :: Lx,Ly,Lz
+            real(WP), dimension(:), allocatable :: x,y,z
+            ! Read in grid and geometry definition
+            call param_read('3 Lx',Lx); call param_read('3 nx',nx); allocate(x(nx+1))
+            call param_read('3 Ly',Ly); call param_read('3 ny',ny); allocate(y(ny+1))
+            call param_read('3 Lz',Lz); call param_read('3 nz',nz); allocate(z(nz+1))
+            ! Create simple rectilinear grid
+            do i=1,nx+1
+               x(i)=real(i-1,WP)/real(nx,WP)*Lx
+            end do
+            do j=1,ny+1
+               y(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
+            end do
+            do k=1,nz+1
+               z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
+            end do
+            ! General serial grid object
+            grid=sgrid(coord=cartesian,no=2,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='particles')
+            ! Create partitioned grid
+            cfg3=config(grp=group3,decomp=partition3,grid=grid)
+            ! Create masks for this config
+            cfg3%VF=1.0_WP
+         end block create_block3
       end if
    
 
