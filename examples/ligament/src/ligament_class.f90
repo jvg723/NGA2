@@ -302,7 +302,7 @@ contains
          end do
          ! Create Carreau model
          call this%nn%initialize(cfg=this%cfg)
-         call param_read('Polymer viscosity ratio',this%nn%visc_zero); this%nn%visc_zero=this%fs%visc_g*this%nn%visc_zero; this%nn%visc=this%nn%visc_zero
+         call param_read('Polymer viscosity ratio',this%nn%visc_zero); this%nn%visc_zero=this%fs%visc_g*this%nn%visc_zero !; this%nn%visc=this%nn%visc_zero
          call param_read('Carreau powerlaw',this%nn%ncoeff)
          call param_read('Carreau reference timescale',this%nn%tref)
          ! nn%tref=ve%trelax
@@ -556,8 +556,8 @@ contains
       ! VOF solver step
       call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
       
-      ! ! Prepare new staggered viscosity (at n+1)
-      ! call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
+      ! Prepare new staggered viscosity (at n+1)
+      call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
 
       ! Calculate grad(U)
       call this%fs%get_gradU(this%gradU)
@@ -592,53 +592,53 @@ contains
          this%fs%V=0.5_WP*(this%fs%V+this%fs%Vold)
          this%fs%W=0.5_WP*(this%fs%W+this%fs%Wold)
 
-         ! Include shear-thinning effect here by adjusting viscosity based on mid-time strain-rate
-         ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
-         shear_thinning: block
-            integer :: i,j,k
-            real(WP) :: liq_vol,gas_vol,tot_vol
-            real(WP) :: visc_l
-            real(WP), dimension(:,:,:,:), allocatable :: SR
-            ! Allocate SR array
-            allocate(SR(1:6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            ! Calculate strain rate
-            call this%fs%get_strainrate(SR)
-            ! Update polymer viscosity using Carreau model
-            call this%nn%update_visc(SR)
-            ! Handle mixture viscosity
-            do k=this%fs%cfg%kmino_+1,this%fs%cfg%kmaxo_
-               do j=this%fs%cfg%jmino_+1,this%fs%cfg%jmaxo_
-                  do i=this%fs%cfg%imino_+1,this%fs%cfg%imaxo_
-                     ! VISC at [xm,ym,zm] - direct sum in x/y/z
-                     liq_vol=sum(this%vf%Lvol(:,:,:,i,j,k))
-                     gas_vol=sum(this%vf%Gvol(:,:,:,i,j,k))
-                     tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+this%nn%visc(i,j,k)
-                     this%fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
-                     ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
-                     liq_vol=sum(this%vf%Lvol(0,0,:,i,j,k))+sum(this%vf%Lvol(1,0,:,i-1,j,k))+sum(this%vf%Lvol(0,1,:,i,j-1,k))+sum(this%vf%Lvol(1,1,:,i-1,j-1,k))
-                     gas_vol=sum(this%vf%Gvol(0,0,:,i,j,k))+sum(this%vf%Gvol(1,0,:,i-1,j,k))+sum(this%vf%Gvol(0,1,:,i,j-1,k))+sum(this%vf%Gvol(1,1,:,i-1,j-1,k))
-                     tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+sum(this%fs%itp_xy(:,:,i,j,k)*this%nn%visc(i-1:i,j-1:j,k))
-                     this%fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_xy(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
-                     ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
-                     liq_vol=sum(this%vf%Lvol(:,0,0,i,j,k))+sum(this%vf%Lvol(:,1,0,i,j-1,k))+sum(this%vf%Lvol(:,0,1,i,j,k-1))+sum(this%vf%Lvol(:,1,1,i,j-1,k-1))
-                     gas_vol=sum(this%vf%Gvol(:,0,0,i,j,k))+sum(this%vf%Gvol(:,1,0,i,j-1,k))+sum(this%vf%Gvol(:,0,1,i,j,k-1))+sum(this%vf%Gvol(:,1,1,i,j-1,k-1))
-                     tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+sum(this%fs%itp_yz(:,:,i,j,k)*this%nn%visc(i,j-1:j,k-1:k))
-                     this%fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_yz(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
-                     ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
-                     liq_vol=sum(this%vf%Lvol(0,:,0,i,j,k))+sum(this%vf%Lvol(0,:,1,i,j,k-1))+sum(this%vf%Lvol(1,:,0,i-1,j,k))+sum(this%vf%Lvol(1,:,1,i-1,j,k-1))
-                     gas_vol=sum(this%vf%Gvol(0,:,0,i,j,k))+sum(this%vf%Gvol(0,:,1,i,j,k-1))+sum(this%vf%Gvol(1,:,0,i-1,j,k))+sum(this%vf%Gvol(1,:,1,i-1,j,k-1))
-                     tot_vol=gas_vol+liq_vol
-                     visc_l=this%fs%visc_l+sum(this%fs%itp_xz(:,:,i,j,k)*this%nn%visc(i-1:i,j,k-1:k))
-                     this%fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_zx(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
-                  end do
-               end do
-            end do
-            ! Deallocate SR array
-            deallocate(SR)
-         end block shear_thinning
+         ! ! Include shear-thinning effect here by adjusting viscosity based on mid-time strain-rate
+         ! ! fs%visc_l is the solvent viscosity, nn%visc is the zero strainrate polymer viscosity
+         ! shear_thinning: block
+         !    integer :: i,j,k
+         !    real(WP) :: liq_vol,gas_vol,tot_vol
+         !    real(WP) :: visc_l
+         !    real(WP), dimension(:,:,:,:), allocatable :: SR
+         !    ! Allocate SR array
+         !    allocate(SR(1:6,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    ! Calculate strain rate
+         !    call this%fs%get_strainrate(SR)
+         !    ! Update polymer viscosity using Carreau model
+         !    call this%nn%update_visc(SR)
+         !    ! Handle mixture viscosity
+         !    do k=this%fs%cfg%kmino_+1,this%fs%cfg%kmaxo_
+         !       do j=this%fs%cfg%jmino_+1,this%fs%cfg%jmaxo_
+         !          do i=this%fs%cfg%imino_+1,this%fs%cfg%imaxo_
+         !             ! VISC at [xm,ym,zm] - direct sum in x/y/z
+         !             liq_vol=sum(this%vf%Lvol(:,:,:,i,j,k))
+         !             gas_vol=sum(this%vf%Gvol(:,:,:,i,j,k))
+         !             tot_vol=gas_vol+liq_vol
+         !             visc_l=this%fs%visc_l+this%nn%visc(i,j,k)
+         !             this%fs%visc(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+         !             ! VISC_xy at [x,y,zm] - direct sum in z, staggered sum in x/y
+         !             liq_vol=sum(this%vf%Lvol(0,0,:,i,j,k))+sum(this%vf%Lvol(1,0,:,i-1,j,k))+sum(this%vf%Lvol(0,1,:,i,j-1,k))+sum(this%vf%Lvol(1,1,:,i-1,j-1,k))
+         !             gas_vol=sum(this%vf%Gvol(0,0,:,i,j,k))+sum(this%vf%Gvol(1,0,:,i-1,j,k))+sum(this%vf%Gvol(0,1,:,i,j-1,k))+sum(this%vf%Gvol(1,1,:,i-1,j-1,k))
+         !             tot_vol=gas_vol+liq_vol
+         !             visc_l=this%fs%visc_l+sum(this%fs%itp_xy(:,:,i,j,k)*this%nn%visc(i-1:i,j-1:j,k))
+         !             this%fs%visc_xy(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_xy(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+         !             ! VISC_yz at [xm,y,z] - direct sum in x, staggered sum in y/z
+         !             liq_vol=sum(this%vf%Lvol(:,0,0,i,j,k))+sum(this%vf%Lvol(:,1,0,i,j-1,k))+sum(this%vf%Lvol(:,0,1,i,j,k-1))+sum(this%vf%Lvol(:,1,1,i,j-1,k-1))
+         !             gas_vol=sum(this%vf%Gvol(:,0,0,i,j,k))+sum(this%vf%Gvol(:,1,0,i,j-1,k))+sum(this%vf%Gvol(:,0,1,i,j,k-1))+sum(this%vf%Gvol(:,1,1,i,j-1,k-1))
+         !             tot_vol=gas_vol+liq_vol
+         !             visc_l=this%fs%visc_l+sum(this%fs%itp_yz(:,:,i,j,k)*this%nn%visc(i,j-1:j,k-1:k))
+         !             this%fs%visc_yz(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_yz(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+         !             ! VISC_zx at [x,ym,z] - direct sum in y, staggered sum in z/x
+         !             liq_vol=sum(this%vf%Lvol(0,:,0,i,j,k))+sum(this%vf%Lvol(0,:,1,i,j,k-1))+sum(this%vf%Lvol(1,:,0,i-1,j,k))+sum(this%vf%Lvol(1,:,1,i-1,j,k-1))
+         !             gas_vol=sum(this%vf%Gvol(0,:,0,i,j,k))+sum(this%vf%Gvol(0,:,1,i,j,k-1))+sum(this%vf%Gvol(1,:,0,i-1,j,k))+sum(this%vf%Gvol(1,:,1,i-1,j,k-1))
+         !             tot_vol=gas_vol+liq_vol
+         !             visc_l=this%fs%visc_l+sum(this%fs%itp_xz(:,:,i,j,k)*this%nn%visc(i-1:i,j,k-1:k))
+         !             this%fs%visc_zx(i,j,k)=0.0_WP; if (tot_vol.gt.0.0_WP) this%fs%visc_zx(i,j,k)=(visc_l*liq_vol+this%fs%visc_g*gas_vol)/tot_vol
+         !          end do
+         !       end do
+         !    end do
+         !    ! Deallocate SR array
+         !    deallocate(SR)
+         ! end block shear_thinning
          
          ! Preliminary mass and momentum transport step at the interface
          call this%fs%prepare_advection_upwind(dt=this%time%dt)
@@ -664,7 +664,8 @@ contains
                call this%ve%get_relax(stress,this%time%dt)
                ! Build liquid stress tensor
                do n=1,6
-                  stress(:,:,:,n)=-this%nn%visc(:,:,:)*this%vf%VF*stress(:,:,:,n)
+                  ! stress(:,:,:,n)=-this%nn%visc(:,:,:)*this%vf%VF*stress(:,:,:,n)
+                  stress(:,:,:,n)=-this%nn%visc_zero*this%vf%VF*stress(:,:,:,n)
                end do
             end select
             ! Interpolate tensor components to cell edges
