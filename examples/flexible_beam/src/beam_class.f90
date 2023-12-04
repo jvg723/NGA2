@@ -1,5 +1,5 @@
 !> Definition of a solid simulation superclass that drives an lss_class object
-module object_class
+module beam_class
    use precision,         only: WP
    use inputfile_class,   only: inputfile
    use config_class,      only: config
@@ -12,10 +12,10 @@ module object_class
    implicit none
    private
    
-   public :: object
+   public :: beam
 
-   !> Solid simulation object
-   type :: object
+   !> Solid simulation beam
+   type :: beam
       
       !> Input file for the simulation
       type(inputfile) :: input
@@ -34,14 +34,12 @@ module object_class
       
       !> Monitor file
       type(monitor) :: mfile
-      real(WP) :: Xbeam1,Xbeam2
-      integer :: ibeam1,ibeam2
-
+      
    contains
       procedure :: init                    !< Initialize solid simulation
       procedure :: step                    !< Advance solid simulation by one time step
       procedure :: final                   !< Finalize solid simulation
-   end type object
+   end type beam
    
    
 contains
@@ -52,7 +50,7 @@ contains
       use parallel, only: amRoot
       use sgrid_class, only: sgrid
       implicit none
-      class(object), intent(inout) :: this
+      class(beam), intent(inout) :: this
       type(sgrid) :: grid
       ! Read the input
       this%input=inputfile(amRoot=amRoot,filename='input.solid')
@@ -74,17 +72,29 @@ contains
             x(i)=real(i-1,WP)/real(nx,WP)*Lx-0.5_WP*Lx
          end do
          do j=1,ny+1
-            y(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
+            y(j)=real(j-1,WP)/real(ny,WP)*Ly
          end do
          do k=1,nz+1
             z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
          end do
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=2,x=x,y=y,z=z,xper=.false.,yper=.true.,zper=.true.,name='object')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.true.,name='object')
          ! Read in partition
          call this%input%read('Partition',partition)
          ! Create partitioned grid
          this%cfg=config(grp=group,decomp=partition,grid=grid)
+         ! Add wall at the bottom
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%cfg%ym(j).lt.0.0_WP) then
+                     this%cfg%VF(i,j,k)=0.0_WP
+                  else
+                     this%cfg%VF(i,j,k)=1.0_WP
+                  end if
+               end do
+            end do
+         end do
       end block initialize_cfg
 
       ! Initialize time tracker
@@ -110,6 +120,7 @@ contains
          call this%input%read('Poisson Ratio',this%ls%poisson_ratio)
          call this%input%read('Density',this%ls%rho)
          call this%input%read('Critical Energy Release Rate',this%ls%crit_energy)
+         call this%input%read('Gravity',this%ls%gravity)
          
          ! Discretization
          call this%input%read('Solid dx',dx)
@@ -131,17 +142,17 @@ contains
                real(WP), dimension(:), allocatable :: x,y,z
                type(sgrid) :: grid
                ! Object size
-               Lx=0.20_WP; Ly=0.20_WP; Lz=0.20_WP
+               Lx=0.40_WP; Ly=4.00_WP; Lz=0.80_WP
                ! Create simple rectilinear grid
                nx=int(Lx/dx)
                ny=int(Ly/dx)
                nz=int(Lz/dx)
                allocate(x(1:nx+1),y(1:ny+1),z(1:nz+1))
                do i=1,nx+1
-                  x(i)=real(i-1,WP)*dx-0.5_WP*Lx-0.25_WP*this%cfg%xL
+                  x(i)=real(i-1,WP)*dx-0.5_WP*Lx
                end do
                do j=1,ny+1
-                  y(j)=real(j-1,WP)*dx-0.5_WP*Ly
+                  y(j)=real(j-1,WP)*dx
                end do
                do k=1,nz+1
                   z(k)=real(k-1,WP)*dx-0.5_WP*Lz
@@ -159,7 +170,11 @@ contains
                         ! Set position
                         this%ls%p(np)%pos=[grid%xm(i),grid%ym(j),grid%zm(k)]
                         ! Set object id and velocity
-                        this%ls%p(np)%id=1
+                        if (this%ls%p(np)%pos(2).gt.10.0_WP*dx) then
+                           this%ls%p(np)%id=+1
+                        else
+                           this%ls%p(np)%id=-2
+                        end if
                         this%ls%p(np)%vel=0.0_WP
                         ! Zero out force
                         this%ls%p(np)%Abond=0.0_WP
@@ -174,56 +189,6 @@ contains
                   end do
                end do
             end block object1
-            ! Second object =====================
-            object2: block
-               integer :: i,j,k,nx,ny,nz
-               real(WP) :: Lx,Ly,Lz
-               real(WP), dimension(:), allocatable :: x,y,z
-               type(sgrid) :: grid
-               ! Object size
-               Lx=0.20_WP; Ly=0.20_WP; Lz=0.20_WP
-               ! Create simple rectilinear grid
-               nx=int(Lx/dx)
-               ny=int(Ly/dx)
-               nz=int(Lz/dx)
-               allocate(x(1:nx+1),y(1:ny+1),z(1:nz+1))
-               do i=1,nx+1
-                  x(i)=real(i-1,WP)*dx+1.0_WP*Lx-0.25_WP*this%cfg%xL
-               end do
-               do j=1,ny+1
-                  y(j)=real(j-1,WP)*dx-0.3_WP*Ly
-               end do
-               do k=1,nz+1
-                  z(k)=real(k-1,WP)*dx-0.5_WP*Lz
-               end do
-               ! General serial grid object
-               grid=sgrid(coord=cartesian,no=1,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='elements')
-               ! Loop over mesh and create particles
-               !np=this%ls%np
-               do k=1,nz
-                  do j=1,ny
-                     do i=1,nx
-                        ! Increment particle
-                        np=np+1
-                        call this%ls%resize(np)
-                        ! Set position
-                        this%ls%p(np)%pos=[grid%xm(i),grid%ym(j),grid%zm(k)]
-                        ! Set object id and velocity
-                        this%ls%p(np)%id=2
-                        this%ls%p(np)%vel=0.0_WP
-                        ! Zero out force
-                        this%ls%p(np)%Abond=0.0_WP
-                        this%ls%p(np)%Afluid=0.0_WP
-                        ! Locate the particle on the mesh
-                        this%ls%p(np)%ind=this%ls%cfg%get_ijk_global(this%ls%p(np)%pos,[this%ls%cfg%imin,this%ls%cfg%jmin,this%ls%cfg%kmin])
-                        ! Assign a unique integer to particle
-                        this%ls%p(np)%i=np
-                        ! Activate the particle
-                        this%ls%p(np)%flag=0
-                     end do
-                  end do
-               end do
-            end block object2
          end if
          
          ! Communicate particles
@@ -308,7 +273,7 @@ contains
    !> Take one time step of the solid simulation
    subroutine step(this)
       implicit none
-      class(object), intent(inout) :: this
+      class(beam), intent(inout) :: this
       
       ! Increment time
       call this%ls%get_cfl(this%time%dt,this%time%cfl)
@@ -352,9 +317,9 @@ contains
    !> Finalize solid simulation
    subroutine final(this)
       implicit none
-      class(object), intent(inout) :: this
+      class(beam), intent(inout) :: this
       ! Deallocate work arrays
    end subroutine final
    
    
-end module object_class
+end module beam_class

@@ -26,7 +26,7 @@ module lss_class
    integer, parameter, public :: max_bond=200  !< Assumes something like a 7x7x7 stencil in 3D
    
 
-   !> Bonded solide particle definition
+   !> Bonded solid particle definition
    type :: part
       !> MPI_DOUBLE_PRECISION data
       real(WP) :: mw                         !< Weighted volume
@@ -68,7 +68,7 @@ module lss_class
       real(WP) :: rho                                     !< Density of the material
       real(WP) :: crit_energy                             !< Critical energy release
       real(WP) :: dV                                      !< Element volume
-
+      
       ! Bonding parameters
       real(WP) :: delta                                   !< Bonding horizon (distance)
       integer :: nb                                       !< Cell-based horizon 
