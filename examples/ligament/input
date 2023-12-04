@@ -21,7 +21,7 @@ Turbulence intensity : 0.1
 # Non-Newtonian modeling
 Carreau powerlaw :              1.0
 Carreau reference timescale :   1.0
-Polymer viscosity ratio :       50
+Polymer viscosity ratio :       12.5
 Polymer relaxation time :       1
 Maximum polymer extensibility : 10
 
