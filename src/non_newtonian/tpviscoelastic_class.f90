@@ -22,17 +22,25 @@ module tpviscoelastic_class
 
    !> Constant density viscoelastic solver object definition
    type, extends(tpscalar) :: tpviscoelastic
+      
       ! Model parameters
-      integer  :: model                                    !< Closure model
-      real(WP) :: trelax                                   !< Polymer relaxation timescale
-      real(WP) :: Lmax                                     !< Polymer maximum extensibility in FENE model
-      real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
-      real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
+      integer  :: model                                      !< Closure model
+      real(WP) :: trelax                                     !< Polymer relaxation timescale
+      real(WP) :: Lmax                                       !< Polymer maximum extensibility in FENE model
+      real(WP) :: affinecoeff                                !< Parameter for affine motion in PTT model
+      real(WP) :: elongvisc                                  !< Extensional parameter for elognational viscosity in PTT model
+
+      ! Arrays for log-conformation stabilization
+      logical :: use_stabilization=.false.                   !< Flag to use log-conformation approach (default=.false.)
+      real(WP), dimension(:,:,:,:), allocatable :: extsion   !< Extension matrix decomposed from gradU
+      real(WP), dimension(:,:,:,:), allocatable :: rotation  !< Rotation matrix decomposed from gradU
+
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distrortion term
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
+      procedure :: decompose_gradu                         !< Deompose velocity gradient for log-conformation stabilization technique
    end type tpviscoelastic
    
    
@@ -40,18 +48,23 @@ contains
    
    
    !> Viscoelastic model initialization
-   subroutine init(this,cfg,phase,model,name)
+   subroutine init(this,cfg,phase,model,name,use_stabilization)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       class(config), target, intent(in) :: cfg
       integer, intent(in) :: phase
       integer, intent(in) :: model
       character(len=*), optional :: name
+      logical, optional :: use_stabilization
       ! Create a six-scalar solver for conformation tensor in the liquid
       call this%tpscalar%initialize(cfg=cfg,nscalar=6,name=name)
       this%phase=phase; this%SCname=['Cxx','Cxy','Cxz','Cyy','Cyz','Czz']
       ! Assign closure model for viscoelastic fluid
       this%model=model
+      ! Set optional detailed flux info
+      if (present(use_stabilization)) then
+         allocate(this%extsion(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      end if
    end subroutine init
    
    
@@ -219,6 +232,93 @@ contains
          call die('[tpviscoelastic get_relax] Unknown viscoelastic model selected')
       end select
    end subroutine get_relax
+
+   !> Decompose velocity gradient for log-conformation stabilization
+   !> Assumes scalar being transported is log(C)
+   !> Passes out B and Omega matrices
+   subroutine decompose_gradu(this,gradu)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
+      integer :: i,j,k
+      ! Eigenvalues/eigenvectors
+      real(WP), dimension(3,3) :: A,AT
+      real(WP), dimension(3,3) :: M,Mtmp
+      real(WP), dimension(3) :: d
+      integer , parameter :: order = 3             !< Conformation tensor is 3x3
+      real(WP), dimension(:), allocatable :: work
+      real(WP), dimension(1)   :: lwork_query
+      integer  :: lwork,info,n
+
+      ! Query optimal work array size
+      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+      
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               
+               ! Eigenvalues/eigenvectors of C tensor
+               !>Assemble C matrix (from C=exp(log(C)))
+               A(1,1)=exp(this%SC(i,j,k,1)); A(1,2)=exp(this%SC(i,j,k,2)); A(1,3)=exp(this%SC(i,j,k,3))
+               A(2,1)=exp(this%SC(i,j,k,2)); A(2,2)=exp(this%SC(i,j,k,4)); A(2,3)=exp(this%SC(i,j,k,5))
+               A(3,1)=exp(this%SC(i,j,k,3)); A(3,2)=exp(this%SC(i,j,k,5)); A(3,3)=exp(this%SC(i,j,k,6))
+               !>On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
+               call dsyev('V','U',order,A,order,d,work,lwork,info)
+
+               ! Change of base for the velocity gradient
+               !>Transpose eigenvector matrix
+               AT(1,1)=A(1,1); AT(1,2)=A(2,1); AT(1,3)=A(3,1)
+               AT(2,1)=A(1,2); AT(2,2)=A(2,2); AT(2,3)=A(3,2)
+               AT(3,1)=A(1,3); AT(3,2)=A(2,3); AT(3,3)=A(3,3)
+               !>Multiply AT*gradu
+               Mtmp=multiply_matrix(AT,gradU(:,:,i,j,k))
+               !>Multiply (AT*gradu)*A
+               M=multiply_matrix(Mtmp,A)
+
+               ! Compute extension matrix (symmetric)
+               !>E11
+               this%extsion(i,j,k,1)=A(1,1)**2*M(1,1)+A(1,2)**2*M(2,2)+A(1,3)**2*M(3,3)
+               !>E21
+               this%extsion(i,j,k,2)=A(1,1)*A(2,1)*M(1,1)+A(1,2)*A(2,2)*M(2,2)+A(1,3)*A(3,3)*M(3,3)
+               !>E31
+               this%extsion(i,j,k,3)=0.0_WP
+               !>E22
+               this%extsion(i,j,k,4)=0.0_WP
+               !>E32
+               this%extsion(i,j,k,5)=0.0_WP
+               !>E33
+               this%extsion(i,j,k,6)=0.0_WP
+
+               ! Compute rotation matrix
+               
+               !>Omega11
+               this%rotaton(i,j,k,1)=0.0_WP
+               !>Omega21
+               this%rotaton(i,j,k,2)=0.0_WP
+               !>Omega31
+               this%rotaton(i,j,k,3)=0.0_WP
+               !>Omega22
+               this%rotaton(i,j,k,4)=0.0_WP
+               !>Omega32
+               this%rotaton(i,j,k,5)=0.0_WP
+               !>Omega33
+               this%rotaton(i,j,k,6)=0.0_WP
+            end do 
+         end do
+      end do
+
+   end subroutine decompose_gradu
+
+   ! Multiply 3x3 matrix
+   function multiply_matrix(A,B) result(C)
+      implicit none
+      real(WP), dimension(3,3), intent(in) :: A,B
+      real(WP), dimension(3,3) :: C
+      ! Resultant matrix
+      C(1,1)=A(1,1)*B(1,1)+A(1,2)*B(2,1)+A(1,3)*B(3,1); C(1,2)=A(1,1)*B(1,2)+A(1,2)*B(2,2)+A(1,3)*B(3,2); C(1,3)=A(1,1)*B(1,3)+A(1,2)*B(2,3)+A(1,3)*B(3,3)
+      C(2,1)=A(2,1)*B(1,1)+A(2,2)*B(2,1)+A(2,3)*B(3,1); C(2,2)=A(2,1)*B(1,2)+A(2,2)*B(2,2)+A(2,3)*B(3,2); C(2,3)=A(2,1)*B(1,3)+A(2,2)*B(2,3)+A(2,3)*B(3,3)
+      C(3,1)=A(3,1)*B(1,1)+A(3,2)*B(2,1)+A(3,3)*B(3,1); C(3,2)=A(3,1)*B(1,2)+A(3,2)*B(2,2)+A(3,3)*B(3,2); C(3,3)=A(3,1)*B(1,3)+A(3,2)*B(2,3)+A(3,3)*B(3,3)
+   end function multiply_matrix
    
    
 end module tpviscoelastic_class
