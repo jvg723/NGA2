@@ -1,0 +1,40 @@
+# Parallelization
+Partition :	2 1 1
+
+# Mesh definition
+Lx :	60
+Ly :	10
+Lz :	1 #10
+nx :	120
+ny :    20
+nz :	1 #64
+
+# Case description
+Jet radius :   1.0
+Jet velocity : 2.828427124746190
+Box height :   0.05
+
+# Fluid properties
+Liquid dynamic viscosity :   0.24 # 0.17*1.41
+Gas dynamic viscosity :       0.0024 #0.0017*1.41
+Liquid density :              1.0
+Gas density :                 10e-3
+Surface tension coefficient : 1
+
+# Non-Newtonian modeling
+Carreau powerlaw :             1 #0.12
+Polymer viscosity :            0.0423 #0.03*1.41
+Polymer relaxation time :      1.0 #*2.828
+Maximum polymer extensibility : 30
+
+# Time integration
+Max timestep size : 2e-4
+Max cfl number :    0.9
+Max time :          40
+
+# Pressure solver
+Pressure tolerance : 1e-5
+Pressure iteration : 100
+
+# Ensight output
+Ensight output period : 1e-2
