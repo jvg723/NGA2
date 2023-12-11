@@ -135,7 +135,7 @@ contains
             z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
          end do
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=y,xper=.false.,yper=.true.,zper=.true.,name='Ligament')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.true.,zper=.true.,name='Ligament')
          ! Read in partition
          call param_read('Partition',partition,short='p')
          ! Create partitioned grid without walls
@@ -715,6 +715,9 @@ contains
          ! this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV/this%fs%rho_V
          ! this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW/this%fs%rho_W
          
+         ! Apply boundary conditions
+         call this%fs%apply_bcond(this%time%t,this%time%dt)
+         
          ! Solve Poisson equation
          call this%fs%update_laplacian()
          !call this%fs%update_laplacian(pinpoint=[this%fs%cfg%imin,this%fs%cfg%jmin,this%fs%cfg%kmin])
@@ -734,6 +737,9 @@ contains
          this%fs%U=this%fs%U-this%time%dt*this%resU/this%fs%rho_U
          this%fs%V=this%fs%V-this%time%dt*this%resV/this%fs%rho_V
          this%fs%W=this%fs%W-this%time%dt*this%resW/this%fs%rho_W
+         
+         ! Apply boundary conditions
+         call this%fs%apply_bcond(this%time%t,this%time%dt)
          
          ! Increment sub-iteration counter
          this%time%it=this%time%it+1
