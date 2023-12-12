@@ -32,7 +32,7 @@ module tpviscoelastic_class
 
       ! Arrays for log-conformation stabilization
       logical :: use_stabilization=.false.                   !< Flag to use log-conformation approach (default=.false.)
-      real(WP), dimension(:,:,:,:), allocatable :: extsion   !< Extension matrix decomposed from gradU
+      real(WP), dimension(:,:,:,:), allocatable :: extension !< Extension matrix decomposed from gradU
       real(WP), dimension(:,:,:,:), allocatable :: rotation  !< Rotation matrix decomposed from gradU
 
    contains
@@ -63,7 +63,7 @@ contains
       this%model=model
       ! Set optional detailed flux info
       if (present(use_stabilization)) then
-         allocate(this%extsion(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%extension(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
       end if
    end subroutine init
    
@@ -242,9 +242,10 @@ contains
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
       integer :: i,j,k
       ! Eigenvalues/eigenvectors
-      real(WP), dimension(3,3) :: A,AT
-      real(WP), dimension(3,3) :: M,Mtmp
+      real(WP), dimension(3,3) :: A
+      real(WP), dimension(3,3) :: M
       real(WP), dimension(3) :: d
+      real(WP)               :: omega12,omega21,omega13,omega31,omega23,omega32
       integer , parameter :: order = 3             !< Conformation tensor is 3x3
       real(WP), dimension(:), allocatable :: work
       real(WP), dimension(1)   :: lwork_query
@@ -265,60 +266,55 @@ contains
                !>On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
                call dsyev('V','U',order,A,order,d,work,lwork,info)
 
-               ! Change of base for the velocity gradient
-               !>Transpose eigenvector matrix
-               AT(1,1)=A(1,1); AT(1,2)=A(2,1); AT(1,3)=A(3,1)
-               AT(2,1)=A(1,2); AT(2,2)=A(2,2); AT(2,3)=A(3,2)
-               AT(3,1)=A(1,3); AT(3,2)=A(2,3); AT(3,3)=A(3,3)
-               !>Multiply AT*gradu
-               Mtmp=multiply_matrix(AT,gradU(:,:,i,j,k))
-               !>Multiply (AT*gradu)*A
-               M=multiply_matrix(Mtmp,A)
+               ! Change of base for the velocity gradient (A*gradU*At=M)
+               !> M={{m11,m12,m13},{m21,m22,m23},{m31,m32,m33}}
+               M(1,1)=A(1,1)*(A(1,1)*gradU(1,1,i,j,k)+A(1,2)*gradU(2,1,i,j,k)+A(1,3)*gradU(3,1,i,j,k))+A(1,2)*(A(1,1)*gradU(1,2,i,j,k)+A(1,2)*gradU(2,2,i,j,k)+A(1,3)*gradU(3,2,i,j,k))+A(1,3)*(A(1,1)*gradU(1,3,i,j,k)+A(1,2)*gradU(2,3,i,j,k)+A(1,3)*gradU(3,3,i,j,k))
+               M(1,2)=A(2,1)*(A(1,1)*gradU(1,1,i,j,k)+A(1,2)*gradU(2,1,i,j,k)+A(1,3)*gradU(3,1,i,j,k))+A(2,2)*(A(1,1)*gradU(1,2,i,j,k)+A(1,2)*gradU(2,2,i,j,k)+A(1,3)*gradU(3,2,i,j,k))+A(2,3)*(A(1,1)*gradU(1,3,i,j,k)+A(1,2)*gradU(2,3,i,j,k)+A(1,3)*gradU(3,3,i,j,k))
+               M(1,3)=A(3,1)*(A(1,1)*gradU(1,1,i,j,k)+A(1,2)*gradU(2,1,i,j,k)+A(1,3)*gradU(3,1,i,j,k))+A(3,2)*(A(1,1)*gradU(1,2,i,j,k)+A(1,2)*gradU(2,2,i,j,k)+A(1,3)*gradU(3,2,i,j,k))+A(3,3)*(A(1,1)*gradU(1,3,i,j,k)+A(1,2)*gradU(2,3,i,j,k)+A(1,3)*gradU(3,3,i,j,k))
+               M(2,1)=A(1,1)*(A(2,1)*gradU(1,1,i,j,k)+A(2,2)*gradU(2,1,i,j,k)+A(2,3)*gradU(3,1,i,j,k))+A(1,2)*(A(2,1)*gradU(1,2,i,j,k)+A(2,2)*gradU(2,2,i,j,k)+A(2,3)*gradU(3,2,i,j,k))+A(1,3)*(A(2,1)*gradU(1,3,i,j,k)+A(2,2)*gradU(2,3,i,j,k)+A(2,3)*gradU(3,3,i,j,k))
+               M(2,2)=A(2,1)*(A(2,1)*gradU(1,1,i,j,k)+A(2,2)*gradU(2,1,i,j,k)+A(2,3)*gradU(3,1,i,j,k))+A(2,2)*(A(2,1)*gradU(1,2,i,j,k)+A(2,2)*gradU(2,2,i,j,k)+A(2,3)*gradU(3,2,i,j,k))+A(2,3)*(A(2,1)*gradU(1,3,i,j,k)+A(2,2)*gradU(2,3,i,j,k)+A(2,3)*gradU(3,3,i,j,k))
+               M(2,3)=A(3,1)*(A(2,1)*gradU(1,1,i,j,k)+A(2,2)*gradU(2,1,i,j,k)+A(2,3)*gradU(3,1,i,j,k))+A(3,2)*(A(2,1)*gradU(1,2,i,j,k)+A(2,2)*gradU(2,2,i,j,k)+A(2,3)*gradU(3,2,i,j,k))+A(3,3)*(A(2,1)*gradU(1,3,i,j,k)+A(2,2)*gradU(2,3,i,j,k)+A(2,3)*gradU(3,3,i,j,k))
+               M(3,1)=A(1,1)*(A(3,1)*gradU(1,1,i,j,k)+A(3,2)*gradU(2,1,i,j,k)+A(3,3)*gradU(3,1,i,j,k))+A(1,2)*(A(3,1)*gradU(1,2,i,j,k)+A(3,2)*gradU(2,2,i,j,k)+A(3,3)*gradU(3,2,i,j,k))+A(1,3)*(A(3,1)*gradU(1,3,i,j,k)+A(3,2)*gradU(2,3,i,j,k)+A(3,3)*gradU(3,3,i,j,k))
+               M(3,2)=A(2,1)*(A(3,1)*gradU(1,1,i,j,k)+A(3,2)*gradU(2,1,i,j,k)+A(3,3)*gradU(3,1,i,j,k))+A(2,2)*(A(3,1)*gradU(1,2,i,j,k)+A(3,2)*gradU(2,2,i,j,k)+A(3,3)*gradU(3,2,i,j,k))+A(2,3)*(A(3,1)*gradU(1,3,i,j,k)+A(3,2)*gradU(2,3,i,j,k)+A(3,3)*gradU(3,3,i,j,k))
+               M(3,3)=A(3,1)*(A(3,1)*gradU(1,1,i,j,k)+A(3,2)*gradU(2,1,i,j,k)+A(3,3)*gradU(3,1,i,j,k))+A(3,2)*(A(3,1)*gradU(1,2,i,j,k)+A(3,2)*gradU(2,2,i,j,k)+A(3,3)*gradU(3,2,i,j,k))+A(3,3)*(A(3,1)*gradU(1,3,i,j,k)+A(3,2)*gradU(2,3,i,j,k)+A(3,3)*gradU(3,3,i,j,k))
+
 
                ! Compute extension matrix (symmetric)
                !>E11
-               this%extsion(i,j,k,1)=A(1,1)**2*M(1,1)+A(1,2)**2*M(2,2)+A(1,3)**2*M(3,3)
+               this%extension(i,j,k,1)=A(1,1)**2*M(1,1)+A(1,2)**2*M(2,2)+A(1,3)**2*M(3,3)
                !>E21
-               this%extsion(i,j,k,2)=A(1,1)*A(2,1)*M(1,1)+A(1,2)*A(2,2)*M(2,2)+A(1,3)*A(3,3)*M(3,3)
+               this%extension(i,j,k,2)=A(1,1)*A(2,1)*M(1,1)+A(1,2)*A(2,2)*M(2,2)+A(1,3)*A(2,3)*M(3,3)
                !>E31
-               this%extsion(i,j,k,3)=0.0_WP
+               this%extension(i,j,k,3)=A(1,1)*A(3,1)*M(1,1)+A(1,2)*A(3,2)*M(2,2)+A(1,3)*A(3,3)*M(3,3)
                !>E22
-               this%extsion(i,j,k,4)=0.0_WP
+               this%extension(i,j,k,4)=A(2,1)**2*M(1,1)+A(2,2)**2*M(2,2)+A(2,3)**2*M(3,3)
                !>E32
-               this%extsion(i,j,k,5)=0.0_WP
+               this%extension(i,j,k,5)=A(2,1)*A(3,1)*M(1,1)+A(2,2)*A(3,2)*M(2,2)+A(2,3)*A(3,3)*M(3,3)
                !>E33
-               this%extsion(i,j,k,6)=0.0_WP
+               this%extension(i,j,k,6)=A(3,1)**2*M(1,1)+A(3,2)**2*M(2,2)+A(3,3)**2*M(3,3)
 
                ! Compute rotation matrix
-               
+               !> Matrix terms
+               omega12=(d(2)*M(1,2)+d(1)*M(2,1))/(d(1)+d(2)); omega21=(d(1)*M(2,1)+d(2)*M(1,2))/(d(2)-d(1))
+               omega23=(d(3)*M(2,3)+d(2)*M(3,2))/(d(2)-d(3)); omega32=(d(2)*M(3,2)+d(3)*M(2,3))/(d(3)-d(2))
+               omega13=(d(3)*M(1,3)+d(1)*M(3,1))/(d(1)-d(3)); omega31=(d(1)*M(3,1)+d(3)*M(1,3))/(d(3)-d(1))
+
                !>Omega11
-               this%rotaton(i,j,k,1)=0.0_WP
+               this%rotation(i,j,k,1)=0.0_WP
                !>Omega21
-               this%rotaton(i,j,k,2)=0.0_WP
+               this%rotation(i,j,k,2)=0.0_WP
                !>Omega31
-               this%rotaton(i,j,k,3)=0.0_WP
+               this%rotation(i,j,k,3)=0.0_WP
                !>Omega22
-               this%rotaton(i,j,k,4)=0.0_WP
+               this%rotation(i,j,k,4)=0.0_WP
                !>Omega32
-               this%rotaton(i,j,k,5)=0.0_WP
+               this%rotation(i,j,k,5)=0.0_WP
                !>Omega33
-               this%rotaton(i,j,k,6)=0.0_WP
+               this%rotation(i,j,k,6)=0.0_WP
             end do 
          end do
       end do
 
    end subroutine decompose_gradu
-
-   ! Multiply 3x3 matrix
-   function multiply_matrix(A,B) result(C)
-      implicit none
-      real(WP), dimension(3,3), intent(in) :: A,B
-      real(WP), dimension(3,3) :: C
-      ! Resultant matrix
-      C(1,1)=A(1,1)*B(1,1)+A(1,2)*B(2,1)+A(1,3)*B(3,1); C(1,2)=A(1,1)*B(1,2)+A(1,2)*B(2,2)+A(1,3)*B(3,2); C(1,3)=A(1,1)*B(1,3)+A(1,2)*B(2,3)+A(1,3)*B(3,3)
-      C(2,1)=A(2,1)*B(1,1)+A(2,2)*B(2,1)+A(2,3)*B(3,1); C(2,2)=A(2,1)*B(1,2)+A(2,2)*B(2,2)+A(2,3)*B(3,2); C(2,3)=A(2,1)*B(1,3)+A(2,2)*B(2,3)+A(2,3)*B(3,3)
-      C(3,1)=A(3,1)*B(1,1)+A(3,2)*B(2,1)+A(3,3)*B(3,1); C(3,2)=A(3,1)*B(1,2)+A(3,2)*B(2,2)+A(3,3)*B(3,2); C(3,3)=A(3,1)*B(1,3)+A(3,2)*B(2,3)+A(3,3)*B(3,3)
-   end function multiply_matrix
-   
    
 end module tpviscoelastic_class
