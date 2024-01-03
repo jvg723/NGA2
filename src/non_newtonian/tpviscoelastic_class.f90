@@ -40,7 +40,7 @@ module tpviscoelastic_class
       procedure :: get_CgradU                              !< Calculate streching and distrortion term
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
-      procedure :: decompose_gradu                         !< Deompose velocity gradient for log-conformation stabilization technique
+      procedure :: stabilization                           !< log-conformation stabilization for upper convected derivative
    end type tpviscoelastic
    
    
@@ -233,19 +233,24 @@ contains
       end select
    end subroutine get_relax
 
-   !> Decompose velocity gradient for log-conformation stabilization
+   !> Log-conformation stabilization method for upper convective derivative
    !> Assumes scalar being transported is log(C)
-   !> Passes out B and Omega matrices
-   subroutine decompose_gradu(this,gradu)
+   subroutine stabilization(this,gradu,resSC)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
-      ! Eigenvalues/eigenvectors
+      ! Temp scalar values for matrix multiplication
+      real(WP) :: Rxx,Rxy,Rxz,Ryx,Ryy,Ryz,Rzx,Rzy,Rzz                                        !< Matrix containing eigenvectors of C
+      real(WP) :: mxx,mxy,mxz,myx,myy,myz,mzx,mzy,mzz                                        !< Components of M tensor
+      real(WP) :: Lambdax,Lambday,Lambdaz                                                    !< Eigenvalues of C
+      real(WP) :: omega_xy,omega_xz,omega_yz                                                 !< Components for anti-symetric matric
+      real(WP) :: Bxx,Bxy,Bxz,Byy,Byz,Bzz                                                    !< Extensional component of conformation tensor
+      real(WP) :: Omegaxx,Omegaxy,Omegaxz,Omegayx,Omegayy,Omegayz,Omegazx,Omegazy,Omegazz    !< Rotational component of conformation tensor
+      ! Used for calculation of conformation tensor eigenvalues and eigenvectors
       real(WP), dimension(3,3) :: A
-      real(WP), dimension(3,3) :: M
       real(WP), dimension(3) :: d
-      real(WP)               :: omega12,omega21,omega13,omega31,omega23,omega32
       integer , parameter :: order = 3             !< Conformation tensor is 3x3
       real(WP), dimension(:), allocatable :: work
       real(WP), dimension(1)   :: lwork_query
@@ -254,67 +259,85 @@ contains
       ! Query optimal work array size
       call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
       
+      resSC=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                
-               ! Eigenvalues/eigenvectors of C tensor
-               !>Assemble C matrix (from C=exp(log(C)))
+               ! Skip non-solved cells
+               if (this%mask(i,j,k).ne.0) cycle
+
+               ! Eigenvalues/eigenvectors of conformation tensor
+               !>Assemble conformation tensor (from C=exp(log(C)))
                A(1,1)=exp(this%SC(i,j,k,1)); A(1,2)=exp(this%SC(i,j,k,2)); A(1,3)=exp(this%SC(i,j,k,3))
                A(2,1)=exp(this%SC(i,j,k,2)); A(2,2)=exp(this%SC(i,j,k,4)); A(2,3)=exp(this%SC(i,j,k,5))
                A(3,1)=exp(this%SC(i,j,k,3)); A(3,2)=exp(this%SC(i,j,k,5)); A(3,3)=exp(this%SC(i,j,k,6))
                !>On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
                call dsyev('V','U',order,A,order,d,work,lwork,info)
+               !>Form eigenvector tensor (R={{Rxx,Rxy,Rxz},{Ryx,Ryy,Ryz},{Rzx,Rzy,Rzz}})
+               Rxx=A(1,1); Rxy=A(1,2); Rxz=A(1,3)
+               Ryx=A(2,1); Ryy=A(2,2); Ryz=A(2,3)
+               Rzx=A(3,1); Rzy=A(3,2); Rzz=A(3,3)
+               !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
+               Lambdax=d(1); Lambday=d(2); Lambdaz=d(3)
 
-               ! Change of base for the velocity gradient (A*gradU*At=M)
-               !> M={{m11,m12,m13},{m21,m22,m23},{m31,m32,m33}}
-               M(1,1)=A(1,1)*(A(1,1)*gradU(1,1,i,j,k)+A(1,2)*gradU(2,1,i,j,k)+A(1,3)*gradU(3,1,i,j,k))+A(1,2)*(A(1,1)*gradU(1,2,i,j,k)+A(1,2)*gradU(2,2,i,j,k)+A(1,3)*gradU(3,2,i,j,k))+A(1,3)*(A(1,1)*gradU(1,3,i,j,k)+A(1,2)*gradU(2,3,i,j,k)+A(1,3)*gradU(3,3,i,j,k))
-               M(1,2)=A(2,1)*(A(1,1)*gradU(1,1,i,j,k)+A(1,2)*gradU(2,1,i,j,k)+A(1,3)*gradU(3,1,i,j,k))+A(2,2)*(A(1,1)*gradU(1,2,i,j,k)+A(1,2)*gradU(2,2,i,j,k)+A(1,3)*gradU(3,2,i,j,k))+A(2,3)*(A(1,1)*gradU(1,3,i,j,k)+A(1,2)*gradU(2,3,i,j,k)+A(1,3)*gradU(3,3,i,j,k))
-               M(1,3)=A(3,1)*(A(1,1)*gradU(1,1,i,j,k)+A(1,2)*gradU(2,1,i,j,k)+A(1,3)*gradU(3,1,i,j,k))+A(3,2)*(A(1,1)*gradU(1,2,i,j,k)+A(1,2)*gradU(2,2,i,j,k)+A(1,3)*gradU(3,2,i,j,k))+A(3,3)*(A(1,1)*gradU(1,3,i,j,k)+A(1,2)*gradU(2,3,i,j,k)+A(1,3)*gradU(3,3,i,j,k))
-               M(2,1)=A(1,1)*(A(2,1)*gradU(1,1,i,j,k)+A(2,2)*gradU(2,1,i,j,k)+A(2,3)*gradU(3,1,i,j,k))+A(1,2)*(A(2,1)*gradU(1,2,i,j,k)+A(2,2)*gradU(2,2,i,j,k)+A(2,3)*gradU(3,2,i,j,k))+A(1,3)*(A(2,1)*gradU(1,3,i,j,k)+A(2,2)*gradU(2,3,i,j,k)+A(2,3)*gradU(3,3,i,j,k))
-               M(2,2)=A(2,1)*(A(2,1)*gradU(1,1,i,j,k)+A(2,2)*gradU(2,1,i,j,k)+A(2,3)*gradU(3,1,i,j,k))+A(2,2)*(A(2,1)*gradU(1,2,i,j,k)+A(2,2)*gradU(2,2,i,j,k)+A(2,3)*gradU(3,2,i,j,k))+A(2,3)*(A(2,1)*gradU(1,3,i,j,k)+A(2,2)*gradU(2,3,i,j,k)+A(2,3)*gradU(3,3,i,j,k))
-               M(2,3)=A(3,1)*(A(2,1)*gradU(1,1,i,j,k)+A(2,2)*gradU(2,1,i,j,k)+A(2,3)*gradU(3,1,i,j,k))+A(3,2)*(A(2,1)*gradU(1,2,i,j,k)+A(2,2)*gradU(2,2,i,j,k)+A(2,3)*gradU(3,2,i,j,k))+A(3,3)*(A(2,1)*gradU(1,3,i,j,k)+A(2,2)*gradU(2,3,i,j,k)+A(2,3)*gradU(3,3,i,j,k))
-               M(3,1)=A(1,1)*(A(3,1)*gradU(1,1,i,j,k)+A(3,2)*gradU(2,1,i,j,k)+A(3,3)*gradU(3,1,i,j,k))+A(1,2)*(A(3,1)*gradU(1,2,i,j,k)+A(3,2)*gradU(2,2,i,j,k)+A(3,3)*gradU(3,2,i,j,k))+A(1,3)*(A(3,1)*gradU(1,3,i,j,k)+A(3,2)*gradU(2,3,i,j,k)+A(3,3)*gradU(3,3,i,j,k))
-               M(3,2)=A(2,1)*(A(3,1)*gradU(1,1,i,j,k)+A(3,2)*gradU(2,1,i,j,k)+A(3,3)*gradU(3,1,i,j,k))+A(2,2)*(A(3,1)*gradU(1,2,i,j,k)+A(3,2)*gradU(2,2,i,j,k)+A(3,3)*gradU(3,2,i,j,k))+A(2,3)*(A(3,1)*gradU(1,3,i,j,k)+A(3,2)*gradU(2,3,i,j,k)+A(3,3)*gradU(3,3,i,j,k))
-               M(3,3)=A(3,1)*(A(3,1)*gradU(1,1,i,j,k)+A(3,2)*gradU(2,1,i,j,k)+A(3,3)*gradU(3,1,i,j,k))+A(3,2)*(A(3,1)*gradU(1,2,i,j,k)+A(3,2)*gradU(2,2,i,j,k)+A(3,3)*gradU(3,2,i,j,k))+A(3,3)*(A(3,1)*gradU(1,3,i,j,k)+A(3,2)*gradU(2,3,i,j,k)+A(3,3)*gradU(3,3,i,j,k))
+               ! Form M tensor (M=R^T*gradU^T*R={{mxx,mxy,mxz},{myx,myy,myz},{mzx,mzy,mzz}})
+               mxx=Rxx*(gradU(1,1,i,j,k)*Rxx+gradU(1,2,i,j,k)*Ryx+gradU(1,3,i,j,k)*Rzx)+Ryx*(gradU(2,1,i,j,k)*Rxx+gradU(2,2,i,j,k)*Ryx+gradU(2,3,i,j,k)*Rzx)+Rzx*(gradU(3,1,i,j,k)*Rxx+gradU(3,2,i,j,k)*Ryx+gradU(3,3,i,j,k)*Rzx)
+               mxy=Rxy*(gradU(1,1,i,j,k)*Rxx+gradU(1,2,i,j,k)*Ryx+gradU(1,3,i,j,k)*Rzx)+Ryy*(gradU(2,1,i,j,k)*Rxx+gradU(2,2,i,j,k)*Ryx+gradU(2,3,i,j,k)*Rzx)+Rzy*(gradU(3,1,i,j,k)*Rxx+gradU(3,2,i,j,k)*Ryx+gradU(3,3,i,j,k)*Rzx)
+               mxz=Rxz*(gradU(1,1,i,j,k)*Rxx+gradU(1,2,i,j,k)*Ryx+gradU(1,3,i,j,k)*Rzx)+Ryz*(gradU(2,1,i,j,k)*Rxx+gradU(2,2,i,j,k)*Ryx+gradU(2,3,i,j,k)*Rzx)+Rzz*(gradU(3,1,i,j,k)*Rxx+gradU(3,2,i,j,k)*Ryx+gradU(3,3,i,j,k)*Rzx)
+               myx=Rxx*(gradU(1,1,i,j,k)*Rxy+gradU(1,2,i,j,k)*Ryy+gradU(1,3,i,j,k)*Rzy)+Ryx*(gradU(2,1,i,j,k)*Rxy+gradU(2,2,i,j,k)*Ryy+gradU(2,3,i,j,k)*Rzy)+Rzx*(gradU(3,1,i,j,k)*Rxy+gradU(3,2,i,j,k)*Ryy+gradU(3,3,i,j,k)*Rzy)
+               myy=Rxy*(gradU(1,1,i,j,k)*Rxy+gradU(1,2,i,j,k)*Ryy+gradU(1,3,i,j,k)*Rzy)+Ryy*(gradU(2,1,i,j,k)*Rxy+gradU(2,2,i,j,k)*Ryy+gradU(2,3,i,j,k)*Rzy)+Rzy*(gradU(3,1,i,j,k)*Rxy+gradU(3,2,i,j,k)*Ryy+gradU(3,3,i,j,k)*Rzy)
+               myz=Rxz*(gradU(1,1,i,j,k)*Rxy+gradU(1,2,i,j,k)*Ryy+gradU(1,3,i,j,k)*Rzy)+Ryz*(gradU(2,1,i,j,k)*Rxy+gradU(2,2,i,j,k)*Ryy+gradU(2,3,i,j,k)*Rzy)+Rzz*(gradU(3,1,i,j,k)*Rxy+gradU(3,2,i,j,k)*Ryy+gradU(3,3,i,j,k)*Rzy)
+               mzx=Rxx*(gradU(1,1,i,j,k)*Rxz+gradU(1,2,i,j,k)*Ryz+gradU(1,3,i,j,k)*Rzz)+Ryx*(gradU(2,1,i,j,k)*Rxz+gradU(2,2,i,j,k)*Ryz+gradU(2,3,i,j,k)*Rzz)+Rzx*(gradU(3,1,i,j,k)*Rxz+gradU(3,2,i,j,k)*Ryz+gradU(3,3,i,j,k)*Rzz)
+               mzy=Rxy*(gradU(1,1,i,j,k)*Rxz+gradU(1,2,i,j,k)*Ryz+gradU(1,3,i,j,k)*Rzz)+Ryy*(gradU(2,1,i,j,k)*Rxz+gradU(2,2,i,j,k)*Ryz+gradU(2,3,i,j,k)*Rzz)+Rzy*(gradU(3,1,i,j,k)*Rxz+gradU(3,2,i,j,k)*Ryz+gradU(3,3,i,j,k)*Rzz)
+               mzz=Rxz*(gradU(1,1,i,j,k)*Rxz+gradU(1,2,i,j,k)*Ryz+gradU(1,3,i,j,k)*Rzz)+Ryz*(gradU(2,1,i,j,k)*Rxz+gradU(2,2,i,j,k)*Ryz+gradU(2,3,i,j,k)*Rzz)+Rzz*(gradU(3,1,i,j,k)*Rxz+gradU(3,2,i,j,k)*Ryz+gradU(3,3,i,j,k)*Rzz)
+            
+               ! Form symmetric extension component of confomration tensor (B=R*{{mxx,0,0},{0,myy,0},{0,0,mzz}}*R^T={{Bxx,Bxy,Bxz},{Bxy,Byy,Byz},{Bxz,Byz,Bzz}})
+               !>xx tensor component
+               Bxx=mxx*Rxx**2+myy*Rxy**2+mzz*Rxz**2
+               !>xy tensor component
+               Bxy=mxx*Rxx*Ryx+myy*Rxy*Ryy+mzz*Rxz*Ryz
+               !>xz tensor component
+               Bxz=mxx*Rxx*Rzx+myy*Rxy*Rzy+mzz*Rxz*Rzz
+               !>yy tensor component
+               Byy=mxx*Rxy**2+myy*Ryy**2+mzz*Ryz**2
+               !>yz tensor component
+               Byz=mxx*Ryx*Rzx+myy*Ryy*Rzy+mzz*Ryz*Rzz
+               !>zz tensor component
+               Bzz=mxx*Rzx**2+myy*Rzy**2+mzz*Rzz**2
 
+               ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
+               !>Antisymmetric components
+               omega_xy=(Lambday*mxy+Lambdax*myx)/(Lambday-Lambdax); omega_xz=(Lambdaz*mxz+Lambdax*mzx)/(Lambdaz-Lambdax); omega_yz=(Lambdaz*myz+Lambday*mzy)/(Lambdaz-Lambday)
+               !>Tensor components
+               Omegaxx=Rxz*(Rxx*omega_xz+Rxy*omega_yz)-Rxx*(Rxy*omega_xy+Rxz*omega_xz)+Rxy*(Rxx*omega_xy-Rxz*omega_yz)
+               Omegaxy=Ryz*(Rxx*omega_xz+Rxy*omega_yz)-Ryx*(Rxy*omega_xy+Rxz*omega_xz)+Ryy*(Rxx*omega_xy-Rxz*omega_yz)
+               Omegaxz=Rzz*(Rxx*omega_xz+Rxy*omega_yz)-Rzx*(Rxy*omega_xy+Rxz*omega_xz)+Rzy*(Rxx*omega_xy-Rxz*omega_yz)
+               Omegayx=Rxz*(Ryx*omega_xz+Ryy*omega_yz)-Rxx*(Ryy*omega_xy+Ryz*omega_xz)+Rxy*(Ryx*omega_xy-Ryz*omega_yz)
+               Omegayy=Ryz*(Ryx*omega_xz+Ryy*omega_yz)-Ryx*(Ryy*omega_xy+Ryz*omega_xz)+Ryy*(Ryx*omega_xy-Ryz*omega_yz)
+               Omegayz=Rzz*(Ryx*omega_xz+Ryy*omega_yz)-Rzx*(Ryy*omega_xy+Ryz*omega_xz)+Rzy*(Ryx*omega_xy-Ryz*omega_yz)
+               Omegazx=Rxz*(Rzx*omega_xz+Rzy*omega_yz)-Rxx*(Rzy*omega_xy+Rzz*omega_xz)+Rxy*(Rzx*omega_xy-Rzz*omega_yz)
+               Omegazy=Ryz*(Rzx*omega_xz+Rzy*omega_yz)-Ryx*(Rzy*omega_xy+Rzz*omega_xz)+Ryy*(Rzx*omega_xy-Rzz*omega_yz)
+               Omegazz=Rzz*(Rzx*omega_xz+Rzy*omega_yz)-Rzx*(Rzy*omega_xy+Rzz*omega_xz)+Rzy*(Rzx*omega_xy-Rzz*omega_yz)
 
-               ! Compute extension matrix (symmetric)
-               !>E11
-               this%extension(i,j,k,1)=A(1,1)**2*M(1,1)+A(1,2)**2*M(2,2)+A(1,3)**2*M(3,3)
-               !>E21
-               this%extension(i,j,k,2)=A(1,1)*A(2,1)*M(1,1)+A(1,2)*A(2,2)*M(2,2)+A(1,3)*A(2,3)*M(3,3)
-               !>E31
-               this%extension(i,j,k,3)=A(1,1)*A(3,1)*M(1,1)+A(1,2)*A(3,2)*M(2,2)+A(1,3)*A(3,3)*M(3,3)
-               !>E22
-               this%extension(i,j,k,4)=A(2,1)**2*M(1,1)+A(2,2)**2*M(2,2)+A(2,3)**2*M(3,3)
-               !>E32
-               this%extension(i,j,k,5)=A(2,1)*A(3,1)*M(1,1)+A(2,2)*A(3,2)*M(2,2)+A(2,3)*A(3,3)*M(3,3)
-               !>E33
-               this%extension(i,j,k,6)=A(3,1)**2*M(1,1)+A(3,2)**2*M(2,2)+A(3,3)**2*M(3,3)
+               ! Add extension and rotation components to resSC (Omega*log(C)-log(C)*Omega+2B)
+               !>xx tensor component
+               resSC(i,j,k,1)=Omegaxy*this%SC(i,j,k,2)-Omegayx*this%SC(i,j,k,2)+Omegaxz*this%SC(i,j,k,3)-Omegazx*this%SC(i,j,k,3)+2.00_WP*Bxx
+               !>xy tensor component
+               resSC(i,j,k,2)=Omegaxx*this%SC(i,j,k,2)-Omegaxy*this%SC(i,j,k,1)-Omegayy*this%SC(i,j,k,2)-Omegazy*this%SC(i,j,k,3)+Omegaxy*this%SC(i,j,k,4)+Omegaxz*this%SC(i,j,k,5)+2.00_WP*Bxy
+               !>xz tensor component
+               resSC(i,j,k,3)=Omegaxx*this%SC(i,j,k,3)-Omegaxz*this%SC(i,j,k,1)-Omegayz*this%SC(i,j,k,2)-Omegazz*this%SC(i,j,k,3)+Omegaxy*this%SC(i,j,k,5)+Omegaxz*this%SC(i,j,k,6)+2.00_WP*Bxz
+               !>yy tensor component
+               resSC(i,j,k,4)=Omegaxy*this%SC(i,j,k,2)-Omegaxy*this%SC(i,j,k,2)+Omegayz*this%SC(i,j,k,5)-Omegazy*this%SC(i,j,k,5)+2.00_WP*Byy
+               !>yz tensor component
+               resSC(i,j,k,5)=Omegayx*this%SC(i,j,k,3)-Omegaxz*this%SC(i,j,k,2)-Omegayz*this%SC(i,j,k,4)+Omegayy*this%SC(i,j,k,5)-Omegazz*this%SC(i,j,k,5)+Omegayz*this%SC(i,j,k,6)+2.00_WP*Byz
+               !>zz tensor component
+               resSC(i,j,k,6)=Omegazx*this%SC(i,j,k,3)-Omegaxz*this%SC(i,j,k,3)-Omegayz*this%SC(i,j,k,5)+Omegazy*this%SC(i,j,k,5)+2.00_WP*Bzz
 
-               ! Compute rotation matrix
-               !> Matrix terms
-               omega12=(d(2)*M(1,2)+d(1)*M(2,1))/(d(1)+d(2)); omega21=(d(1)*M(2,1)+d(2)*M(1,2))/(d(2)-d(1))
-               omega23=(d(3)*M(2,3)+d(2)*M(3,2))/(d(2)-d(3)); omega32=(d(2)*M(3,2)+d(3)*M(2,3))/(d(3)-d(2))
-               omega13=(d(3)*M(1,3)+d(1)*M(3,1))/(d(1)-d(3)); omega31=(d(1)*M(3,1)+d(3)*M(1,3))/(d(3)-d(1))
-
-               !>Omega11
-               this%rotation(i,j,k,1)=0.0_WP
-               !>Omega21
-               this%rotation(i,j,k,2)=0.0_WP
-               !>Omega31
-               this%rotation(i,j,k,3)=0.0_WP
-               !>Omega22
-               this%rotation(i,j,k,4)=0.0_WP
-               !>Omega32
-               this%rotation(i,j,k,5)=0.0_WP
-               !>Omega33
-               this%rotation(i,j,k,6)=0.0_WP
             end do 
          end do
       end do
 
-   end subroutine decompose_gradu
+   end subroutine stabilization
    
 end module tpviscoelastic_class
