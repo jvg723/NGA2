@@ -32,8 +32,6 @@ module tpviscoelastic_class
 
       ! Arrays for log-conformation stabilization
       logical :: use_stabilization=.false.                   !< Flag to use log-conformation approach (default=.false.)
-      real(WP), dimension(:,:,:,:), allocatable :: extension !< Extension matrix decomposed from gradU
-      real(WP), dimension(:,:,:,:), allocatable :: rotation  !< Rotation matrix decomposed from gradU
 
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
@@ -41,6 +39,7 @@ module tpviscoelastic_class
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
       procedure :: stabilization                           !< log-conformation stabilization for upper convected derivative
+      procedure :: stabilization_relax                     !< Calculate relaxation term in for log conformation
    end type tpviscoelastic
    
    
@@ -61,10 +60,6 @@ contains
       this%phase=phase; this%SCname=['Cxx','Cxy','Cxz','Cyy','Cyz','Czz']
       ! Assign closure model for viscoelastic fluid
       this%model=model
-      ! Set optional detailed flux info
-      if (present(use_stabilization)) then
-         allocate(this%extension(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-      end if
    end subroutine init
    
    
@@ -234,7 +229,7 @@ contains
    end subroutine get_relax
 
    !> Log-conformation stabilization method for upper convective derivative
-   !> Assumes scalar being transported is log(C)
+   !> Assumes scalar being transported is ln(C)
    subroutine stabilization(this,gradu,resSC)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
@@ -268,18 +263,18 @@ contains
                if (this%mask(i,j,k).ne.0) cycle
 
                ! Eigenvalues/eigenvectors of conformation tensor
-               !>Assemble conformation tensor (from C=exp(log(C)))
-               A(1,1)=exp(this%SC(i,j,k,1)); A(1,2)=exp(this%SC(i,j,k,2)); A(1,3)=exp(this%SC(i,j,k,3))
-               A(2,1)=exp(this%SC(i,j,k,2)); A(2,2)=exp(this%SC(i,j,k,4)); A(2,3)=exp(this%SC(i,j,k,5))
-               A(3,1)=exp(this%SC(i,j,k,3)); A(3,2)=exp(this%SC(i,j,k,5)); A(3,3)=exp(this%SC(i,j,k,6))
-               !>On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
+               !>Assemble ln(C) tensor
+               A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
+               A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
+               A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
+               !>On exit, A contains eigenvectors, and d contains ln(eigenvalues) in ascending order
                call dsyev('V','U',order,A,order,d,work,lwork,info)
                !>Form eigenvector tensor (R={{Rxx,Rxy,Rxz},{Ryx,Ryy,Ryz},{Rzx,Rzy,Rzz}})
                Rxx=A(1,1); Rxy=A(1,2); Rxz=A(1,3)
                Ryx=A(2,1); Ryy=A(2,2); Ryz=A(2,3)
                Rzx=A(3,1); Rzy=A(3,2); Rzz=A(3,3)
                !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
-               Lambdax=d(1); Lambday=d(2); Lambdaz=d(3)
+               Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3))
 
                ! Form M tensor (M=R^T*gradU^T*R={{mxx,mxy,mxz},{myx,myy,myz},{mzx,mzy,mzz}})
                mxx=Rxx*(gradU(1,1,i,j,k)*Rxx+gradU(1,2,i,j,k)*Ryx+gradU(1,3,i,j,k)*Rzx)+Ryx*(gradU(2,1,i,j,k)*Rxx+gradU(2,2,i,j,k)*Ryx+gradU(2,3,i,j,k)*Rzx)+Rzx*(gradU(3,1,i,j,k)*Rxx+gradU(3,2,i,j,k)*Ryx+gradU(3,3,i,j,k)*Rzx)
@@ -339,5 +334,36 @@ contains
       end do
 
    end subroutine stabilization
+
+   !> Log-conformation stabilization method for relaxation term
+   !> Assumes scalar being transported is ln(C)
+   subroutine stabilization_relax(this,resSC)
+      use messager, only: die
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
+      integer :: i,j,k
+      real(WP) :: coeff
+      resSC=0.0_WP
+      select case (this%model)
+      case (eptt) ! Add relaxation source term for ePTT model
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
+                  coeff=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((exp(this%SC(i,j,k,1))+exp(this%SC(i,j,k,4))+exp(this%SC(i,j,k,6)))-3.0_WP))
+                  resSC(i,j,k,1)=-(exp(-this%SC(i,j,k,1))/this%trelax)*coeff*(exp(this%SC(i,j,k,1))-1.0_WP)               !< xx tensor component
+                  resSC(i,j,k,2)=-(exp(-this%SC(i,j,k,2))/this%trelax)*coeff*(exp(this%SC(i,j,k,2))-0.0_WP)               !< xy tensor component
+                  resSC(i,j,k,3)=-(exp(-this%SC(i,j,k,3))/this%trelax)*coeff*(exp(this%SC(i,j,k,3))-0.0_WP)               !< xz tensor component
+                  resSC(i,j,k,4)=-(exp(-this%SC(i,j,k,4))/this%trelax)*coeff*(exp(this%SC(i,j,k,4))-1.0_WP)               !< yy tensor component
+                  resSC(i,j,k,5)=-(exp(-this%SC(i,j,k,5))/this%trelax)*coeff*(exp(this%SC(i,j,k,5))-0.0_WP)               !< yz tensor component
+                  resSC(i,j,k,6)=-(exp(-this%SC(i,j,k,6))/this%trelax)*coeff*(exp(this%SC(i,j,k,6))-1.0_WP)               !< zz tensor component
+               end do
+            end do
+         end do
+      case default
+         call die('[tpviscoelastic get_relax] Unknown viscoelastic model selected')
+      end select
+   end subroutine stabilization_relax 
    
 end module tpviscoelastic_class
