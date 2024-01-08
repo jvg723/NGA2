@@ -38,7 +38,7 @@ module tpviscoelastic_class
       procedure :: get_CgradU                              !< Calculate streching and distrortion term
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
-      procedure :: stabilization                           !< log-conformation stabilization for upper convected derivative
+      procedure :: stabilization_CgradU                    !< log-conformation stabilization for upper convected derivative
       procedure :: stabilization_relax                     !< Calculate relaxation term in for log conformation
    end type tpviscoelastic
    
@@ -230,7 +230,7 @@ contains
 
    !> Log-conformation stabilization method for upper convective derivative
    !> Assumes scalar being transported is ln(C)
-   subroutine stabilization(this,gradu,resSC)
+   subroutine stabilization_CgradU(this,gradu,resSC)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
@@ -333,7 +333,7 @@ contains
          end do
       end do
 
-   end subroutine stabilization
+   end subroutine stabilization_CgradU
 
    !> Log-conformation stabilization method for relaxation term
    !> Assumes scalar being transported is ln(C)
