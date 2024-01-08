@@ -295,7 +295,7 @@ contains
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Maximum extensibility of polymer chain
          ! call param_read('Maximum polymer extensibility',ve%Lmax)
          ! Relaxation time for polymer
@@ -487,14 +487,16 @@ contains
          ! Transport our liquid conformation tensor
          advance_scalar: block
             integer :: i,j,k,nsc
-            ! ! Add upper convected derivative term and relaxation term
+
+            ! Add upper convected derivative term and relaxation term
             ! call ve%get_CgradU(gradU,SCtmp);  resSC=SCtmp
             ! call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
-            ! call ve%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
-            ! ve%SC=ve%SC+time%dt*resSC
+            !call ve%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
+
             ! Add upper convected derivative term and relaxation term for log conformation
-            call ve%stabilization(gradU,SCtmp); resSC=SCtmp
-            call ve%stabilization_relax(SCtmp); resSC=resSC+SCtmp
+            call ve%stabilization_CgradU(gradU,SCtmp); resSC=SCtmp
+            call ve%stabilization_relax(SCtmp);     resSC=resSC+SCtmp
+
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
             ve%SCold=ve%SC
@@ -505,76 +507,66 @@ contains
                where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
-            ! ! Add upper convected derivative term and relaxation term
-            ! call ve%get_CgradU(gradU,SCtmp);  resSC=SCtmp
-            ! call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
-            ! call ve%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
-            ! ve%SC=ve%SC+time%dt*resSC
-            ! ! Add upper convected derivative term and relaxation term for log conformation
-            ! call ve%stabilization(gradU,SCtmp); resSC=SCtmp
-            ! call ve%stabilization_relax(SCtmp); resSC=resSC+SCtmp
-            ve%SC=ve%SC+time%dt*resSC
-            ! Apply boundary conditions
-            call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
 
-         calcualte_conformation: block
-            integer :: i,j,k,nsc
-            ! Temp scalar values for matrix multiplication
-            real(WP) :: Rxx,Rxy,Rxz,Ryx,Ryy,Ryz,Rzx,Rzy,Rzz  !< Matrix containing eigenvectors of C
-            real(WP) :: Lambdax,Lambday,Lambdaz              !< Eigenvalues of C
-            ! Used for calculation of conformation tensor eigenvalues and eigenvectors
-            real(WP), dimension(3,3) :: A
-            real(WP), dimension(3) :: d
-            integer , parameter :: order = 3             !< Conformation tensor is 3x3
-            real(WP), dimension(:), allocatable :: work
-            real(WP), dimension(1)   :: lwork_query
-            integer  :: lwork,info,n
+         ! calcualte_conformation: block
+         !    integer :: i,j,k,nsc
+         !    ! Temp scalar values for matrix multiplication
+         !    real(WP) :: Rxx,Rxy,Rxz,Ryx,Ryy,Ryz,Rzx,Rzy,Rzz  !< Matrix containing eigenvectors of C
+         !    real(WP) :: Lambdax,Lambday,Lambdaz              !< Eigenvalues of C
+         !    ! Used for calculation of conformation tensor eigenvalues and eigenvectors
+         !    real(WP), dimension(3,3) :: A
+         !    real(WP), dimension(3) :: d
+         !    integer , parameter :: order = 3             !< Conformation tensor is 3x3
+         !    real(WP), dimension(:), allocatable :: work
+         !    real(WP), dimension(1)   :: lwork_query
+         !    integer  :: lwork,info,n
 
-            ! Query optimal work array size
-            call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+         !    ! Query optimal work array size
+         !    call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
 
-            Conf=0.0_WP
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
+         !    Conf=0.0_WP
+         !    do k=cfg%kmino_,cfg%kmaxo_
+         !       do j=cfg%jmino_,cfg%jmaxo_
+         !          do i=cfg%imino_,cfg%imaxo_
                      
-                     ! Skip non-solved cells
-                     if (ve%mask(i,j,k).ne.0) cycle
+         !             ! Skip non-solved cells
+         !             if (ve%mask(i,j,k).ne.0) cycle
 
-                     ! Eigenvalues/eigenvectors of ln(conformation) tensor
-                     !>Assemble log of conformation tensor
-                     A(1,1)=ve%SC(i,j,k,1); A(1,2)=ve%SC(i,j,k,2); A(1,3)=ve%SC(i,j,k,3)
-                     A(2,1)=ve%SC(i,j,k,2); A(2,2)=ve%SC(i,j,k,4); A(2,3)=ve%SC(i,j,k,5)
-                     A(3,1)=ve%SC(i,j,k,3); A(3,2)=ve%SC(i,j,k,5); A(3,3)=ve%SC(i,j,k,6)
-                     !>On exit, A contains orthonormal eigenvectors, and d contains ln(eigenvalues) in ascending order
-                     call dsyev('V','U',order,A,order,d,work,lwork,info)
-                     !>Form eigenvector tensor (R={{Rxx,Rxy,Rxz},{Ryx,Ryy,Ryz},{Rzx,Rzy,Rzz}})
-                     Rxx=A(1,1); Rxy=A(1,2); Rxz=A(1,3)
-                     Ryx=A(2,1); Ryy=A(2,2); Ryz=A(2,3)
-                     Rzx=A(3,1); Rzy=A(3,2); Rzz=A(3,3)
-                     !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
-                     Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3))
+         !             ! Eigenvalues/eigenvectors of ln(conformation) tensor
+         !             !>Assemble log of conformation tensor
+         !             A(1,1)=ve%SC(i,j,k,1); A(1,2)=ve%SC(i,j,k,2); A(1,3)=ve%SC(i,j,k,3)
+         !             A(2,1)=ve%SC(i,j,k,2); A(2,2)=ve%SC(i,j,k,4); A(2,3)=ve%SC(i,j,k,5)
+         !             A(3,1)=ve%SC(i,j,k,3); A(3,2)=ve%SC(i,j,k,5); A(3,3)=ve%SC(i,j,k,6)
+         !             !>On exit, A contains orthonormal eigenvectors, and d contains ln(eigenvalues) in ascending order
+         !             call dsyev('V','U',order,A,order,d,work,lwork,info)
+         !             !>Form eigenvector tensor (R={{Rxx,Rxy,Rxz},{Ryx,Ryy,Ryz},{Rzx,Rzy,Rzz}})
+         !             Rxx=A(1,1); Rxy=A(1,2); Rxz=A(1,3)
+         !             Ryx=A(2,1); Ryy=A(2,2); Ryz=A(2,3)
+         !             Rzx=A(3,1); Rzy=A(3,2); Rzz=A(3,3)
+         !             !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
+         !             Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3))
 
-                     ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
-                     !>xx tensor component
-                     Conf(i,j,k,1)=Lambdax*Rxx**2+Lambday*Rxy**2+Lambdaz*Rxz**2
-                     !>xy tensor component
-                     Conf(i,j,k,2)=Lambdax*Rxx*Ryx+Lambday*Rxy*Ryy+Lambdaz*Rxz*Ryz
-                     !>xz tensor component
-                     Conf(i,j,k,3)=Lambdax*Rxx*Rzx+Lambday*Rxy*Rzy+Lambdaz*Rxz*Rzz
-                     !>yy tensor component
-                     Conf(i,j,k,4)=Lambdax*Ryx**2+Lambday*Ryy**2+Lambdaz*Ryz**2
-                     !>yz tensor component
-                     Conf(i,j,k,5)=Lambdax*Ryx*Rzx+Lambday*Ryy*Rzy+Lambdaz*Ryz*Rzz
-                     !>zz tensor component
-                     Conf(i,j,k,6)=Lambdax*Rzx**2+Lambday*Rzy**2+Lambdaz*Rzz
+         !             ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
+         !             !>xx tensor component
+         !             Conf(i,j,k,1)=Lambdax*Rxx**2+Lambday*Rxy**2+Lambdaz*Rxz**2
+         !             !>xy tensor component
+         !             Conf(i,j,k,2)=Lambdax*Rxx*Ryx+Lambday*Rxy*Ryy+Lambdaz*Rxz*Ryz
+         !             !>xz tensor component
+         !             Conf(i,j,k,3)=Lambdax*Rxx*Rzx+Lambday*Rxy*Rzy+Lambdaz*Rxz*Rzz
+         !             !>yy tensor component
+         !             Conf(i,j,k,4)=Lambdax*Ryx**2+Lambday*Ryy**2+Lambdaz*Ryz**2
+         !             !>yz tensor component
+         !             Conf(i,j,k,5)=Lambdax*Ryx*Rzx+Lambday*Ryy*Rzy+Lambdaz*Ryz*Rzz
+         !             !>zz tensor component
+         !             Conf(i,j,k,6)=Lambdax*Rzx**2+Lambday*Rzy**2+Lambdaz*Rzz**2
 
-                  end do
-               end do
-            end do
 
-         end block calcualte_conformation
+         !          end do
+         !       end do
+         !    end do
+
+         ! end block calcualte_conformation
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
