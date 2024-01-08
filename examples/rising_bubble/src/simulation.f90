@@ -556,7 +556,7 @@ contains
                      !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
                      Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3))
 
-                     ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Byz},{Cxz,Cyz,Czz}})
+                     ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
                      !>xx tensor component
                      Conf(i,j,k,1)=Lambdax*Rxx**2+Lambday*Rxy**2+Lambdaz*Rxz**2
                      !>xy tensor component
