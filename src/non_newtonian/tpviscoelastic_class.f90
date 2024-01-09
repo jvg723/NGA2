@@ -316,21 +316,46 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
-      real(WP) :: coeff
+      ! Temp scalar values for matrix multiplication
+      real(WP), dimension(3,3) :: srcMat,tmpMat  !< Matrices for diagonalization 
+      real(WP) :: Lambdax,Lambday,Lambdaz                 !< Eigenvalues of C
+      ! Used for calculation of conformation tensor eigenvalues and eigenvectors
+      real(WP), dimension(3,3) :: A
+      real(WP), dimension(3) :: d
+      integer , parameter :: order = 3             !< Conformation tensor is 3x3
+      real(WP), dimension(:), allocatable :: work
+      real(WP), dimension(1)   :: lwork_query
+      integer  :: lwork,info,n
+
+      ! Query optimal work array size
+      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+      
       resSC=0.0_WP
       select case (this%model)
-      case (eptt) ! Add relaxation source term for ePTT model
+      case (oldroydb) ! Add relaxation source term for ePTT model
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
-                  coeff=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((exp(this%SC(i,j,k,1))+exp(this%SC(i,j,k,4))+exp(this%SC(i,j,k,6)))-3.0_WP))
-                  resSC(i,j,k,1)=-(exp(-this%SC(i,j,k,1))/this%trelax)*coeff*(exp(this%SC(i,j,k,1))-1.0_WP)               !< xx tensor component
-                  resSC(i,j,k,2)=-(exp(-this%SC(i,j,k,2))/this%trelax)*coeff*(exp(this%SC(i,j,k,2))-0.0_WP)               !< xy tensor component
-                  resSC(i,j,k,3)=-(exp(-this%SC(i,j,k,3))/this%trelax)*coeff*(exp(this%SC(i,j,k,3))-0.0_WP)               !< xz tensor component
-                  resSC(i,j,k,4)=-(exp(-this%SC(i,j,k,4))/this%trelax)*coeff*(exp(this%SC(i,j,k,4))-1.0_WP)               !< yy tensor component
-                  resSC(i,j,k,5)=-(exp(-this%SC(i,j,k,5))/this%trelax)*coeff*(exp(this%SC(i,j,k,5))-0.0_WP)               !< yz tensor component
-                  resSC(i,j,k,6)=-(exp(-this%SC(i,j,k,6))/this%trelax)*coeff*(exp(this%SC(i,j,k,6))-1.0_WP)               !< zz tensor component
+                  ! Eigenvalues/eigenvectors of conformation tensor
+                  !>Assemble ln(C) tensor
+                  A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
+                  A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
+                  A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
+                  !>On exit, A contains eigenvectors, and d contains ln(eigenvalues) in ascending order
+                  call dsyev('V','U',order,A,order,d,work,lwork,info)
+                  !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
+                  Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3)); 
+                  ! Temp matrix for calculating residual
+                  tmpMat=reshape((/ (1.00_WP/Lambdax)-1.00_WP,0.0_WP,0.0_WP,0.0_WP,(1.00_WP/Lambday)-1.00_WP,0.0_WP,0.0_WP,0.0_WP,(1.00_WP/Lambdaz)-1.00_WP /),shape(tmpMat))
+                  ! Calculate source terms
+                  srcMat=matmul(A,matmul(((1.00_WP/this%trelax)*tmpMat),A))
+                  resSC(i,j,k,1)=srcMat(1,1)  !< xx tensor component
+                  resSC(i,j,k,2)=srcMat(2,1)  !< xy tensor component
+                  resSC(i,j,k,3)=srcMat(3,1)  !< xz tensor component
+                  resSC(i,j,k,4)=srcMat(2,2)  !< yy tensor component
+                  resSC(i,j,k,5)=srcMat(3,2)  !< yz tensor component
+                  resSC(i,j,k,6)=srcMat(3,2)  !< zz tensor component
                end do
             end do
          end do
