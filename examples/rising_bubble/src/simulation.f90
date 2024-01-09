@@ -21,6 +21,7 @@ module simulation
    type(tpns),           public :: fs
    type(vfs),            public :: vf
    type(tpviscoelastic), public :: ve
+   type(tpviscoelastic), public :: veln
    type(carreau),        public :: nn
    type(timetracker),    public :: time
    
@@ -37,6 +38,7 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR,Conf
+   real(WP), dimension(:,:,:,:),   allocatable :: resSCln,SCtmpln
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
@@ -139,6 +141,8 @@ contains
          allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(resSCln(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SCtmpln(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(Conf(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SR   (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -296,16 +300,8 @@ contains
          integer :: i,j,k
          ! Create viscoelastic model solver
          call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
-         ! Maximum extensibility of polymer chain
-         ! call param_read('Maximum polymer extensibility',ve%Lmax)
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
-         ! Extensional viscosity parameter (ePTT)
-         call param_read('Extensional viscosity parameter',ve%elongvisc)
-         ! Affine parameter (ePTT)
-         call param_read('Extensional viscosity parameter',ve%affinecoeff)
-         ! Outflow at the bottom
-         ! call ve%add_bcond(name='outflow',type=neumann,locator=ym_locator,dir='y-')
          ! Setup without an implicit solver
          call ve%setup()
          ! Initialize scalar fields
@@ -320,15 +316,35 @@ contains
                end do
             end do
          end do
-         ! Create Carreau model
-         call nn%initialize(cfg=cfg)
-         call param_read('Polymer viscosity',nn%visc_zero) !; nn%visc=nn%visc_zero
-         ! call param_read('Carreau powerlaw',nn%ncoeff)
-         ! call param_read('Carreau reference timescale',nn%tref)
-         ! nn%tref=ve%trelax
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
+
+      ! Create a viscoleastic model with log conformation stablization method
+      create_viscoelastic_log: block
+         use tpviscoelastic_class, only: fenecr,eptt,oldroydb
+         use tpscalar_class,       only: neumann
+         integer :: i,j,k
+         ! Create viscoelastic model solver
+         call veln%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call param_read('Polymer relaxation time',veln%trelax)
+         ! Setup without an implicit solver
+         call veln%setup()
+         ! Initialize scalar fields
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
+                     veln%SC(i,j,k,1)=0.0_WP !< Cxx
+                     veln%SC(i,j,k,4)=0.0_WP !< Cyy
+                     veln%SC(i,j,k,6)=0.0_WP !< Czz
+                  end if
+               end do
+            end do
+         end do
+         ! Apply boundary conditions
+         call veln%apply_bcond(time%t,time%dt)
+      end block create_viscoelastic_log
       
       
       ! Add Ensight output
@@ -346,15 +362,14 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          do nsc=1,ve%nscalar
-            ! call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
-            call ens_out%add_scalar(trim(ve%SCname(nsc)),Conf(:,:,:,nsc))
+            call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
          end do
-         call ens_out%add_scalar('lnCxx',ve%SC(:,:,:,1))
-         call ens_out%add_scalar('lnCxy',ve%SC(:,:,:,2))
-         call ens_out%add_scalar('lnCxz',ve%SC(:,:,:,3))
-         call ens_out%add_scalar('lnCyy',ve%SC(:,:,:,4))
-         call ens_out%add_scalar('lnCyz',ve%SC(:,:,:,5))
-         call ens_out%add_scalar('lnCzz',ve%SC(:,:,:,6))
+         call ens_out%add_scalar('lnCxx',veln%SC(:,:,:,1))
+         call ens_out%add_scalar('lnCxy',veln%SC(:,:,:,2))
+         call ens_out%add_scalar('lnCxz',veln%SC(:,:,:,3))
+         call ens_out%add_scalar('lnCyy',veln%SC(:,:,:,4))
+         call ens_out%add_scalar('lnCyz',veln%SC(:,:,:,5))
+         call ens_out%add_scalar('lnCzz',veln%SC(:,:,:,6))
          call ens_out%add_scalar('visc_p',nn%visc)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -487,16 +502,9 @@ contains
          ! Transport our liquid conformation tensor
          advance_scalar: block
             integer :: i,j,k,nsc
-
             ! Add upper convected derivative term and relaxation term
-            ! call ve%get_CgradU(gradU,SCtmp);  resSC=SCtmp
+            call ve%get_CgradU(gradU,SCtmp);  resSC=SCtmp
             ! call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
-            !call ve%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
-
-            ! Add upper convected derivative term and relaxation term for log conformation
-            call ve%stabilization_CgradU(gradU,SCtmp); resSC=SCtmp
-            call ve%stabilization_relax(SCtmp);     resSC=resSC+SCtmp
-
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
             ve%SCold=ve%SC
@@ -508,6 +516,24 @@ contains
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
          end block advance_scalar
+
+         ! Transport our liquid conformation tensor using log conformation
+         advance_scalar_log: block
+            integer :: i,j,k,nsc
+            ! Add upper convected derivative term and relaxation term for log conformation
+            call veln%stabilization_CgradU(gradU,SCtmpln,SR); resSCln=SCtmpln
+            ! call veln%stabilization_relax(SCtmpln);        resSCln=resSCln+SCtmpln
+            veln%SC=veln%SC+time%dt*resSCln
+            call veln%apply_bcond(time%t,time%dt)
+            veln%SCold=veln%SC
+            ! Explicit calculation of dSC/dt from scalar equation
+            call veln%get_dSCdt(dSCdt=resSCln,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Update our scalars
+            do nsc=1,veln%nscalar
+               where (veln%mask.eq.0.and.vf%VF.ne.0.0_WP) veln%SC(:,:,:,nsc)=(vf%VFold*veln%SCold(:,:,:,nsc)+time%dt*resSCln(:,:,:,nsc))/vf%VF
+               where (vf%VF.eq.0.0_WP) veln%SC(:,:,:,nsc)=0.0_WP
+            end do
+         end block advance_scalar_log
 
          ! calcualte_conformation: block
          !    integer :: i,j,k,nsc
