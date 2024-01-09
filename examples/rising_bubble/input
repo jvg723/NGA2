@@ -5,8 +5,8 @@ Partition :	1 8 1
 Lx :	0.02556
 Ly :	0.05112
 Lz :	0.0002556
-nx :	64 
-ny :	128 
+nx :	128 
+ny :	125 
 nz :	1 
 
 # Fluid properties
@@ -18,7 +18,7 @@ Gas density :                 1.226
 Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   70    # in mm^3
+Bubble volume :   30    # in mm^3
 Bubble position : 0 0.005 0
 
 # Non-Newtonian modeling                     
