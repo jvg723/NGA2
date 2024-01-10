@@ -305,7 +305,7 @@ contains
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Maximum extension of polymer for FENE models
@@ -340,7 +340,7 @@ contains
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call veln%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
+         call veln%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',veln%trelax)
          ! Maximum extension of polymer for FENE models

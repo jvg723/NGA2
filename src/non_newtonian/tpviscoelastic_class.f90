@@ -419,6 +419,27 @@ contains
                end do
             end do
          end do
+      case (eptt) ! Add relaxation source term for ePTT model
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
+                  !>Trace of reconstructed conformation tensor
+                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  !>Relaxation function coefficent
+                  coeff=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*(trace-3.0_WP))
+                  !>Add source term to residual
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+               end do
+            end do
+         end do
       case default
          call die('[tpviscoelastic get_relax] Unknown viscoelastic model selected')
       end select
