@@ -38,6 +38,7 @@ module tpviscoelastic_class
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
       procedure :: stabilization_CgradU                    !< log-conformation stabilization for upper convected derivative
+      procedure :: stabilization_CgradU_ptt                !< log-conformation stabilization for upper convected derivative
       procedure :: stabilization_relax                     !< Calculate relaxation term in for log conformation
       procedure :: get_eigensystem                         !< Procedure to calculate eigenvalues and eigenvectors for Conformation tensor
    end type tpviscoelastic
@@ -328,6 +329,73 @@ contains
          end do
       end do
    end subroutine stabilization_CgradU
+
+   !> Log-conformation stabilization method for upper convective derivative
+   !> Assumes scalar being transported is ln(C)
+   subroutine stabilization_CgradU_ptt(this,Eigenvalues,Eigenvectors,gradu,resSC,SR)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(in)    :: Eigenvalues   
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(in)    :: Eigenvectors
+      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),    intent(in)    :: SR
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
+      integer :: i,j,k
+      ! Temp scalar values for matrix multiplication
+      real(WP), dimension(3,3) :: tmpMat,M,B,Omega,D,L   !< Matrices for diagonalization 
+      real(WP) :: omega_xy,omega_xz,omega_yz             !< Components for anti-symetric matric
+      resSC=0.0_WP
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Check if C is proportional to I based upon C's eigenvalues (i.e., Lambda_ii=Lambda_jj)
+               if (abs(Eigenvalues(i,j,k,1)-Eigenvalues(i,j,k,2)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,3)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)).le.1.0e-15_WP) then
+                  !>Set B equal to the strain rate tensor
+                  B(1,1)=SR(1,i,j,k); B(1,2)=SR(4,i,j,k); B(1,3)=SR(6,i,j,k)
+                  B(2,1)=SR(4,i,j,k); B(2,2)=SR(2,i,j,k); B(2,3)=SR(5,i,j,k)
+                  B(3,1)=SR(6,i,j,k); B(3,2)=SR(5,i,j,k); B(3,3)=SR(3,i,j,k)
+                  !>Set Omega = 0
+                  Omega=0.0_WP
+               else
+                  !>Strain rate tensor useed for calculating L
+                  D(1,1)=SR(1,i,j,k); D(1,2)=SR(4,i,j,k); D(1,3)=SR(6,i,j,k)
+                  D(2,1)=SR(4,i,j,k); D(2,2)=SR(2,i,j,k); D(2,3)=SR(5,i,j,k)
+                  D(3,1)=SR(6,i,j,k); D(3,2)=SR(5,i,j,k); D(3,3)=SR(3,i,j,k)
+                  ! Form L tensor L=gradU^T-zeta*D
+                  L=transpose(gradU(:,:,i,j,k))-this%affinecoeff*D
+                  ! Form M tensor (M=R^T*gradU^T*R={{mxx,mxy,mxz},{myx,myy,myz},{mzx,mzy,mzz}})
+                  M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul(transpose(L),Eigenvectors(i,j,k,:,:)))
+                  ! Temp matrix for calculating B
+                  tmpMat=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(tmpMat))
+                  ! Form symmetric extension component of confomration tensor (B=R*{{mxx,0,0},{0,myy,0},{0,0,mzz}}*R^T={{Bxx,Bxy,Bxz},{Bxy,Byy,Byz},{Bxz,Byz,Bzz}})
+                  B=matmul(Eigenvectors(i,j,k,:,:),matmul(tmpMat,transpose(Eigenvectors(i,j,k,:,:))))
+                  ! Antisymmetric components
+                  omega_xy=(Eigenvalues(i,j,k,2)*M(1,2)+Eigenvalues(i,j,k,1)*M(2,1))/(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,1)) 
+                  omega_xz=(Eigenvalues(i,j,k,3)*M(1,3)+Eigenvalues(i,j,k,1)*M(3,1))/(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)) 
+                  omega_yz=(Eigenvalues(i,j,k,3)*M(2,3)+Eigenvalues(i,j,k,2)*M(3,2))/(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,2))
+                  ! Temp matrix for calculating Omega
+                  tmpMat=0.0_WP
+                  tmpMat=reshape((/ 0.0_WP,-omega_xy,-omega_xz,omega_xy,0.0_WP,-omega_yz,omega_xz,omega_yz,0.0_WP /),shape(tmpMat))
+                  ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
+                  Omega=matmul(Eigenvectors(i,j,k,:,:),matmul(tmpMat,transpose(Eigenvectors(i,j,k,:,:))))
+               end if
+               ! Add extension and rotation components to resSC (Omega*log(C)-log(C)*Omega+2B)
+               !>xx tensor component
+               resSC(i,j,k,1)=Omega(1,2)*this%SC(i,j,k,2)-Omega(2,1)*this%SC(i,j,k,2)+Omega(1,3)*this%SC(i,j,k,3)-Omega(3,1)*this%SC(i,j,k,3)+2.00_WP*B(1,1)
+               !>xy tensor component
+               resSC(i,j,k,2)=Omega(1,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,1)-Omega(2,2)*this%SC(i,j,k,2)-Omega(3,2)*this%SC(i,j,k,3)+Omega(1,2)*this%SC(i,j,k,4)+Omega(1,3)*this%SC(i,j,k,5)+2.00_WP*B(2,1)
+               !>xz tensor component
+               resSC(i,j,k,3)=Omega(1,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,1)-Omega(2,3)*this%SC(i,j,k,2)-Omega(3,3)*this%SC(i,j,k,3)+Omega(1,2)*this%SC(i,j,k,5)+Omega(1,3)*this%SC(i,j,k,6)+2.00_WP*B(3,1)
+               !>yy tensor component
+               resSC(i,j,k,4)=Omega(2,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,5)+2.00_WP*B(2,2)
+               !>yz tensor component
+               resSC(i,j,k,5)=Omega(2,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,2)-Omega(2,3)*this%SC(i,j,k,4)+Omega(2,2)*this%SC(i,j,k,5)-Omega(3,3)*this%SC(i,j,k,5)+Omega(2,3)*this%SC(i,j,k,6)+2.00_WP*B(2,3)
+               !>zz tensor component
+               resSC(i,j,k,6)=Omega(3,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,3)-Omega(2,3)*this%SC(i,j,k,5)+Omega(3,2)*this%SC(i,j,k,5)+2.00_WP*B(3,3)
+            end do 
+         end do
+      end do
+   end subroutine stabilization_CgradU_ptt
 
    !> Log-conformation stabilization method for relaxation term
    !> Assumes scalar being transported is ln(C)

@@ -547,6 +547,7 @@ contains
             ! Add upper convected derivative term and relaxation term
             call ve%get_CgradU(gradU,SCtmp);  resSC=SCtmp
             call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
+            call ve%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
             ve%SCold=ve%SC
@@ -564,8 +565,9 @@ contains
             integer :: i,j,k,nsc
             ! Add upper convected derivative term and relaxation term for log conformation
             call veln%get_eigensystem(Eigenvalues,Eigenvectors)
-            call veln%stabilization_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmpln,SR); resSCln=SCtmpln
-            call veln%stabilization_relax(Eigenvalues,Eigenvectors,SCtmpln);           resSCln=resSCln+SCtmpln
+            ! call veln%stabilization_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmpln,SR); resSCln=SCtmpln
+            call veln%stabilization_CgradU_ptt(Eigenvalues,Eigenvectors,gradU,SCtmpln,SR); resSCln=SCtmpln
+            call veln%stabilization_relax(Eigenvalues,Eigenvectors,SCtmpln);               resSCln=resSCln+SCtmpln
             veln%SC=veln%SC+time%dt*resSCln
             call veln%apply_bcond(time%t,time%dt)
             veln%SCold=veln%SC

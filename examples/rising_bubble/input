@@ -5,8 +5,8 @@ Partition :	1 8 1
 Lx :	0.02556
 Ly :	0.05112
 Lz :	0.0002556
-nx :	64 
-ny :	128 
+nx :	128 
+ny :	256 
 nz :	1 
 
 # Fluid properties
