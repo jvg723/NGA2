@@ -301,17 +301,21 @@ contains
       
       ! Create a viscoleastic model
       create_viscoelastic: block
-         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep
+         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep,lptt
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=fenep,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Maximum extension of polymer for FENE models
          call param_read('Maximum polymer extensibility',ve%Lmax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',ve%visc_p)
+         ! Extensional viscosity parameter (ePTT)
+         call param_read('Extensional viscosity parameter',ve%elongvisc)
+         ! Affine parameter (ePTT)
+         call param_read('Extensional viscosity parameter',ve%affinecoeff)
          ! Setup without an implicit solver
          call ve%setup()
          ! Initialize scalar fields
@@ -332,17 +336,21 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic_log: block
-         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep
+         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep,lptt
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call veln%init(cfg=cfg,phase=0,model=fenep,name='viscoelastic')
+         call veln%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',veln%trelax)
          ! Maximum extension of polymer for FENE models
          call param_read('Maximum polymer extensibility',veln%Lmax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',veln%visc_p)
+         ! Extensional viscosity parameter (ePTT)
+         call param_read('Extensional viscosity parameter',veln%elongvisc)
+         ! Affine parameter (ePTT)
+         call param_read('Extensional viscosity parameter',veln%affinecoeff)
          ! Setup without an implicit solver
          call veln%setup()
          ! Initialize C scalar fields
