@@ -21,7 +21,6 @@ module simulation
    type(tpns),           public :: fs
    type(vfs),            public :: vf
    type(tpviscoelastic), public :: ve
-   type(tpviscoelastic), public :: veln
    type(carreau),        public :: nn
    type(timetracker),    public :: time
    
@@ -38,7 +37,6 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR,Eigenvalues,Conf
-   real(WP), dimension(:,:,:,:),   allocatable :: resSCln,SCtmpln
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU,Eigenvectors
    
    !> Problem definition
@@ -141,8 +139,6 @@ contains
          allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-         allocate(resSCln(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-         allocate(SCtmpln(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(Conf(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SR   (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -298,8 +294,8 @@ contains
       viscosity: block
          call param_read('Polymer viscosity',nn%visc_zero)
       end block viscosity
-      
-      ! Create a viscoleastic model
+
+      ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
          use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep,lptt
          use tpscalar_class,       only: neumann
@@ -318,14 +314,15 @@ contains
          call param_read('Extensional viscosity parameter',ve%affinecoeff)
          ! Setup without an implicit solver
          call ve%setup()
-         ! Initialize scalar fields
+         ! Initialize C scalar fields (C=I -> 0 intital value in ln(C) feild) 
+         Conf=0.0_WP
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
                   if (vf%VF(i,j,k).gt.0.0_WP) then
-                     ve%SC(i,j,k,1)=1.0_WP !< Cxx
-                     ve%SC(i,j,k,4)=1.0_WP !< Cyy
-                     ve%SC(i,j,k,6)=1.0_WP !< Czz
+                     Conf(i,j,k,1)=1.0_WP  !< Cxx
+                     Conf(i,j,k,4)=1.0_WP  !< Cyy
+                     Conf(i,j,k,6)=1.0_WP  !< Czz
                   end if
                end do
             end do
@@ -333,54 +330,6 @@ contains
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
-
-      ! Create a viscoleastic model with log conformation stablization method
-      create_viscoelastic_log: block
-         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep,lptt
-         use tpscalar_class,       only: neumann
-         integer :: i,j,k
-         ! Create viscoelastic model solver
-         call veln%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
-         ! Relaxation time for polymer
-         call param_read('Polymer relaxation time',veln%trelax)
-         ! Maximum extension of polymer for FENE models
-         call param_read('Maximum polymer extensibility',veln%Lmax)
-         ! Polymer viscosity
-         call param_read('Polymer viscosity',veln%visc_p)
-         ! Extensional viscosity parameter (ePTT)
-         call param_read('Extensional viscosity parameter',veln%elongvisc)
-         ! Affine parameter (ePTT)
-         call param_read('Extensional viscosity parameter',veln%affinecoeff)
-         ! Setup without an implicit solver
-         call veln%setup()
-         ! Initialize C scalar fields
-         Conf=0.0_WP
-         do k=cfg%kmino_,cfg%kmaxo_
-            do j=cfg%jmino_,cfg%jmaxo_
-               do i=cfg%imino_,cfg%imaxo_
-                  if (vf%VF(i,j,k).gt.0.0_WP) then
-                     Conf(i,j,k,1)=1.0_WP
-                     Conf(i,j,k,4)=1.0_WP
-                     Conf(i,j,k,6)=1.0_WP
-                  end if
-               end do
-            end do
-         end do
-         ! Initialize ln(C) scalar fields (C=I -> 0 intital value in ln(C) feild) 
-         do k=cfg%kmino_,cfg%kmaxo_
-            do j=cfg%jmino_,cfg%jmaxo_
-               do i=cfg%imino_,cfg%imaxo_
-                  if (vf%VF(i,j,k).gt.0.0_WP) then
-                     veln%SC(i,j,k,1)=0.0_WP !< Cxx
-                     veln%SC(i,j,k,4)=0.0_WP !< Cyy
-                     veln%SC(i,j,k,6)=0.0_WP !< Czz
-                  end if
-               end do
-            end do
-         end do
-         ! Apply boundary conditions
-         call veln%apply_bcond(time%t,time%dt)
-      end block create_viscoelastic_log
       
       
       ! Add Ensight output
@@ -400,12 +349,12 @@ contains
          do nsc=1,ve%nscalar
             call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
          end do
-         call ens_out%add_scalar('lnCxx',veln%SC(:,:,:,1))
-         call ens_out%add_scalar('lnCxy',veln%SC(:,:,:,2))
-         call ens_out%add_scalar('lnCxz',veln%SC(:,:,:,3))
-         call ens_out%add_scalar('lnCyy',veln%SC(:,:,:,4))
-         call ens_out%add_scalar('lnCyz',veln%SC(:,:,:,5))
-         call ens_out%add_scalar('lnCzz',veln%SC(:,:,:,6))
+         call ens_out%add_scalar('lnCxx',ve%SC(:,:,:,1))
+         call ens_out%add_scalar('lnCxy',ve%SC(:,:,:,2))
+         call ens_out%add_scalar('lnCxz',ve%SC(:,:,:,3))
+         call ens_out%add_scalar('lnCyy',ve%SC(:,:,:,4))
+         call ens_out%add_scalar('lnCyz',ve%SC(:,:,:,5))
+         call ens_out%add_scalar('lnCzz',ve%SC(:,:,:,6))
          call ens_out%add_scalar('recCxx',Conf(:,:,:,1))
          call ens_out%add_scalar('recCxy',Conf(:,:,:,2))
          call ens_out%add_scalar('recCxz',Conf(:,:,:,3))
@@ -540,14 +489,14 @@ contains
          
          ! Calcualte SR tensor
          call fs%get_strainrate(SR)
-         
-         ! Transport our liquid conformation tensor
+
+         ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
             integer :: i,j,k,nsc
-            ! Add upper convected derivative term and relaxation term
-            call ve%get_CgradU(gradU,SCtmp);  resSC=SCtmp
-            call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
-            call ve%get_affine(SR,SCtmp);     resSC=resSC+SCtmp
+            ! Add upper convected derivative term and relaxation term for log conformation
+            call ve%get_eigensystem(Eigenvalues,Eigenvectors)
+            call ve%stabilization_CgradU_ptt(Eigenvalues,Eigenvectors,gradU,SCtmp,SR); resSC=SCtmp
+            call ve%stabilization_relax(Eigenvalues,Eigenvectors,SCtmp);               resSC=resSC+SCtmp
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
             ve%SCold=ve%SC
@@ -559,26 +508,6 @@ contains
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
          end block advance_scalar
-
-         ! Transport our liquid conformation tensor using log conformation
-         advance_scalar_log: block
-            integer :: i,j,k,nsc
-            ! Add upper convected derivative term and relaxation term for log conformation
-            call veln%get_eigensystem(Eigenvalues,Eigenvectors)
-            ! call veln%stabilization_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmpln,SR); resSCln=SCtmpln
-            call veln%stabilization_CgradU_ptt(Eigenvalues,Eigenvectors,gradU,SCtmpln,SR); resSCln=SCtmpln
-            call veln%stabilization_relax(Eigenvalues,Eigenvectors,SCtmpln);               resSCln=resSCln+SCtmpln
-            veln%SC=veln%SC+time%dt*resSCln
-            call veln%apply_bcond(time%t,time%dt)
-            veln%SCold=veln%SC
-            ! Explicit calculation of dSC/dt from scalar equation
-            call veln%get_dSCdt(dSCdt=resSCln,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
-            ! Update our scalars
-            do nsc=1,veln%nscalar
-               where (veln%mask.eq.0.and.vf%VF.ne.0.0_WP) veln%SC(:,:,:,nsc)=(vf%VFold*veln%SCold(:,:,:,nsc)+time%dt*resSCln(:,:,:,nsc))/vf%VF
-               where (vf%VF.eq.0.0_WP) veln%SC(:,:,:,nsc)=0.0_WP
-            end do
-         end block advance_scalar_log
 
          reconstruct_conformation: block
             integer :: i,j,k,nsc
@@ -710,7 +639,7 @@ contains
                   !    ! stress(:,:,:,n)=-nn%visc(:,:,:)*vf%VF*stress(:,:,:,n)
                   !    stress(:,:,:,n)=-nn%visc_zero*vf%VF*stress(:,:,:,n)
                   ! end do
-                  coeff=veln%visc_p/veln%trelax
+                  coeff=ve%visc_p/ve%trelax
                   do n=1,6
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_

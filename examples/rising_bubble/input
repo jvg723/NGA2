@@ -2,12 +2,19 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.02556
-Ly :	0.05112
-Lz :	0.0002556
+Lx :	0.0193
+Ly :	0.0386
+Lz :	0.000193
 nx :	128 
 ny :	256 
 nz :	1 
+
+# Lx :	0.02556
+# Ly :	0.05112
+# Lz :	0.0002556
+# nx :	128 
+# ny :	256 
+# nz :	1 
 
 # Fluid properties
 Gravity :                     0 -9.81 0
@@ -26,7 +33,7 @@ Carreau powerlaw :              0
 Carreau reference timescale :   0     
 Polymer viscosity :             1.483     
 Polymer relaxation time :       0.207        
-Maximum polymer extensibility : 10
+Maximum polymer extensibility : 0
 Extensional viscosity parameter : 0.05
 Affine parameter                : 0.12
 
