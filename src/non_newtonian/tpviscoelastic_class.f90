@@ -342,6 +342,27 @@ contains
       real(WP) :: coeff,trace
       resSC=0.0_WP
       select case (this%model)
+      case (fenep) ! Add relaxation source for FENE-P (1/lambda)(f(r)*C-I)
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
+                  !>Trace of reconstructed conformation tensor
+                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  !>Relaxation function coefficent
+                  coeff=(this%Lmax**2-3.00_WP)/(this%Lmax**2-trace)
+                  !>Add source term to residual
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)**2                     *((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)**2                     *((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,3,1)**2                     *((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+               end do
+            end do
+         end do
       case (fenecr) ! Add relaxation source for FENE-CR (f(r)/lambda*(C-I))
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_

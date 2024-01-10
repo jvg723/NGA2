@@ -301,11 +301,11 @@ contains
       
       ! Create a viscoleastic model
       create_viscoelastic: block
-         use tpviscoelastic_class, only: fenecr,eptt,oldroydb
+         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=fenep,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Maximum extension of polymer for FENE models
@@ -332,11 +332,11 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic_log: block
-         use tpviscoelastic_class, only: fenecr,eptt,oldroydb
+         use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call veln%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
+         call veln%init(cfg=cfg,phase=0,model=fenep,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',veln%trelax)
          ! Maximum extension of polymer for FENE models
@@ -681,7 +681,7 @@ contains
             
             ! Add polymer stress term
             polymer_stress: block
-               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt
+               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt,fenep
                integer :: i,j,k,n
                real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
                real(WP), dimension(:,:,:,:), allocatable :: stress
@@ -692,7 +692,7 @@ contains
                allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                select case (ve%model)
-               case (oldroydb,fenecr)
+               case (oldroydb,fenecr,fenep)
                   ! ! Calculate the polymer relaxation
                   ! call ve%get_relax(stress,time%dt)
                   ! ! Build liquid stress tensor
