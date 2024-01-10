@@ -40,6 +40,7 @@ module tpviscoelastic_class
       procedure :: get_affine                              !< Source term in PTT equation for non-affine motion
       procedure :: stabilization_CgradU                    !< log-conformation stabilization for upper convected derivative
       procedure :: stabilization_relax                     !< Calculate relaxation term in for log conformation
+      procedure :: get_eigensystem                         !< Procedure to calculate eigenvalues and eigenvectors for Conformation tensor
    end type tpviscoelastic
    
    
@@ -228,19 +229,14 @@ contains
       end select
    end subroutine get_relax
 
-   !> Log-conformation stabilization method for upper convective derivative
+   !> Calculate the eigenvalues and eigenevtors of the conformation tensor for the whole domain
    !> Assumes scalar being transported is ln(C)
-   subroutine stabilization_CgradU(this,gradu,resSC,SR)
+   subroutine get_eigensystem(this,Eigenvalues,Eigenvectors)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
-      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),    intent(in) :: SR
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(out) :: Eigenvalues   !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:3)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(out) :: Eigenvectors  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:3,1:3)
       integer :: i,j,k
-      ! Temp scalar values for matrix multiplication
-      real(WP), dimension(3,3) :: M,Mdiag,B,tmpMat,Omega  !< Matrices for diagonalization 
-      real(WP) :: Lambdax,Lambday,Lambdaz                 !< Eigenvalues of C
-      real(WP) :: omega_xy,omega_xz,omega_yz              !< Components for anti-symetric matric
       ! Used for calculation of conformation tensor eigenvalues and eigenvectors
       real(WP), dimension(3,3) :: A
       real(WP), dimension(3) :: d
@@ -251,24 +247,53 @@ contains
 
       ! Query optimal work array size
       call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      
-      resSC=0.0_WP
+
+      Eigenvalues=0.0_WP
+      Eigenvectors=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Skip non-solved cells
                if (this%mask(i,j,k).ne.0) cycle
-               ! Eigenvalues/eigenvectors of conformation tensor
                !>Assemble ln(C) tensor
                A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
                A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
                A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
                !>On exit, A contains eigenvectors, and d contains ln(eigenvalues) in ascending order
                call dsyev('V','U',order,A,order,d,work,lwork,info)
-               !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
-               Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3)); 
-               ! Check if C is proportional to I based upon C's eigenvalues
-               if (abs(abs(Lambdax)-1.00_WP).le.1.0e-10_WP.and.abs(abs(Lambday)-1.00_WP).le.1.0e-10_WP.and.abs(abs(Lambdax)-1.00_WP).le.1.0e-10_WP) then
+               !>Eigenvalues (Eigenvalues(1)=Lambda_xx,Eigenvalues(2)=Lambda_yy,Eigenvalues(3)=Lambda_zz)
+               Eigenvalues(i,j,k,:)=exp(d(:))
+               !>Eigenvectors
+               Eigenvectors(i,j,k,:,:)=A(:,:)
+            end do 
+         end do
+      end do
+
+   end subroutine get_eigensystem
+
+
+   !> Log-conformation stabilization method for upper convective derivative
+   !> Assumes scalar being transported is ln(C)
+   subroutine stabilization_CgradU(this,Eigenvalues,Eigenvectors,gradu,resSC,SR)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(in)    :: Eigenvalues   
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(in)    :: Eigenvectors
+      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
+      real(WP), dimension(1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),    intent(in)    :: SR
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
+      integer :: i,j,k
+      ! Temp scalar values for matrix multiplication
+      real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
+      real(WP) :: omega_xy,omega_xz,omega_yz         !< Components for anti-symetric matric
+
+      
+      resSC=0.0_WP
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Check if C is proportional to I based upon C's eigenvalues (i.e., Lambda_ii=Lambda_jj)
+               if (abs(Eigenvalues(i,j,k,1)-Eigenvalues(i,j,k,2)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,3)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)).le.1.0e-15_WP) then
                   !>Set B equal to the strain rate tensor
                   B(1,1)=SR(1,i,j,k); B(1,2)=SR(4,i,j,k); B(1,3)=SR(6,i,j,k)
                   B(2,1)=SR(4,i,j,k); B(2,2)=SR(2,i,j,k); B(2,3)=SR(5,i,j,k)
@@ -277,17 +302,20 @@ contains
                   Omega=0.0_WP
                else
                   ! Form M tensor (M=R^T*gradU^T*R={{mxx,mxy,mxz},{myx,myy,myz},{mzx,mzy,mzz}})
-                  M=matmul(transpose(A),matmul(transpose(gradU(:,:,i,j,k)),A))
-                  ! Matrix for diagonal components of M
-                  Mdiag=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(Mdiag))
+                  M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul(transpose(gradU(:,:,i,j,k)),Eigenvectors(i,j,k,:,:)))
+                  ! Temp matrix for calculating B
+                  tmpMat=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(tmpMat))
                   ! Form symmetric extension component of confomration tensor (B=R*{{mxx,0,0},{0,myy,0},{0,0,mzz}}*R^T={{Bxx,Bxy,Bxz},{Bxy,Byy,Byz},{Bxz,Byz,Bzz}})
-                  B=matmul(A,matmul(Mdiag,transpose(A)))
+                  B=matmul(Eigenvectors(i,j,k,:,:),matmul(tmpMat,transpose(Eigenvectors(i,j,k,:,:))))
                   ! Antisymmetric components
-                  omega_xy=(Lambday*M(1,2)+Lambdax*M(2,1))/(Lambday-Lambdax); omega_xz=(Lambdaz*M(1,3)+Lambdax*M(3,1))/(Lambdaz-Lambdax); omega_yz=(Lambdaz*M(2,3)+Lambday*M(3,2))/(Lambdaz-Lambday)
+                  omega_xy=(Eigenvalues(i,j,k,2)*M(1,2)+Eigenvalues(i,j,k,1)*M(2,1))/(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,1)) 
+                  omega_xz=(Eigenvalues(i,j,k,3)*M(1,3)+Eigenvalues(i,j,k,1)*M(3,1))/(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)) 
+                  omega_yz=(Eigenvalues(i,j,k,3)*M(2,3)+Eigenvalues(i,j,k,2)*M(3,2))/(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,2))
                   ! Temp matrix for calculating Omega
+                  tmpMat=0.0_WP
                   tmpMat=reshape((/ 0.0_WP,-omega_xy,-omega_xz,omega_xy,0.0_WP,-omega_yz,omega_xz,omega_yz,0.0_WP /),shape(tmpMat))
                   ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
-                  Omega=matmul(A,matmul(tmpMat,transpose(A)))
+                  Omega=matmul(Eigenvectors(i,j,k,:,:),matmul(tmpMat,transpose(Eigenvectors(i,j,k,:,:))))
                end if
                ! Add extension and rotation components to resSC (Omega*log(C)-log(C)*Omega+2B)
                !>xx tensor component
@@ -310,26 +338,14 @@ contains
 
    !> Log-conformation stabilization method for relaxation term
    !> Assumes scalar being transported is ln(C)
-   subroutine stabilization_relax(this,resSC)
+   subroutine stabilization_relax(this,Eigenvalues,Eigenvectors,resSC)
       use messager, only: die
       implicit none
       class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(in) :: Eigenvalues   
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(in) :: Eigenvectors
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
-      ! Temp scalar values for matrix multiplication
-      real(WP), dimension(3,3) :: srcMat,tmpMat  !< Matrices for diagonalization 
-      real(WP) :: Lambdax,Lambday,Lambdaz                 !< Eigenvalues of C
-      ! Used for calculation of conformation tensor eigenvalues and eigenvectors
-      real(WP), dimension(3,3) :: A
-      real(WP), dimension(3) :: d
-      integer , parameter :: order = 3             !< Conformation tensor is 3x3
-      real(WP), dimension(:), allocatable :: work
-      real(WP), dimension(1)   :: lwork_query
-      integer  :: lwork,info,n
-
-      ! Query optimal work array size
-      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      
       resSC=0.0_WP
       select case (this%model)
       case (oldroydb) ! Add relaxation source term for ePTT model
@@ -337,25 +353,12 @@ contains
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
-                  ! Eigenvalues/eigenvectors of conformation tensor
-                  !>Assemble ln(C) tensor
-                  A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
-                  A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
-                  A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
-                  !>On exit, A contains eigenvectors, and d contains ln(eigenvalues) in ascending order
-                  call dsyev('V','U',order,A,order,d,work,lwork,info)
-                  !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
-                  Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3)); 
-                  ! Temp matrix for calculating residual
-                  tmpMat=reshape((/ (1.00_WP/Lambdax)-1.00_WP,0.0_WP,0.0_WP,0.0_WP,(1.00_WP/Lambday)-1.00_WP,0.0_WP,0.0_WP,0.0_WP,(1.00_WP/Lambdaz)-1.00_WP /),shape(tmpMat))
-                  ! Calculate source terms
-                  srcMat=matmul(A,matmul(((1.00_WP/this%trelax)*tmpMat),A))
-                  resSC(i,j,k,1)=srcMat(1,1)  !< xx tensor component
-                  resSC(i,j,k,2)=srcMat(2,1)  !< xy tensor component
-                  resSC(i,j,k,3)=srcMat(3,1)  !< xz tensor component
-                  resSC(i,j,k,4)=srcMat(2,2)  !< yy tensor component
-                  resSC(i,j,k,5)=srcMat(3,2)  !< yz tensor component
-                  resSC(i,j,k,6)=srcMat(3,2)  !< zz tensor component
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
                end do
             end do
          end do
