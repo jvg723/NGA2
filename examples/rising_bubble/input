@@ -5,8 +5,8 @@ Partition :	1 8 1
 Lx :	0.02556
 Ly :	0.05112
 Lz :	0.0002556
-nx :	128 
-ny :	256 
+nx :	64 
+ny :	128 
 nz :	1 
 
 # Fluid properties
@@ -26,7 +26,7 @@ Carreau powerlaw :              0
 Carreau reference timescale :   0     
 Polymer viscosity :             1.483     
 Polymer relaxation time :       0.207        
-Maximum polymer extensibility : 0
+Maximum polymer extensibility : 10
 Extensional viscosity parameter : 0.05
 Affine parameter                : 0.12
 

@@ -305,9 +305,13 @@ contains
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
+         ! Maximum extension of polymer for FENE models
+         call param_read('Maximum polymer extensibility',ve%Lmax)
+         ! Polymer viscosity
+         call param_read('Polymer viscosity',ve%visc_p)
          ! Setup without an implicit solver
          call ve%setup()
          ! Initialize scalar fields
@@ -332,8 +336,13 @@ contains
          use tpscalar_class,       only: neumann
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call veln%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call veln%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
+         ! Relaxation time for polymer
          call param_read('Polymer relaxation time',veln%trelax)
+         ! Maximum extension of polymer for FENE models
+         call param_read('Maximum polymer extensibility',veln%Lmax)
+         ! Polymer viscosity
+         call param_read('Polymer viscosity',veln%visc_p)
          ! Setup without an implicit solver
          call veln%setup()
          ! Initialize C scalar fields
@@ -567,21 +576,23 @@ contains
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
                   do i=cfg%imino_,cfg%imaxo_
-                     ! Skip non-solved cells
-                     if (ve%mask(i,j,k).ne.0) cycle
-                     ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
-                     !>xx tensor component
-                     Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
-                     !>xy tensor component
-                     Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
-                     !>xz tensor component
-                     Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
-                     !>yy tensor component
-                     Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
-                     !>yz tensor component
-                     Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
-                     !>zz tensor component
-                     Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ! Skip non-solved cells
+                        if (ve%mask(i,j,k).ne.0) cycle
+                        ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
+                        !>xx tensor component
+                        Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
+                        !>xy tensor component
+                        Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
+                        !>xz tensor component
+                        Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
+                        !>yy tensor component
+                        Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
+                        !>yz tensor component
+                        Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
+                        !>zz tensor component
+                        Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
+                     end if
                   end do
                end do
             end do
@@ -689,7 +700,7 @@ contains
                   !    ! stress(:,:,:,n)=-nn%visc(:,:,:)*vf%VF*stress(:,:,:,n)
                   !    stress(:,:,:,n)=-nn%visc_zero*vf%VF*stress(:,:,:,n)
                   ! end do
-                  coeff=nn%visc_zero/veln%trelax
+                  coeff=veln%visc_p/veln%trelax
                   do n=1,6
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_
