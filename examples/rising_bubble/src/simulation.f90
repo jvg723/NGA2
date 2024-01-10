@@ -37,9 +37,9 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR,Conf
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR,Eigenvalues,Conf
    real(WP), dimension(:,:,:,:),   allocatable :: resSCln,SCtmpln
-   real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:,:,:), allocatable :: gradU,Eigenvectors
    
    !> Problem definition
    real(WP), dimension(3) :: center,gravity
@@ -146,6 +146,8 @@ contains
          allocate(Conf(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SR   (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Eigenvalues(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:3))
+         allocate(Eigenvectors(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:3,1:3))
       end block allocate_work_arrays
       
       
@@ -334,7 +336,20 @@ contains
          call param_read('Polymer relaxation time',veln%trelax)
          ! Setup without an implicit solver
          call veln%setup()
-         ! Initialize scalar fields
+         ! Initialize C scalar fields
+         Conf=0.0_WP
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
+                     Conf(i,j,k,1)=1.0_WP
+                     Conf(i,j,k,4)=1.0_WP
+                     Conf(i,j,k,6)=1.0_WP
+                  end if
+               end do
+            end do
+         end do
+         ! Initialize ln(C) scalar fields (C=I -> 0 intital value in ln(C) feild) 
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
@@ -531,8 +546,9 @@ contains
          advance_scalar_log: block
             integer :: i,j,k,nsc
             ! Add upper convected derivative term and relaxation term for log conformation
-            call veln%stabilization_CgradU(gradU,SCtmpln,SR); resSCln=SCtmpln
-            call veln%stabilization_relax(SCtmpln);           resSCln=resSCln+SCtmpln
+            call veln%get_eigensystem(Eigenvalues,Eigenvectors)
+            call veln%stabilization_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmpln,SR); resSCln=SCtmpln
+            call veln%stabilization_relax(Eigenvalues,Eigenvectors,SCtmpln);           resSCln=resSCln+SCtmpln
             veln%SC=veln%SC+time%dt*resSCln
             call veln%apply_bcond(time%t,time%dt)
             veln%SCold=veln%SC
@@ -545,54 +561,31 @@ contains
             end do
          end block advance_scalar_log
 
-         calcualte_conformation: block
+         reconstruct_conformation: block
             integer :: i,j,k,nsc
-            ! Temp scalar values for matrix multiplication
-            real(WP) :: Lambdax,Lambday,Lambdaz              !< Eigenvalues of C
-            ! Used for calculation of conformation tensor eigenvalues and eigenvectors
-            real(WP), dimension(3,3) :: A
-            real(WP), dimension(3) :: d
-            integer , parameter :: order = 3             !< Conformation tensor is 3x3
-            real(WP), dimension(:), allocatable :: work
-            real(WP), dimension(1)   :: lwork_query
-            integer  :: lwork,info,n
-
-            ! Query optimal work array size
-            call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-
             Conf=0.0_WP
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
                   do i=cfg%imino_,cfg%imaxo_
                      ! Skip non-solved cells
                      if (ve%mask(i,j,k).ne.0) cycle
-                     ! Eigenvalues/eigenvectors of ln(conformation) tensor
-                     !>Assemble log of conformation tensor
-                     A(1,1)=veln%SC(i,j,k,1); A(1,2)=veln%SC(i,j,k,2); A(1,3)=veln%SC(i,j,k,3)
-                     A(2,1)=veln%SC(i,j,k,2); A(2,2)=veln%SC(i,j,k,4); A(2,3)=veln%SC(i,j,k,5)
-                     A(3,1)=veln%SC(i,j,k,3); A(3,2)=veln%SC(i,j,k,5); A(3,3)=veln%SC(i,j,k,6)
-                     !>On exit, A contains orthonormal eigenvectors, and d contains ln(eigenvalues) in ascending order
-                     call dsyev('V','U',order,A,order,d,work,lwork,info)
-                     !>Eigenvalues for conformation tensor (Lambdax,Lambday,Lambdaz)
-                     Lambdax=exp(d(1)); Lambday=exp(d(2)); Lambdaz=exp(d(3))
                      ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
                      !>xx tensor component
-                     Conf(i,j,k,1)=Lambdax*A(1,1)**2+Lambday*A(1,2)**2+Lambdaz*A(1,3)**2
+                     Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
                      !>xy tensor component
-                     Conf(i,j,k,2)=Lambdax*A(1,1)*A(2,1)+Lambday*A(1,2)*A(2,2)+Lambdaz*A(1,3)*A(2,3)
+                     Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
                      !>xz tensor component
-                     Conf(i,j,k,3)=Lambdax*A(1,1)*A(3,1)+Lambday*A(1,2)*A(3,2)+Lambdaz*A(1,3)*A(3,3)
+                     Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
                      !>yy tensor component
-                     Conf(i,j,k,4)=Lambdax*A(2,1)**2+Lambday*A(2,2)**2+Lambdaz*A(2,3)**2
+                     Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
                      !>yz tensor component
-                     Conf(i,j,k,5)=Lambdax*A(2,1)*A(3,1)+Lambday*A(2,2)*A(3,2)+Lambdaz*A(2,3)*A(3,3)
+                     Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
                      !>zz tensor component
-                     Conf(i,j,k,6)=Lambdax*A(3,1)**2+Lambday*A(3,2)**2+Lambdaz*A(3,3)**2
+                     Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
                   end do
                end do
             end do
-
-         end block calcualte_conformation
+         end block reconstruct_conformation
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -839,7 +832,7 @@ contains
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
       ! deallocate(resSC,SCtmp,gradU)
-      deallocate(resSC,SCtmp,SR,gradU,Conf)
+      deallocate(resSC,SCtmp,SR,gradU,Eigenvalues,Eigenvectors,Conf)
       
    end subroutine simulation_final
    
