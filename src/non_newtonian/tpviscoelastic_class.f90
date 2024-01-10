@@ -29,9 +29,8 @@ module tpviscoelastic_class
       real(WP) :: Lmax                                       !< Polymer maximum extensibility in FENE model
       real(WP) :: affinecoeff                                !< Parameter for affine motion in PTT model
       real(WP) :: elongvisc                                  !< Extensional parameter for elognational viscosity in PTT model
+      real(WP) :: visc_p
 
-      ! Arrays for log-conformation stabilization
-      logical :: use_stabilization=.false.                   !< Flag to use log-conformation approach (default=.false.)
 
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
@@ -244,10 +243,8 @@ contains
       real(WP), dimension(:), allocatable :: work
       real(WP), dimension(1)   :: lwork_query
       integer  :: lwork,info,n
-
       ! Query optimal work array size
       call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-
       Eigenvalues=0.0_WP
       Eigenvectors=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
@@ -268,7 +265,6 @@ contains
             end do 
          end do
       end do
-
    end subroutine get_eigensystem
 
 
@@ -286,8 +282,6 @@ contains
       ! Temp scalar values for matrix multiplication
       real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
       real(WP) :: omega_xy,omega_xz,omega_yz         !< Components for anti-symetric matric
-
-      
       resSC=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
@@ -333,7 +327,6 @@ contains
             end do 
          end do
       end do
-
    end subroutine stabilization_CgradU
 
    !> Log-conformation stabilization method for relaxation term
@@ -346,9 +339,31 @@ contains
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(in) :: Eigenvectors
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
+      real(WP) :: coeff,trace
       resSC=0.0_WP
       select case (this%model)
-      case (oldroydb) ! Add relaxation source term for ePTT model
+      case (fenecr) ! Add relaxation source for FENE-CR (f(r)/lambda*(C-I))
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
+                  !>Trace of reconstructed conformation tensor
+                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  !>Relaxation function coefficent
+                  coeff=1.00_WP/(1.0_WP-trace/this%Lmax**2)
+                  !>Add source term to residual
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+               end do
+            end do
+         end do
+      case (oldroydb) ! Add relaxation source term for Oldroyd-B model
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
