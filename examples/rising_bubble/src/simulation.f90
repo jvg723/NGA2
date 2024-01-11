@@ -373,7 +373,7 @@ contains
          ! Affine parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%affinecoeff)
          ! Apply boundary conditions
-         call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator,dir='yp')
+         call ve%add_bcond(name='yp_sc',type=dirichlet,locator=yp_locator,dir='yp')
          call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator,dir='ym')
          call ve%add_bcond(name='xp_sc',type=neumann,locator=xp_locator,dir='xp')
          call ve%add_bcond(name='xm_sc',type=neumann,locator=xm_locator,dir='xm')
@@ -395,11 +395,11 @@ contains
             end do
          end do
          ! Set top of domain to Identity at each time step
-         ! call ve%get_bcond('yp_sc',mybc)
-         ! do n=1,mybc%itr%no_
-         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-         !    ve%SC(i,j,k,:)=0.0_WP
-         ! end do
+         call ve%get_bcond('yp_sc',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            ve%SC(i,j,k,:)=0.0_WP
+         end do
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -551,16 +551,16 @@ contains
             end do
          end block reapply_dirichlet
 
-         ! reapply_identity: block
-         !    use tpscalar_class, only: bcond
-         !    type(bcond), pointer :: mybc
-         !    integer  :: n,i,j,k
-         !    call ve%get_bcond('yp_sc',mybc)
-         !    do n=1,mybc%itr%no_
-         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-         !       ve%SC(i,j,k,:)=0.0_WP
-         !    end do 
-         ! end block reapply_identity
+         reapply_identity: block
+            use tpscalar_class, only: bcond
+            type(bcond), pointer :: mybc
+            integer  :: n,i,j,k
+            call ve%get_bcond('yp_sc',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               ve%SC(i,j,k,:)=0.0_WP
+            end do 
+         end block reapply_identity
          
          ! Remember old VOF
          vf%VFold=vf%VF
