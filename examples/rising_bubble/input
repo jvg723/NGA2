@@ -2,10 +2,10 @@
 Partition :	1 8 1
 
 # Mesh definition
-Lx :	0.0193
-Ly :	0.0386
-Lz :	0.000193
-nx :	64 
+Lx :	0.02696
+Ly :	0.02696
+Lz :	0.0002696
+nx :	128 
 ny :	128 
 nz :	1 
 
@@ -18,15 +18,15 @@ Gas density :                 1.226
 Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   30    # in mm^3
-Bubble position : 0 0.005 0
+Bubble volume :   20    # in mm^3
+Bubble position : 0 0.01348 0
 
 # Non-Newtonian modeling                     
 Carreau powerlaw :              0         
 Carreau reference timescale :   0     
 Polymer viscosity :             1.483     
-Polymer relaxation time :       0.207        
-Maximum polymer extensibility : 10
+Polymer relaxation time :       0.203        
+Maximum polymer extensibility : 0
 Extensional viscosity parameter : 0.05
 Affine parameter                : 0.12
 
