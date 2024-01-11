@@ -78,6 +78,50 @@ contains
       isIn=.false.
       if (j.eq.pg%jmin) isIn=.true.
    end function ym_locator
+
+   !> Function that localizes the x+ side of the domain
+   function xp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imax+1) isIn=.true.
+   end function xp_locator
+
+   !> Function that localizes the x- side of the domain
+   function xm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin) isIn=.true.
+   end function xm_locator
+
+   !> Function that localizes the z+ side of the domain
+   function zp_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmax+1) isIn=.true.
+   end function zp_locator
+
+   !> Function that localizes the x- side of the domain
+   function zm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmin) isIn=.true.
+   end function zm_locator
    
    
    !> Routine that computes rise velocity
@@ -249,10 +293,14 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
-         ! Dirichlet inflow at the top
-         call fs%add_bcond(name='inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+         ! Dirichlet inflow at the top and sides of domain
+         call fs%add_bcond(name='yp_inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+         call fs%add_bcond(name='xp_inflow',type=dirichlet,face='x',dir=+1,canCorrect=.false.,locator=xp_locator)
+         call fs%add_bcond(name='xm_inflow',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
+         call fs%add_bcond(name='zp_inflow',type=dirichlet,face='z',dir=+1,canCorrect=.false.,locator=zp_locator)
+         call fs%add_bcond(name='zm_inflow',type=dirichlet,face='z',dir=-1,canCorrect=.false.,locator=zm_locator)
          ! Outflow at the bottom
-         call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         call fs%add_bcond(name='yp_outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
@@ -272,8 +320,28 @@ contains
          Uin_old=0.0_WP
          ! Inflow velocity
          Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-         ! Setup inflow at top of domain
-         call fs%get_bcond('inflow',mybc)
+         ! Setup inflow at top and sides of domain
+         call fs%get_bcond('yp_inflow',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%V(i,j,k)=Uin
+         end do
+         call fs%get_bcond('xp_inflow',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%V(i,j,k)=Uin
+         end do
+         call fs%get_bcond('xm_inflow',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%V(i,j,k)=Uin
+         end do
+         call fs%get_bcond('zp_inflow',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%V(i,j,k)=Uin
+         end do
+         call fs%get_bcond('zm_inflow',mybc)
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
             fs%V(i,j,k)=Uin
@@ -291,8 +359,9 @@ contains
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
          use tpviscoelastic_class, only: fenecr,eptt,oldroydb,fenep,lptt
-         use tpscalar_class,       only: neumann
-         integer :: i,j,k
+         use tpscalar_class,       only: bcond,neumann,dirichlet
+         type(bcond), pointer :: mybc
+         integer :: n,i,j,k
          ! Create viscoelastic model solver
          call ve%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
          ! Relaxation time for polymer
@@ -303,6 +372,13 @@ contains
          call param_read('Extensional viscosity parameter',ve%elongvisc)
          ! Affine parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%affinecoeff)
+         ! Apply boundary conditions
+         call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator,dir='yp')
+         call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator,dir='ym')
+         call ve%add_bcond(name='xp_sc',type=neumann,locator=xp_locator,dir='xp')
+         call ve%add_bcond(name='xm_sc',type=neumann,locator=xm_locator,dir='xm')
+         call ve%add_bcond(name='zp_sc',type=neumann,locator=zp_locator,dir='zp')
+         call ve%add_bcond(name='zm_sc',type=neumann,locator=zm_locator,dir='zm')
          ! Setup without an implicit solver
          call ve%setup()
          ! Initialize C scalar fields (C=I -> 0 intital value in ln(C) feild) 
@@ -318,6 +394,12 @@ contains
                end do
             end do
          end do
+         ! Set top of domain to Identity at each time step
+         ! call ve%get_bcond('yp_sc',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    ve%SC(i,j,k,:)=0.0_WP
+         ! end do
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -441,13 +523,44 @@ contains
             Uin_old=Uin
             ! Inflow velocity
             Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-            ! Setup inflow at top of domain
-            call fs%get_bcond('inflow',mybc)
+            ! Apply inflow at top and sides of domain
+            call fs%get_bcond('yp_inflow',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               fs%V(i,j,k)=Uin
+            end do
+            call fs%get_bcond('xp_inflow',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               fs%V(i,j,k)=Uin
+            end do
+            call fs%get_bcond('xm_inflow',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               fs%V(i,j,k)=Uin
+            end do
+            call fs%get_bcond('zp_inflow',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               fs%V(i,j,k)=Uin
+            end do
+            call fs%get_bcond('zm_inflow',mybc)
             do n=1,mybc%itr%no_
                i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
                fs%V(i,j,k)=Uin
             end do
          end block reapply_dirichlet
+
+         ! reapply_identity: block
+         !    use tpscalar_class, only: bcond
+         !    type(bcond), pointer :: mybc
+         !    integer  :: n,i,j,k
+         !    call ve%get_bcond('yp_sc',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       ve%SC(i,j,k,:)=0.0_WP
+         !    end do 
+         ! end block reapply_identity
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -472,53 +585,55 @@ contains
          ! Calcualte SR tensor
          call fs%get_strainrate(SR)
 
-         ! ! Transport our liquid conformation tensor using log conformation
-         ! advance_scalar: block
-         !    integer :: i,j,k,nsc
-         !    ! Add source terms for constitutive model
-         !    call ve%get_eigensystem(Eigenvalues,Eigenvectors)
-         !    call ve%get_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmp,SR); resSC=SCtmp
-         !    call ve%get_relax(Eigenvalues,Eigenvectors,SCtmp);           resSC=resSC+SCtmp
-         !    ve%SC=ve%SC+time%dt*resSC
-         !    call ve%apply_bcond(time%t,time%dt)
-         !    ve%SCold=ve%SC
-         !    ! Explicit calculation of dSC/dt from scalar equation
-         !    call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
-         !    ! Update our scalars
-         !    do nsc=1,ve%nscalar
-         !       where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
-         !       where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
-         !    end do
-         ! end block advance_scalar
+         ! Transport our liquid conformation tensor using log conformation
+         advance_scalar: block
+            integer :: i,j,k,nsc
+            ! Add source terms for constitutive model
+            call ve%get_eigensystem(Eigenvalues,Eigenvectors)
+            call ve%get_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmp,SR); resSC=SCtmp
+            call ve%get_relax(Eigenvalues,Eigenvectors,SCtmp);           resSC=resSC+SCtmp
+            ve%SC=ve%SC+time%dt*resSC
+            call ve%apply_bcond(time%t,time%dt)
+            ve%SCold=ve%SC
+            ! Explicit calculation of dSC/dt from scalar equation
+            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Update our scalars
+            do nsc=1,ve%nscalar
+               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+            end do
+            ! Apply boundary conditions
+            call ve%apply_bcond(time%t,time%dt)
+         end block advance_scalar
          
-         ! ! Build conformation tensor from its diagonalized state
-         ! reconstruct_conformation: block
-         !    integer :: i,j,k,nsc
-         !    Conf=0.0_WP
-         !    do k=cfg%kmino_,cfg%kmaxo_
-         !       do j=cfg%jmino_,cfg%jmaxo_
-         !          do i=cfg%imino_,cfg%imaxo_
-         !             if (vf%VF(i,j,k).gt.0.0_WP) then
-         !                ! Skip non-solved cells
-         !                if (ve%mask(i,j,k).ne.0) cycle
-         !                ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
-         !                !>xx tensor component
-         !                Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
-         !                !>xy tensor component
-         !                Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
-         !                !>xz tensor component
-         !                Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
-         !                !>yy tensor component
-         !                Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
-         !                !>yz tensor component
-         !                Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
-         !                !>zz tensor component
-         !                Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         ! end block reconstruct_conformation
+         ! Build conformation tensor from its diagonalized state
+         reconstruct_conformation: block
+            integer :: i,j,k,nsc
+            Conf=0.0_WP
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ! Skip non-solved cells
+                        if (ve%mask(i,j,k).ne.0) cycle
+                        ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
+                        !>xx tensor component
+                        Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
+                        !>xy tensor component
+                        Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
+                        !>xz tensor component
+                        Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
+                        !>yy tensor component
+                        Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
+                        !>yz tensor component
+                        Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
+                        !>zz tensor component
+                        Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
+                     end if
+                  end do
+               end do
+            end do
+         end block reconstruct_conformation
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
