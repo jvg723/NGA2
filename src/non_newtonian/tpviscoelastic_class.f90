@@ -152,6 +152,8 @@ contains
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Skip non-solved cells
+               if (this%mask(i,j,k).ne.0) cycle
                ! Check if C is proportional to I based upon C's eigenvalues (i.e., Lambda_ii=Lambda_jj)
                if (abs(Eigenvalues(i,j,k,1)-Eigenvalues(i,j,k,2)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,3)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)).le.1.0e-15_WP) then
                   !>Set B equal to the strain rate tensor
