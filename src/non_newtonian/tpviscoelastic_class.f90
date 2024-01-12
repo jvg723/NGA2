@@ -146,7 +146,7 @@ contains
       integer :: i,j,k
       ! Temp scalar values for matrix multiplication
       real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
-      real(WP), dimension(3,3) :: D,L                !< Matrices for diagonalization in PTT models
+      real(WP), dimension(3,3) :: D                  !< Strian rate tensor for diagonalization in PTT models
       real(WP) :: omega_xy,omega_xz,omega_yz         !< Components for anti-symetric matric
       resSC=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
@@ -169,9 +169,8 @@ contains
                      D(1,1)=SR(1,i,j,k); D(1,2)=SR(4,i,j,k); D(1,3)=SR(6,i,j,k)
                      D(2,1)=SR(4,i,j,k); D(2,2)=SR(2,i,j,k); D(2,3)=SR(5,i,j,k)
                      D(3,1)=SR(6,i,j,k); D(3,2)=SR(5,i,j,k); D(3,3)=SR(3,i,j,k)
-                     ! Form L tensor L=gradU^T-zeta*D
-                     L=transpose(gradU(:,:,i,j,k))-this%affinecoeff*D
-                     M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul(transpose(L),Eigenvectors(i,j,k,:,:)))
+                     ! Use L tensor L=gradU^T-zeta*D for PTT models
+                     M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul((transpose(gradU(:,:,i,j,k))-this%affinecoeff*D),Eigenvectors(i,j,k,:,:)))
                   else 
                      M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul(transpose(gradU(:,:,i,j,k)),Eigenvectors(i,j,k,:,:)))
                   end if

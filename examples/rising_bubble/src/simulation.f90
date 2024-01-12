@@ -355,14 +355,14 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
-         ! Dirichlet inflow at the top and sides of domain
-         call fs%add_bcond(name='yp_inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
-         call fs%add_bcond(name='xp_inflow',type=dirichlet,face='x',dir=+1,canCorrect=.false.,locator=xp_locator)
-         call fs%add_bcond(name='xm_inflow',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
-         call fs%add_bcond(name='zp_inflow',type=dirichlet,face='z',dir=+1,canCorrect=.false.,locator=zp_locator)
-         call fs%add_bcond(name='zm_inflow',type=dirichlet,face='z',dir=-1,canCorrect=.false.,locator=zm_locator)
-         ! Outflow at the bottom
-         call fs%add_bcond(name='yp_outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         ! ! Dirichlet inflow at the top and sides of domain
+         ! call fs%add_bcond(name='yp_inflow',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+         ! call fs%add_bcond(name='xp_inflow',type=dirichlet,face='x',dir=+1,canCorrect=.false.,locator=xp_locator)
+         ! call fs%add_bcond(name='xm_inflow',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
+         ! call fs%add_bcond(name='zp_inflow',type=dirichlet,face='z',dir=+1,canCorrect=.false.,locator=zp_locator)
+         ! call fs%add_bcond(name='zm_inflow',type=dirichlet,face='z',dir=-1,canCorrect=.false.,locator=zm_locator)
+         ! ! Outflow at the bottom
+         ! call fs%add_bcond(name='yp_outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
@@ -374,40 +374,40 @@ contains
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-         ! Error at current time step
-         ek=Ycent_0-Ycent
-         ! Sum errors up to current time
-         e_sum=e_sum+ek*time%dt
-         ! Rember old inflow velocity at preivous time step
-         Uin_old=0.0_WP
-         ! Inflow velocity
-         Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-         ! Setup inflow at top and sides of domain
-         call fs%get_bcond('yp_inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=Uin
-         end do
-         call fs%get_bcond('xp_inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=Uin
-         end do
-         call fs%get_bcond('xm_inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=Uin
-         end do
-         call fs%get_bcond('zp_inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=Uin
-         end do
-         call fs%get_bcond('zm_inflow',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=Uin
-         end do
+         ! ! Error at current time step
+         ! ek=Ycent_0-Ycent
+         ! ! Sum errors up to current time
+         ! e_sum=e_sum+ek*time%dt
+         ! ! Rember old inflow velocity at preivous time step
+         ! Uin_old=0.0_WP
+         ! ! Inflow velocity
+         ! Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+         ! ! Setup inflow at top and sides of domain
+         ! call fs%get_bcond('yp_inflow',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    fs%V(i,j,k)=Uin
+         ! end do
+         ! call fs%get_bcond('xp_inflow',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    fs%V(i,j,k)=Uin
+         ! end do
+         ! call fs%get_bcond('xm_inflow',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    fs%V(i,j,k)=Uin
+         ! end do
+         ! call fs%get_bcond('zp_inflow',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    fs%V(i,j,k)=Uin
+         ! end do
+         ! call fs%get_bcond('zm_inflow',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    fs%V(i,j,k)=Uin
+         ! end do
          ! Apply other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
          ! Adjust MFR for global mass balance
@@ -436,13 +436,13 @@ contains
          call param_read('Extensional viscosity parameter',ve%elongvisc)
          ! Affine parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%affinecoeff)
-         ! Apply boundary conditions
-         call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
-         call ve%add_bcond(name='ym_sc',type=neumann,  locator=ym_locator_sc,dir='ym')
-         call ve%add_bcond(name='xp_sc',type=neumann,  locator=xp_locator_sc,dir='xp')
-         call ve%add_bcond(name='xm_sc',type=neumann,  locator=xm_locator_sc,dir='xm')
-         call ve%add_bcond(name='zp_sc',type=neumann,  locator=zp_locator_sc,dir='zp')
-         call ve%add_bcond(name='zm_sc',type=neumann,  locator=zm_locator_sc,dir='zm')
+         ! ! Apply boundary conditions
+         ! call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
+         ! call ve%add_bcond(name='ym_sc',type=neumann,  locator=ym_locator_sc,dir='ym')
+         ! call ve%add_bcond(name='xp_sc',type=neumann,  locator=xp_locator_sc,dir='xp')
+         ! call ve%add_bcond(name='xm_sc',type=neumann,  locator=xm_locator_sc,dir='xm')
+         ! call ve%add_bcond(name='zp_sc',type=neumann,  locator=zp_locator_sc,dir='zp')
+         ! call ve%add_bcond(name='zm_sc',type=neumann,  locator=zm_locator_sc,dir='zm')
          ! Setup without an implicit solver
          call ve%setup()
          ! Initialize C scalar fields (C=I -> 0 intital value in ln(C) feild) 
@@ -590,46 +590,46 @@ contains
          call time%adjust_dt()
          call time%increment()
 
-         ! Apply time-varying Dirichlet conditions
-         reapply_dirichlet: block
-            use tpns_class, only: bcond
-            type(bcond), pointer :: mybc
-            integer  :: n,i,j,k
-            ! Error at current time step
-            ek=Ycent_0-Ycent
-            ! Sum errors up to current time
-            e_sum=e_sum+ek*time%dt
-            ! Rember old inflow velocity at preivous time step
-            Uin_old=Uin
-            ! Inflow velocity
-            Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
-            ! Apply inflow at top and sides of domain
-            call fs%get_bcond('yp_inflow',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=Uin
-            end do
-            call fs%get_bcond('xp_inflow',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=Uin
-            end do
-            call fs%get_bcond('xm_inflow',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=Uin
-            end do
-            call fs%get_bcond('zp_inflow',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=Uin
-            end do
-            call fs%get_bcond('zm_inflow',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=Uin
-            end do
-         end block reapply_dirichlet
+         ! ! Apply time-varying Dirichlet conditions
+         ! reapply_dirichlet: block
+         !    use tpns_class, only: bcond
+         !    type(bcond), pointer :: mybc
+         !    integer  :: n,i,j,k
+         !    ! Error at current time step
+         !    ek=Ycent_0-Ycent
+         !    ! Sum errors up to current time
+         !    e_sum=e_sum+ek*time%dt
+         !    ! Rember old inflow velocity at preivous time step
+         !    Uin_old=Uin
+         !    ! Inflow velocity
+         !    Uin=controller(ek,Kc,tau_i,e_sum,tau_d,Ycent,Ycent_old,time%dt)
+         !    ! Apply inflow at top and sides of domain
+         !    call fs%get_bcond('yp_inflow',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       fs%V(i,j,k)=Uin
+         !    end do
+         !    call fs%get_bcond('xp_inflow',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       fs%V(i,j,k)=Uin
+         !    end do
+         !    call fs%get_bcond('xm_inflow',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       fs%V(i,j,k)=Uin
+         !    end do
+         !    call fs%get_bcond('zp_inflow',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       fs%V(i,j,k)=Uin
+         !    end do
+         !    call fs%get_bcond('zm_inflow',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       fs%V(i,j,k)=Uin
+         !    end do
+         ! end block reapply_dirichlet
 
          
          ! Remember old VOF
@@ -748,17 +748,17 @@ contains
             ! Add momentum source terms
             call fs%addsrc_gravity(resU,resV,resW)
 
-            ! Body forcing from non-inertial frame
-            moving_frame: block
-               integer :: i,j,k
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
-                     end do
-                  end do
-               end do
-            end block moving_frame
+            ! ! Body forcing from non-inertial frame
+            ! moving_frame: block
+            !    integer :: i,j,k
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)-fs%rho_V(i,j,k)*(Uin-Uin_old)/time%dt
+            !          end do
+            !       end do
+            !    end do
+            ! end block moving_frame
             
             ! Add polymer stress term
             polymer_stress: block
@@ -784,7 +784,7 @@ contains
                   stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
                end do
                case (eptt,lptt)
-                  ! coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
+                  coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
                   do k=cfg%kmino_,cfg%kmaxo_
                      do j=cfg%jmino_,cfg%jmaxo_
                         do i=cfg%imino_,cfg%imaxo_
@@ -800,12 +800,12 @@ contains
                            ! stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(Conf(i,j,k,4)-1.0_WP) !> yy tensor component
                            ! stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(Conf(i,j,k,5)-0.0_WP) !> yz tensor component
                            ! stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(Conf(i,j,k,6)-1.0_WP) !> zz tensor component
-                           stress(i,j,k,1)=vf%VF(i,j,k)*(ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                           stress(i,j,k,2)=vf%VF(i,j,k)*(ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                           stress(i,j,k,3)=vf%VF(i,j,k)*(ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                           stress(i,j,k,4)=vf%VF(i,j,k)*(ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                           stress(i,j,k,5)=vf%VF(i,j,k)*(ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                           stress(i,j,k,6)=vf%VF(i,j,k)*(ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+                           stress(i,j,k,1)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
+                           stress(i,j,k,2)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
+                           stress(i,j,k,3)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
+                           stress(i,j,k,4)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
+                           stress(i,j,k,5)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
+                           stress(i,j,k,6)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
                         end do
                      end do
                   end do
