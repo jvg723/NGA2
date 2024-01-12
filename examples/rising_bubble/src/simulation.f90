@@ -437,7 +437,7 @@ contains
          ! Affine parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%affinecoeff)
          ! Apply boundary conditions
-         call ve%add_bcond(name='yp_sc',type=dirichlet,locator=yp_locator_sc,dir='yp')
+         call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
          call ve%add_bcond(name='ym_sc',type=neumann,  locator=ym_locator_sc,dir='ym')
          call ve%add_bcond(name='xp_sc',type=neumann,  locator=xp_locator_sc,dir='xp')
          call ve%add_bcond(name='xm_sc',type=neumann,  locator=xm_locator_sc,dir='xm')
@@ -464,22 +464,22 @@ contains
          ! Get eigenvalues and eigenvectors
          call ve%get_eigensystem(Eigenvalues,Eigenvectors)
          ! Set top of domain to Identity at each time step
-         call ve%get_bcond('yp_sc',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            ! ve%SC(i,j,k,1)=1.0_WP-ve%SC(i,j+1,k,1)
-            ! ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
-            ! ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
-            ! ve%SC(i,j,k,4)=1.0_WP-ve%SC(i,j+1,k,4)
-            ! ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
-            ! ve%SC(i,j,k,6)=1.0_WP-ve%SC(i,j+1,k,6)
-            ve%SC(i,j,k,1)=0.0_WP-ve%SC(i,j+1,k,1)
-            ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
-            ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
-            ve%SC(i,j,k,4)=0.0_WP-ve%SC(i,j+1,k,4)
-            ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
-            ve%SC(i,j,k,6)=0.0_WP-ve%SC(i,j+1,k,6)
-         end do
+         ! call ve%get_bcond('yp_sc',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    ! ve%SC(i,j,k,1)=1.0_WP-ve%SC(i,j+1,k,1)
+         !    ! ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
+         !    ! ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
+         !    ! ve%SC(i,j,k,4)=1.0_WP-ve%SC(i,j+1,k,4)
+         !    ! ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
+         !    ! ve%SC(i,j,k,6)=1.0_WP-ve%SC(i,j+1,k,6)
+         !    ve%SC(i,j,k,1)=0.0_WP-ve%SC(i,j+1,k,1)
+         !    ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
+         !    ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
+         !    ve%SC(i,j,k,4)=0.0_WP-ve%SC(i,j+1,k,4)
+         !    ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
+         !    ve%SC(i,j,k,6)=0.0_WP-ve%SC(i,j+1,k,6)
+         ! end do
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -677,27 +677,27 @@ contains
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
 
-         reapply_identity: block
-            use tpscalar_class, only: bcond
-            type(bcond), pointer :: mybc
-            integer  :: n,i,j,k
-            call ve%get_bcond('yp_sc',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               ! ve%SC(i,j,k,1)=1.0_WP-ve%SC(i,j+1,k,1)
-               ! ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
-               ! ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
-               ! ve%SC(i,j,k,4)=1.0_WP-ve%SC(i,j+1,k,4)
-               ! ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
-               ! ve%SC(i,j,k,6)=1.0_WP-ve%SC(i,j+1,k,6)
-               ve%SC(i,j,k,1)=0.0_WP-ve%SC(i,j+1,k,1)
-               ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
-               ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
-               ve%SC(i,j,k,4)=0.0_WP-ve%SC(i,j+1,k,4)
-               ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
-               ve%SC(i,j,k,6)=0.0_WP-ve%SC(i,j+1,k,6)
-            end do 
-         end block reapply_identity
+         ! reapply_identity: block
+         !    use tpscalar_class, only: bcond
+         !    type(bcond), pointer :: mybc
+         !    integer  :: n,i,j,k
+         !    call ve%get_bcond('yp_sc',mybc)
+         !    do n=1,mybc%itr%no_
+         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !       ! ve%SC(i,j,k,1)=1.0_WP-ve%SC(i,j+1,k,1)
+         !       ! ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
+         !       ! ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
+         !       ! ve%SC(i,j,k,4)=1.0_WP-ve%SC(i,j+1,k,4)
+         !       ! ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
+         !       ! ve%SC(i,j,k,6)=1.0_WP-ve%SC(i,j+1,k,6)
+         !       ve%SC(i,j,k,1)=0.0_WP-ve%SC(i,j+1,k,1)
+         !       ve%SC(i,j,k,2)=0.0_WP-ve%SC(i,j+1,k,2)
+         !       ve%SC(i,j,k,3)=0.0_WP-ve%SC(i,j+1,k,3)
+         !       ve%SC(i,j,k,4)=0.0_WP-ve%SC(i,j+1,k,4)
+         !       ve%SC(i,j,k,5)=0.0_WP-ve%SC(i,j+1,k,5)
+         !       ve%SC(i,j,k,6)=0.0_WP-ve%SC(i,j+1,k,6)
+         !    end do 
+         ! end block reapply_identity
          
          ! Update eigenvalues and eigenvectors
          call ve%get_eigensystem(Eigenvalues,Eigenvectors)
