@@ -26,7 +26,7 @@ Carreau powerlaw :              0
 Carreau reference timescale :   0     
 Polymer viscosity :             1.483     
 Polymer relaxation time :       0.203        
-Maximum polymer extensibility : 0
+Maximum polymer extensibility : 10
 Extensional viscosity parameter : 0.05
 Affine parameter                : 0.12
 
