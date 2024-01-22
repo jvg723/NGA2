@@ -9,7 +9,7 @@ module cclabel_class
    
 
    ! Expose type/constructor/methods
-   public :: cclabel
+   public :: cclabel,make_label_ftype,same_label_ftype
    
 
    ! Some parameters for memory management
@@ -32,8 +32,6 @@ module cclabel_class
       class(config), pointer :: cfg
       ! This is the name of the CCL
       character(len=str_medium) :: name='UNNAMED_CCL'
-      ! Eulerian field of tagged cells - input set by user
-      logical, dimension(:,:,:), allocatable :: tagged
       ! ID of the structure that contains each cell
       integer, dimension(:,:,:), allocatable :: id
       ! Array of structures
@@ -44,6 +42,20 @@ module cclabel_class
       procedure :: build
       procedure :: empty
    end type cclabel
+   
+   !> Type of the make_label function used to generate a structure
+   interface
+      logical function make_label_ftype(ind1,ind2,ind3)
+         integer, intent(in) :: ind1,ind2,ind3
+      end function make_label_ftype
+   end interface
+   
+   !> Type of the same_label function used to connect two structures
+   interface
+      logical function same_label_ftype(ind1,ind2,ind3,ind4,ind5,ind6)
+         integer, intent(in) :: ind1,ind2,ind3,ind4,ind5,ind6
+      end function same_label_ftype
+   end interface
    
 
 contains
@@ -59,8 +71,6 @@ contains
       if (present(name)) this%name=trim(adjustl(name))
       ! Point to cfg object
       this%cfg=>cfg
-      ! Allocate and initialize logical array
-      allocate(this%tagged(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%tagged=.false.
       ! Allocate and initialize ID array
       allocate(this%id(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%id=0
       ! Zero structures
@@ -68,16 +78,19 @@ contains
    end subroutine initialize
    
 
-   !> Build structure using the user-set tagged field
-   subroutine build(this)
+   !> Build structure using the user-set test functions
+   subroutine build(this,make_label,same_label)
       implicit none
       class(cclabel), intent(inout) :: this
+      procedure(make_label_ftype) :: make_label
+      procedure(same_label_ftype) :: same_label
       integer :: nstruct_,stmin,stmax
       integer, dimension(:,:,:,:), allocatable :: idp          !< Periodicity treatment
       integer, dimension(:), allocatable :: parent             !< Resolving structure id across procs
       integer, dimension(:), allocatable :: parent_all         !< Resolving structure id across procs
       integer, dimension(:), allocatable :: parent_own         !< Resolving structure id across procs
       
+
       ! Start by cleaning up
       call this%empty()
       
@@ -99,8 +112,8 @@ contains
          integer, dimension(3) :: pos
          ! Perform local loop
          do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
-            ! Find next tagged cell
-            if (this%tagged(i,j,k)) then
+            ! Find next cell in a structure
+            if (make_label(i,j,k)) then
                ! Loop through one-sided neighbors
                do dim=1,3
                   pos=0; pos(dim)=-1
@@ -110,10 +123,14 @@ contains
                      ! Neighbor is labeled, but are we?
                      if (this%id(i,j,k).ne.0) then
                         ! We already have a label, perform a union of both labels
-                        this%id(i,j,k)=union_struct(this%id(i,j,k),this%id(ii,jj,kk))
+                        if (same_label(i,j,k,ii,jj,kk)) this%id(i,j,k)=union_struct(this%id(i,j,k),this%id(ii,jj,kk))
                      else
-                        ! We don't have a label, take the neighbor's label
-                        this%id(i,j,k)=this%id(ii,jj,kk)
+                        ! We don't have a label, check if we take the neighbor's label
+                        if (same_label(i,j,k,ii,jj,kk)) then
+                           this%id(i,j,k)=this%id(ii,jj,kk)
+                        else
+                           this%id(i,j,k)=add()
+                        end if
                      end if
                   end if
                end do
@@ -127,7 +144,7 @@ contains
             end if
          end do; end do; end do
       end block first_pass
-
+      
       ! Now collapse the tree, count the cells and resolve periodicity in each structure
       collapse_tree: block
          integer :: i,j,k
@@ -221,7 +238,7 @@ contains
          if (this%cfg%imin_.ne.this%cfg%imin) then
             do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_
                if (this%id(this%cfg%imin_,j,k).gt.0.and.this%id(this%cfg%imin_-1,j,k).gt.0) then
-                  call union_parent(this%id(this%cfg%imin_,j,k),this%id(this%cfg%imin_-1,j,k))
+                  if (same_label(this%cfg%imin_,j,k,this%cfg%imin_-1,j,k)) call union_parent(this%id(this%cfg%imin_,j,k),this%id(this%cfg%imin_-1,j,k))
                end if
             end do; end do
          end if
@@ -229,7 +246,7 @@ contains
          if (this%cfg%jmin_.ne.this%cfg%jmin) then
             do k=this%cfg%kmin_,this%cfg%kmax_; do i=this%cfg%imin_,this%cfg%imax_
                if (this%id(i,this%cfg%jmin_,k).gt.0.and.this%id(i,this%cfg%jmin_-1,k).gt.0) then
-                  call union_parent(this%id(i,this%cfg%jmin_,k),this%id(i,this%cfg%jmin_-1,k))
+                  if (same_label(i,this%cfg%jmin_,k,i,this%cfg%jmin_-1,k)) call union_parent(this%id(i,this%cfg%jmin_,k),this%id(i,this%cfg%jmin_-1,k))
                end if
             end do; end do
          end if
@@ -237,7 +254,7 @@ contains
          if (this%cfg%kmin_.ne.this%cfg%kmin) then
             do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
                if (this%id(i,j,this%cfg%kmin_).gt.0.and.this%id(i,j,this%cfg%kmin_-1).gt.0) then
-                  call union_parent(this%id(i,j,this%cfg%kmin_),this%id(i,j,this%cfg%kmin_-1))
+                  if (same_label(i,j,this%cfg%kmin_,i,j,this%cfg%kmin_-1)) call union_parent(this%id(i,j,this%cfg%kmin_),this%id(i,j,this%cfg%kmin_-1))
                end if
             end do; end do
          end if
@@ -319,7 +336,7 @@ contains
          ! Clean up
          deallocate(ownper,allper)
       end block periodicity_update
-
+      
       ! One more pass for domain boundaries
       boundary_handling: block
          use mpi_f08, only: MPI_ALLREDUCE,MPI_MIN,MPI_MAX,MPI_INTEGER
@@ -328,7 +345,7 @@ contains
          if (this%cfg%imin_.eq.this%cfg%imin) then
             do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_
                if (this%id(this%cfg%imin_,j,k).gt.0.and.this%id(this%cfg%imin_-1,j,k).gt.0) then
-                  call union_parent(this%id(this%cfg%imin_,j,k),this%id(this%cfg%imin_-1,j,k))
+                  if (same_label(this%cfg%imin_,j,k,this%cfg%imin_-1,j,k)) call union_parent(this%id(this%cfg%imin_,j,k),this%id(this%cfg%imin_-1,j,k))
                end if
             end do; end do
          end if
@@ -336,7 +353,7 @@ contains
          if (this%cfg%jmin_.eq.this%cfg%jmin) then
             do k=this%cfg%kmin_,this%cfg%kmax_; do i=this%cfg%imin_,this%cfg%imax_
                if (this%id(i,this%cfg%jmin_,k).gt.0.and.this%id(i,this%cfg%jmin_-1,k).gt.0) then
-                  call union_parent(this%id(i,this%cfg%jmin_,k),this%id(i,this%cfg%jmin_-1,k))
+                  if (same_label(i,this%cfg%jmin_,k,i,this%cfg%jmin_-1,k)) call union_parent(this%id(i,this%cfg%jmin_,k),this%id(i,this%cfg%jmin_-1,k))
                end if
             end do; end do
          end if
@@ -344,7 +361,7 @@ contains
          if (this%cfg%kmin_.eq.this%cfg%kmin) then
             do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
                if (this%id(i,j,this%cfg%kmin_).gt.0.and.this%id(i,j,this%cfg%kmin_-1).gt.0) then
-                  call union_parent(this%id(i,j,this%cfg%kmin_),this%id(i,j,this%cfg%kmin_-1))
+                  if (same_label(i,j,this%cfg%kmin_,i,j,this%cfg%kmin_-1)) call union_parent(this%id(i,j,this%cfg%kmin_),this%id(i,j,this%cfg%kmin_-1))
                end if
             end do; end do
          end if
@@ -606,6 +623,8 @@ contains
       end if
       ! Zero structures
       this%nstruct=0
+      ! Reset id to zero
+      this%id=0
    end subroutine empty
    
    
