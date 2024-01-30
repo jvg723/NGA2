@@ -9,6 +9,7 @@ module simulation
    use tpviscoelastic_class, only: tpviscoelastic
    use timetracker_class,    only: timetracker
    use ensight_class,        only: ensight
+   use surfmesh_class,       only: surfmesh
    use event_class,          only: event
    use monitor_class,        only: monitor
    implicit none
@@ -23,8 +24,9 @@ module simulation
    type(timetracker),    public :: time
    
    !> Ensight postprocessing
-   type(ensight) :: ens_out
-   type(event)   :: ens_evt
+   type(surfmesh) :: smesh
+   type(ensight)  :: ens_out
+   type(event)    :: ens_evt
    
    !> Simulation monitor file
    type(monitor) :: mfile,cflfile,scfile,ctfile
@@ -364,7 +366,6 @@ contains
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('VOF',vf%VF)
-         call ens_out%add_scalar('viscosity',fs%visc)
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          ! do nsc=1,ve%nscalar
@@ -394,8 +395,6 @@ contains
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
          call mfile%add_column(time%t,'Time')
-         call mfile%add_column(Ycent,'Y centroid')
-         call mfile%add_column(Vrise,'Rise velocity')
          call mfile%add_column(time%dt,'Timestep size')
          call mfile%add_column(time%cfl,'Maximum CFL')
          call mfile%add_column(fs%Umax,'Umax')
@@ -447,6 +446,7 @@ contains
    
    !> Perform an NGA2 simulation
    subroutine simulation_run
+      use tpns_class, only: arithmetic_visc,harmonic_visc
       use tpns_class, only: arithmetic_visc,harmonic_visc
       implicit none
       
