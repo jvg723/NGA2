@@ -241,7 +241,7 @@ contains
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use hypre_str_class, only: pcg_pfmg2
+         use hypre_str_class, only: pcg_pfmg2,pcg_pfmg
          use tpns_class,      only: clipped_neumann,dirichlet
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
@@ -261,8 +261,8 @@ contains
             call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
          end if
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
-         ps%maxlevel=12
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         ps%maxlevel=30
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver

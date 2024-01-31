@@ -5,9 +5,9 @@ Partition :	1 8 1
 Moving domain : .true.
 
 # Mesh definition
-Lx :	0.02555
-Ly :	0.02555
-Lz :	0.02555
+Lx :	0.0193
+Ly :	0.0193
+Lz :	0.0193
 nx :	64
 ny :	64
 nz :	64
@@ -21,7 +21,7 @@ Gas density :                 1.226
 Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   7e-8   # in m^3
+Bubble volume :   3e-8   # in m^3
 Bubble position : 0 0 0
 
 # Non-Newtonian modeling                      
@@ -32,7 +32,7 @@ Affine parameter                : 0.12
 
 # Time integration
 Max timestep size : 2e-4
-Max cfl number :    1
+Max cfl number :    0.5
 Max time :          1
 
 # Pressure solver
