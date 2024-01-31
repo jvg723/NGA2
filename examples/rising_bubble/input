@@ -5,24 +5,30 @@ Partition :	1 8 1
 Moving domain : .true.
 
 # Mesh definition
-Lx :	0.2
-Ly :	0.2
-Lz :	0.2
-nx :	128
-ny :	128
-nz :	128
+Lx :	0.02555
+Ly :	0.02555
+Lz :	0.02555
+nx :	64
+ny :	64
+nz :	64
 
 # Fluid properties
 Gravity :                     0 -9.81 0
-Liquid dynamic viscosity :    1.273   ! M=848=>2.715, M=41.1=>1.273
+Liquid dynamic viscosity :    0.03   ! M=848=>2.715, M=41.1=>1.273
 Gas dynamic viscosity :       1.780e-5
-Liquid density :              1350
+Liquid density :              1000.9
 Gas density :                 1.226
-Surface tension coefficient : 0.0775
+Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   9.3e-6    # in m^3
+Bubble volume :   7e-8   # in m^3
 Bubble position : 0 0 0
+
+# Non-Newtonian modeling                      
+Polymer viscosity :             1.483     
+Polymer relaxation time :       0.203        
+Extensional viscosity parameter : 0.05
+Affine parameter                : 0.12
 
 # Time integration
 Max timestep size : 2e-3
@@ -34,4 +40,4 @@ Pressure tolerance : 1e-4
 Pressure iteration : 100
 
 # Ensight output
-Ensight output period : 1e-1
+Ensight output period : 1e-2
