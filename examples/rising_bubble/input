@@ -31,7 +31,7 @@ Extensional viscosity parameter : 0.05
 Affine parameter                : 0.12
 
 # Time integration
-Max timestep size : 2e-3
+Max timestep size : 2e-4
 Max cfl number :    1
 Max time :          1
 

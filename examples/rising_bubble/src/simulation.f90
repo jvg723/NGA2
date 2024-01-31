@@ -233,7 +233,7 @@ contains
             Ycent_ref=center(2)
             Vrise_ref=0.0_WP
             ! Controller parameters
-            G=0.5_WP
+            G=0.1_WP
             ti=time%dtmax
          end block prepare_controller
       end if
