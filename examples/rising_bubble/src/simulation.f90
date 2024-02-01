@@ -261,7 +261,7 @@ contains
             call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
          end if
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=gmres_pfmg,nst=7)
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
