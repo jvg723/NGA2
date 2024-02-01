@@ -241,7 +241,7 @@ contains
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use hypre_str_class, only: pcg_pfmg2,pcg_pfmg,gmres_pfmg
+         use hypre_str_class, only: pcg_pfmg2
          use tpns_class,      only: clipped_neumann,dirichlet
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
