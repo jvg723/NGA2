@@ -36,8 +36,8 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp,SR,Eigenvalues,Conf
-   real(WP), dimension(:,:,:,:,:), allocatable :: gradU,Eigenvectors
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
    real(WP), dimension(3) :: center,gravity
@@ -146,11 +146,7 @@ contains
          allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-         allocate(Conf(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-         allocate(SR   (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Eigenvalues(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:3))
-         allocate(Eigenvectors(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:3,1:3))
       end block allocate_work_arrays
       
       
@@ -303,14 +299,10 @@ contains
          ! Setup without an implicit solver
          call ve%setup()
          ! Initialize C scalar fields (C=I -> 0 intital value in ln(C) feild) 
-         Conf=0.0_WP
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
                   if (vf%VF(i,j,k).gt.0.0_WP) then
-                     Conf(i,j,k,1)=1.0_WP  !< Cxx
-                     Conf(i,j,k,4)=1.0_WP  !< Cyy
-                     Conf(i,j,k,6)=1.0_WP  !< Czz
                      ! ve%SC(i,j,k,1)=1.0_WP  !< Cxx
                      ! ve%SC(i,j,k,4)=1.0_WP  !< Cyy
                      ! ve%SC(i,j,k,6)=1.0_WP  !< Czz
@@ -319,7 +311,7 @@ contains
             end do
          end do
          ! Get eigenvalues and eigenvectors
-         call ve%get_eigensystem(Eigenvalues,Eigenvectors)
+         call ve%get_eigensystem()
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -349,12 +341,6 @@ contains
          do nsc=1,ve%nscalar
             call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
          end do
-         call ens_out%add_scalar('recCxx',Conf(:,:,:,1))
-         call ens_out%add_scalar('recCxy',Conf(:,:,:,2))
-         call ens_out%add_scalar('recCxz',Conf(:,:,:,3))
-         call ens_out%add_scalar('recCyy',Conf(:,:,:,4))
-         call ens_out%add_scalar('recCyz',Conf(:,:,:,5))
-         call ens_out%add_scalar('recCzz',Conf(:,:,:,6))
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -415,7 +401,7 @@ contains
          end do
          call scfile%write()
       end block create_monitor
-      
+
       
    end subroutine simulation_init
    
@@ -454,15 +440,12 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
-         ! Calcualte SR tensor
-         call fs%get_strainrate(SR)
-
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
             integer :: i,j,k,nsc
             ! Add source terms for constitutive model
-            call ve%get_CgradU(Eigenvalues,Eigenvectors,gradU,SCtmp,SR); resSC=SCtmp
-            call ve%get_relax(Eigenvalues,Eigenvectors,SCtmp);           resSC=resSC+SCtmp
+            call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
+            call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
             ! call ve%get_CgradU(gradU,SCtmp,SR); resSC=SCtmp
             ! call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
             ve%SC=ve%SC+time%dt*resSC
@@ -478,36 +461,39 @@ contains
             ! Apply boundary conditions
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
+         
          ! Update eigenvalues and eigenvectors
-         call ve%get_eigensystem(Eigenvalues,Eigenvectors)
-         ! Build conformation tensor from its diagonalized state
-         reconstruct_conformation: block
-            integer :: i,j,k,nsc
-            Conf=0.0_WP
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        ! Skip non-solved cells
-                        if (ve%mask(i,j,k).ne.0) cycle
-                        ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
-                        !>xx tensor component
-                        Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
-                        !>xy tensor component
-                        Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
-                        !>xz tensor component
-                        Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
-                        !>yy tensor component
-                        Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
-                        !>yz tensor component
-                        Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
-                        !>zz tensor component
-                        Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
-                     end if
-                  end do
-               end do
-            end do
-         end block reconstruct_conformation
+         call ve%get_eigensystem()
+         
+         ! ! Build conformation tensor from its diagonalized state
+         ! reconstruct_conformation: block
+         !    integer :: i,j,k,nsc
+         !    Conf=0.0_WP
+         !    do k=cfg%kmino_,cfg%kmaxo_
+         !       do j=cfg%jmino_,cfg%jmaxo_
+         !          do i=cfg%imino_,cfg%imaxo_
+         !             if (vf%VF(i,j,k).gt.0.0_WP) then
+         !                ! Skip non-solved cells
+         !                if (ve%mask(i,j,k).ne.0) cycle
+         !                ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
+         !                !>xx tensor component
+         !                Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
+         !                !>xy tensor component
+         !                Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
+         !                !>xz tensor component
+         !                Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
+         !                !>yy tensor component
+         !                Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
+         !                !>yz tensor component
+         !                Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
+         !                !>zz tensor component
+         !                Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         ! end block reconstruct_conformation
+         
          ! Remember old VOF
          vf%VFold=vf%VF
          
@@ -543,79 +529,79 @@ contains
             if (moving_domain) fs%gravity(2)=gravity(2)+(Vin-Vin_old)/time%dt
             call fs%addsrc_gravity(resU,resV,resW)
 
-            ! Add polymer stress term
-            polymer_stress: block
-               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt,fenep
-               integer :: i,j,k,nsc
-               real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-               real(WP), dimension(:,:,:,:), allocatable :: stress
-               real(WP) :: coeff
-               ! Allocate work arrays
-               allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-               allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               ! Calculate polymer stress for a given model
-               select case (ve%model)
-               case (oldroydb,fenecr,fenep)
-               ! Calculate the polymer relaxation
-               ! call ve%get_relax(stress,time%dt)
-               call ve%get_relax(Eigenvalues,Eigenvectors,stress)
-               ! Build liquid stress tensor
-               do nsc=1,6
-                  ! stress(:,:,:,nsc)=-nn%visc(:,:,:)*vf%VF*stress(:,:,:,nsc)
-                  stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
-               end do
-               case (eptt,lptt)
-                  ! coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
-                  do k=cfg%kmino_,cfg%kmaxo_
-                     do j=cfg%jmino_,cfg%jmaxo_
-                        do i=cfg%imino_,cfg%imaxo_
-                           ! stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-                           ! stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,2)-0.0_WP) !> xy tensor component
-                           ! stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,3)-0.0_WP) !> xz tensor component
-                           ! stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-                           ! stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,5)-0.0_WP) !> yz tensor component
-                           ! stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,6)-1.0_WP) !> zz tensor component
-                           stress(i,j,k,1)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                           stress(i,j,k,2)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                           stress(i,j,k,3)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                           stress(i,j,k,4)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                           stress(i,j,k,5)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                           stress(i,j,k,6)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
-                        end do
-                     end do
-                  end do
-               end select
-               ! Interpolate tensor components to cell edges
-               do k=cfg%kmin_,cfg%kmax_+1
-                  do j=cfg%jmin_,cfg%jmax_+1
-                     do i=cfg%imin_,cfg%imax_+1
-                        Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-                        Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-                        Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-                     end do
-                  end do
-               end do
-               ! Add divergence of stress to residual
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-                        &                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-                        &                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-                        &                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-                        &                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-                        if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-                        &                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-                        &                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-                     end do
-                  end do
-               end do
-               ! Clean up
-               deallocate(stress,Txy,Tyz,Tzx)
-            end block polymer_stress
+            ! ! Add polymer stress term
+            ! polymer_stress: block
+            !    use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt,fenep
+            !    integer :: i,j,k,nsc
+            !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+            !    real(WP), dimension(:,:,:,:), allocatable :: stress
+            !    real(WP) :: coeff
+            !    ! Allocate work arrays
+            !    allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+            !    allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    ! Calculate polymer stress for a given model
+            !    select case (ve%model)
+            !    case (oldroydb,fenecr,fenep)
+            !    ! Calculate the polymer relaxation
+            !    ! call ve%get_relax(stress,time%dt)
+            !    call ve%get_relax(stress)
+            !    ! Build liquid stress tensor
+            !    do nsc=1,6
+            !       ! stress(:,:,:,nsc)=-nn%visc(:,:,:)*vf%VF*stress(:,:,:,nsc)
+            !       stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
+            !    end do
+            !    case (eptt,lptt)
+            !       ! coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
+            !       do k=cfg%kmino_,cfg%kmaxo_
+            !          do j=cfg%jmino_,cfg%jmaxo_
+            !             do i=cfg%imino_,cfg%imaxo_
+            !                ! stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,1)-1.0_WP) !> xx tensor component
+            !                ! stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,2)-0.0_WP) !> xy tensor component
+            !                ! stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,3)-0.0_WP) !> xz tensor component
+            !                ! stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,4)-1.0_WP) !> yy tensor component
+            !                ! stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,5)-0.0_WP) !> yz tensor component
+            !                ! stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,6)-1.0_WP) !> zz tensor component
+            !                stress(i,j,k,1)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
+            !                stress(i,j,k,2)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
+            !                stress(i,j,k,3)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
+            !                stress(i,j,k,4)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
+            !                stress(i,j,k,5)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
+            !                stress(i,j,k,6)=vf%VF(i,j,k)*(-ve%visc_p/(ve%trelax*(1.00_WP-ve%affinecoeff)))*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+            !             end do
+            !          end do
+            !       end do
+            !    end select
+            !    ! Interpolate tensor components to cell edges
+            !    do k=cfg%kmin_,cfg%kmax_+1
+            !       do j=cfg%jmin_,cfg%jmax_+1
+            !          do i=cfg%imin_,cfg%imax_+1
+            !             Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+            !             Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+            !             Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+            !          end do
+            !       end do
+            !    end do
+            !    ! Add divergence of stress to residual
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+            !             &                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+            !             &                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+            !             &                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+            !             &                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+            !             if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+            !             &                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+            !             &                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+            !          end do
+            !       end do
+            !    end do
+            !    ! Clean up
+            !    deallocate(stress,Txy,Tyz,Tzx)
+            ! end block polymer_stress
             
             ! Assemble explicit residual
             resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
@@ -691,7 +677,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
-      deallocate(resSC,SCtmp,SR,gradU,Eigenvalues,Eigenvectors,Conf)
+      deallocate(resSC,SCtmp,gradU)
       
    end subroutine simulation_final
    
