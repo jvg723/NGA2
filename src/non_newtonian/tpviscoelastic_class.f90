@@ -31,13 +31,13 @@ module tpviscoelastic_class
       real(WP) :: elongvisc                                !< Extensional parameter for elongational viscosity in PTT model
       real(WP) :: visc_p                                   !< Viscosity of polymer
       ! Eigensystem storage
-      real(WP), dimension(:,:,:,:),   allocatable :: eigenval  !< Field of eigenvalues  of the conformation tensor
+      real(WP), dimension(:,:,:,:),   allocatable :: eigenval  !< Field of eigenvalues of the conformation tensor
       real(WP), dimension(:,:,:,:,:), allocatable :: eigenvec  !< Field of eigenvectors of the conformation tensor
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
       procedure :: get_relax                               !< Calculate relaxation term
-      !procedure :: get_CgradU_log                          !< Calculate streching and distortion term for log-conformation tensor
+      procedure :: get_CgradU_log                          !< Calculate streching and distortion term for log-conformation tensor
       !procedure :: get_relax_log                           !< Calculate relaxation term for log-conformation tensor
       procedure :: get_eigensystem                         !< Calculate eigenvalues and eigenvectors for conformation tensor
    end type tpviscoelastic
@@ -72,8 +72,6 @@ contains
       integer :: i,j,k
       real(WP), dimension(6) :: SR
       resSC=0.0_WP
-      select case (this%model)
-      case (oldroydb,fenep,fenecr) !< For all other models
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
@@ -136,74 +134,73 @@ contains
    
    !> Get CgradU source terms to add to multiscalar residual
    !> Assumes scalar being transported is ln(C)
-   ! subroutine get_CgradU_log(this,gradu,resSC)
-   !    implicit none
-   !    class(tpviscoelastic), intent(inout) :: this
-   !    real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
-   !    real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
-   !    integer :: i,j,k
-   !    real(WP), dimension(6) :: SR
-   !    ! Temp scalar values for matrix multiplication
-   !    real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
-   !    real(WP), dimension(3,3) :: D                  !< Strain rate tensor for diagonalization in PTT models
-   !    real(WP) :: omega_xy,omega_xz,omega_yz         !< Components for anti-symetric matrix
-   !    resSC=0.0_WP
-   !    do k=this%cfg%kmino_,this%cfg%kmaxo_
-   !       do j=this%cfg%jmino_,this%cfg%jmaxo_
-   !          do i=this%cfg%imino_,this%cfg%imaxo_
-   !             ! Skip non-solved cells
-   !             if (this%mask(i,j,k).ne.0) cycle
-   !             ! Check if C is proportional to I based upon C's eigenvalues (i.e., Lambda_ii=Lambda_jj)
-   !             if (abs(Eigenvalues(i,j,k,1)-Eigenvalues(i,j,k,2)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,3)).le.1.0e-15_WP.or.abs(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)).le.1.0e-15_WP) then
-   !                !>Set B equal to the strain rate tensor
-   !                B(1,1)=SR(1,i,j,k); B(1,2)=SR(4,i,j,k); B(1,3)=SR(6,i,j,k)
-   !                B(2,1)=SR(4,i,j,k); B(2,2)=SR(2,i,j,k); B(2,3)=SR(5,i,j,k)
-   !                B(3,1)=SR(6,i,j,k); B(3,2)=SR(5,i,j,k); B(3,3)=SR(3,i,j,k)
-   !                !>Set Omega = 0
-   !                Omega=0.0_WP
-   !             else
-   !                ! Form M tensor (M=R^T*gradU^T*R={{mxx,mxy,mxz},{myx,myy,myz},{mzx,mzy,mzz}})
-   !                if (this%model.eq.lptt.or.this%model.eq.eptt) then
-   !                   !>Strain rate tensor used for calculating L
-   !                   D(1,1)=SR(1,i,j,k); D(1,2)=SR(4,i,j,k); D(1,3)=SR(6,i,j,k)
-   !                   D(2,1)=SR(4,i,j,k); D(2,2)=SR(2,i,j,k); D(2,3)=SR(5,i,j,k)
-   !                   D(3,1)=SR(6,i,j,k); D(3,2)=SR(5,i,j,k); D(3,3)=SR(3,i,j,k)
-   !                   ! Use L tensor L=gradU^T-zeta*D for PTT models
-   !                   M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul((transpose(gradU(:,:,i,j,k))-this%affinecoeff*D),Eigenvectors(i,j,k,:,:)))
-   !                else 
-   !                   M=matmul(transpose(Eigenvectors(i,j,k,:,:)),matmul(transpose(gradU(:,:,i,j,k)),Eigenvectors(i,j,k,:,:)))
-   !                end if
-   !                ! Temp matrix for calculating B
-   !                tmpMat=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(tmpMat))
-   !                ! Form symmetric extension component of confomration tensor (B=R*{{mxx,0,0},{0,myy,0},{0,0,mzz}}*R^T={{Bxx,Bxy,Bxz},{Bxy,Byy,Byz},{Bxz,Byz,Bzz}})
-   !                B=matmul(Eigenvectors(i,j,k,:,:),matmul(tmpMat,transpose(Eigenvectors(i,j,k,:,:))))
-   !                ! Antisymmetric components
-   !                omega_xy=(Eigenvalues(i,j,k,2)*M(1,2)+Eigenvalues(i,j,k,1)*M(2,1))/(Eigenvalues(i,j,k,2)-Eigenvalues(i,j,k,1)) 
-   !                omega_xz=(Eigenvalues(i,j,k,3)*M(1,3)+Eigenvalues(i,j,k,1)*M(3,1))/(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,1)) 
-   !                omega_yz=(Eigenvalues(i,j,k,3)*M(2,3)+Eigenvalues(i,j,k,2)*M(3,2))/(Eigenvalues(i,j,k,3)-Eigenvalues(i,j,k,2))
-   !                ! Temp matrix for calculating Omega
-   !                tmpMat=0.0_WP
-   !                tmpMat=reshape((/ 0.0_WP,-omega_xy,-omega_xz,omega_xy,0.0_WP,-omega_yz,omega_xz,omega_yz,0.0_WP /),shape(tmpMat))
-   !                ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
-   !                Omega=matmul(Eigenvectors(i,j,k,:,:),matmul(tmpMat,transpose(Eigenvectors(i,j,k,:,:))))
-   !             end if
-   !             ! Add extension and rotation components to resSC (Omega*log(C)-log(C)*Omega+2B)
-   !             !>xx tensor component
-   !             resSC(i,j,k,1)=Omega(1,2)*this%SC(i,j,k,2)-Omega(2,1)*this%SC(i,j,k,2)+Omega(1,3)*this%SC(i,j,k,3)-Omega(3,1)*this%SC(i,j,k,3)+2.00_WP*B(1,1)
-   !             !>xy tensor component
-   !             resSC(i,j,k,2)=Omega(1,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,1)-Omega(2,2)*this%SC(i,j,k,2)-Omega(3,2)*this%SC(i,j,k,3)+Omega(1,2)*this%SC(i,j,k,4)+Omega(1,3)*this%SC(i,j,k,5)+2.00_WP*B(2,1)
-   !             !>xz tensor component
-   !             resSC(i,j,k,3)=Omega(1,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,1)-Omega(2,3)*this%SC(i,j,k,2)-Omega(3,3)*this%SC(i,j,k,3)+Omega(1,2)*this%SC(i,j,k,5)+Omega(1,3)*this%SC(i,j,k,6)+2.00_WP*B(3,1)
-   !             !>yy tensor component
-   !             resSC(i,j,k,4)=Omega(2,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,5)+2.00_WP*B(2,2)
-   !             !>yz tensor component
-   !             resSC(i,j,k,5)=Omega(2,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,2)-Omega(2,3)*this%SC(i,j,k,4)+Omega(2,2)*this%SC(i,j,k,5)-Omega(3,3)*this%SC(i,j,k,5)+Omega(2,3)*this%SC(i,j,k,6)+2.00_WP*B(2,3) 
-   !             !>zz tensor component
-   !             resSC(i,j,k,6)=Omega(3,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,3)-Omega(2,3)*this%SC(i,j,k,5)+Omega(3,2)*this%SC(i,j,k,5)+2.00_WP*B(3,3)
-   !          end do 
-   !       end do
-   !    end do
-   ! end subroutine get_CgradU_log_conformation
+   subroutine get_CgradU_log(this,gradu,resSC)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
+      integer :: i,j,k
+      ! Temp scalar values for matrix multiplication
+      real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
+      real(WP), dimension(3,3) :: D                  !< Strain rate tensor for diagonalization in PTT models
+      real(WP) :: omega_xy,omega_xz,omega_yz         !< Components for anti-symetric matrix
+      resSC=0.0_WP
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Skip non-solved cells
+               if (this%mask(i,j,k).ne.0) cycle
+               ! Check  C is proportional to I based upon C's eigenvalues (i.e., Lambda_ii=Lambda_jj)
+               if (abs(this%eigenval(1,i,j,k)-this%eigenval(2,i,j,k)).le.1.0e-15_WP.or.abs(this%eigenval(2,i,j,k)-this%eigenval(3,i,j,k)).le.1.0e-15_WP.or.abs(this%eigenval(3,i,j,k)-this%eigenval(1,i,j,k)).le.1.0e-15_WP) then
+                  !>Set B equal to the strain rate tensor
+                  B(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
+                  B(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
+                  B(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   B(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   B(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
+                  !>Set Omega = 0
+                  Omega=0.0_WP
+               else
+                  select case (this%model)
+                  case (lptt,eptt)
+                     !>Strain rate tensor used for calculating L
+                     D(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; D(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   D(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
+                     D(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   D(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; D(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
+                     D(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   D(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   D(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
+                     ! Use L tensor L=gradU^T-zeta*D for PTT models
+                     M=matmul(transpose(this%eigenvec(:,:,i,j,k)),matmul((transpose(gradU(:,:,i,j,k))-this%affinecoeff*D),this%eigenvec(:,:,i,j,k)))
+                  case default
+                     M=matmul(transpose(this%eigenvec(:,:,i,j,k)),matmul(transpose(gradU(:,:,i,j,k)),this%eigenvec(:,:,i,j,k)))
+                  end select
+                  ! Temp matrix for calculating B
+                  tmpMat=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(tmpMat))
+                  ! Form symmetric extension component of confomration tensor (B=R*{{mxx,0,0},{0,myy,0},{0,0,mzz}}*R^T={{Bxx,Bxy,Bxz},{Bxy,Byy,Byz},{Bxz,Byz,Bzz}})
+                  B=matmul(this%eigenvec(i,j,k,:,:),matmul(tmpMat,transpose(this%eigenvec(i,j,k,:,:))))
+                  ! Antisymmetric components
+                  omega_xy=(this%eigenval(i,j,k,2)*M(1,2)+this%eigenval(i,j,k,1)*M(2,1))/(this%eigenval(i,j,k,2)-this%eigenval(i,j,k,1)) 
+                  omega_xz=(this%eigenval(i,j,k,3)*M(1,3)+this%eigenval(i,j,k,1)*M(3,1))/(this%eigenval(i,j,k,3)-this%eigenval(i,j,k,1)) 
+                  omega_yz=(this%eigenval(i,j,k,3)*M(2,3)+this%eigenval(i,j,k,2)*M(3,2))/(this%eigenval(i,j,k,3)-this%eigenval(i,j,k,2))
+                  ! Temp matrix for calculating Omega
+                  tmpMat=0.0_WP
+                  tmpMat=reshape((/ 0.0_WP,-omega_xy,-omega_xz,omega_xy,0.0_WP,-omega_yz,omega_xz,omega_yz,0.0_WP /),shape(tmpMat))
+                  ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
+                  Omega=matmul(this%eigenvec(:,:,i,j,k),matmul(tmpMat,transpose(this%eigenvec(:,:,i,j,k))))
+               end if
+               ! Add extension and rotation components to resSC (Omega*log(C)-log(C)*Omega+2B)
+               !>xx tensor component
+               resSC(i,j,k,1)=Omega(1,2)*this%SC(i,j,k,2)-Omega(2,1)*this%SC(i,j,k,2)+Omega(1,3)*this%SC(i,j,k,3)-Omega(3,1)*this%SC(i,j,k,3)+2.00_WP*B(1,1)
+               !>xy tensor component
+               resSC(i,j,k,2)=Omega(1,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,1)-Omega(2,2)*this%SC(i,j,k,2)-Omega(3,2)*this%SC(i,j,k,3)+Omega(1,2)*this%SC(i,j,k,4)+Omega(1,3)*this%SC(i,j,k,5)+2.00_WP*B(2,1)
+               !>xz tensor component
+               resSC(i,j,k,3)=Omega(1,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,1)-Omega(2,3)*this%SC(i,j,k,2)-Omega(3,3)*this%SC(i,j,k,3)+Omega(1,2)*this%SC(i,j,k,5)+Omega(1,3)*this%SC(i,j,k,6)+2.00_WP*B(3,1)
+               !>yy tensor component
+               resSC(i,j,k,4)=Omega(2,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,5)+2.00_WP*B(2,2)
+               !>yz tensor component
+               resSC(i,j,k,5)=Omega(2,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,2)-Omega(2,3)*this%SC(i,j,k,4)+Omega(2,2)*this%SC(i,j,k,5)-Omega(3,3)*this%SC(i,j,k,5)+Omega(2,3)*this%SC(i,j,k,6)+2.00_WP*B(2,3) 
+               !>zz tensor component
+               resSC(i,j,k,6)=Omega(3,1)*this%SC(i,j,k,3)-Omega(1,3)*this%SC(i,j,k,3)-Omega(2,3)*this%SC(i,j,k,5)+Omega(3,2)*this%SC(i,j,k,5)+2.00_WP*B(3,3)
+            end do 
+         end do
+      end do
+   end subroutine get_CgradU_log_conformation
    
    
    !> Add viscoelastic relaxation source
@@ -310,8 +307,6 @@ contains
       use messager, only: die
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(in) :: Eigenvalues   
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(in) :: Eigenvectors
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
       integer :: i,j,k
       real(WP) :: coeff,trace
@@ -323,18 +318,18 @@ contains
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
                   !>Trace of reconstructed conformation tensor
-                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
-                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
-                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  trace=Eigenvectors(i,j,k,1,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*this%eigenval(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*this%eigenval(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*this%eigenval(i,j,k,3)
                   !>Relaxation function coefficent
                   coeff=(this%Lmax**2-3.00_WP)/(this%Lmax**2-trace)
                   !>Add source term to residual
-                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)**2                     *((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)**2                     *((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,3,1)**2                     *((coeff/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((coeff/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((coeff/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)**2                     *((coeff/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((coeff/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((coeff/this%eigenval(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((coeff/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((coeff/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((coeff/this%eigenval(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((coeff/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((coeff/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((coeff/this%eigenval(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)**2                     *((coeff/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((coeff/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((coeff/this%eigenval(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((coeff/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((coeff/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((coeff/this%eigenval(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,3,1)**2                     *((coeff/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((coeff/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((coeff/this%eigenval(i,j,k,3))-1.00_WP))  !< zz tensor component
                end do
             end do
          end do
@@ -344,18 +339,18 @@ contains
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
                   !>Trace of reconstructed conformation tensor
-                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
-                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
-                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  trace=Eigenvectors(i,j,k,1,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*this%eigenval(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*this%eigenval(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*this%eigenval(i,j,k,3)
                   !>Relaxation function coefficent
                   coeff=1.00_WP/(1.0_WP-trace/this%Lmax**2)
                   !>Add source term to residual
-                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< zz tensor component
                end do
             end do
          end do
@@ -364,12 +359,12 @@ contains
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
-                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< zz tensor component
                end do
             end do
          end do
@@ -379,18 +374,18 @@ contains
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
                   !>Trace of reconstructed conformation tensor
-                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
-                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
-                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  trace=Eigenvectors(i,j,k,1,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*this%eigenval(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*this%eigenval(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*this%eigenval(i,j,k,3)
                   !>Relaxation function coefficent
                   coeff=1.00_WP+(this%elongvisc/(1.0_WP-this%affinecoeff))*(trace-3.0_WP)
                   !>Add source term to residual
-                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< zz tensor component
                end do
             end do
          end do
@@ -400,18 +395,18 @@ contains
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
                   !>Trace of reconstructed conformation tensor
-                  trace=Eigenvectors(i,j,k,1,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*Eigenvalues(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*Eigenvalues(i,j,k,1)+&
-                  &     Eigenvectors(i,j,k,1,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*Eigenvalues(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*Eigenvalues(i,j,k,2)+&
-                  &     Eigenvectors(i,j,k,1,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*Eigenvalues(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*Eigenvalues(i,j,k,3)
+                  trace=Eigenvectors(i,j,k,1,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,2,1)**2*this%eigenval(i,j,k,1)+Eigenvectors(i,j,k,3,1)**2*this%eigenval(i,j,k,1)+&
+                  &     Eigenvectors(i,j,k,1,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,2,2)**2*this%eigenval(i,j,k,2)+Eigenvectors(i,j,k,3,2)**2*this%eigenval(i,j,k,2)+&
+                  &     Eigenvectors(i,j,k,1,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,2,3)**2*this%eigenval(i,j,k,3)+Eigenvectors(i,j,k,3,3)**2*this%eigenval(i,j,k,3)
                   !>Relaxation function coefficent
                   coeff=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*(trace-3.0_WP))
                   !>Add source term to residual
-                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xx tensor component
-                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xy tensor component
-                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< xz tensor component
-                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yy tensor component
-                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< yz tensor component
-                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/Eigenvalues(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/Eigenvalues(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/Eigenvalues(i,j,k,3))-1.00_WP))  !< zz tensor component
+                  resSC(i,j,k,1)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xx tensor component
+                  resSC(i,j,k,2)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xy tensor component
+                  resSC(i,j,k,3)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< xz tensor component
+                  resSC(i,j,k,4)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yy tensor component
+                  resSC(i,j,k,5)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)*((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,2,2)*Eigenvectors(i,j,k,3,2)*((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)*((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< yz tensor component
+                  resSC(i,j,k,6)=(1.00_WP/this%trelax)*coeff*(Eigenvectors(i,j,k,3,1)**2                     *((1.00_WP/this%eigenval(i,j,k,1))-1.00_WP)+Eigenvectors(i,j,k,3,2)**2                     *((1.00_WP/this%eigenval(i,j,k,2))-1.00_WP)+Eigenvectors(i,j,k,3,3)**2                     *((1.00_WP/this%eigenval(i,j,k,3))-1.00_WP))  !< zz tensor component
                end do
             end do
          end do
@@ -420,46 +415,7 @@ contains
       end select
    end subroutine get_relax_log_conformation
 
-
-   !> Calculate the eigenvalues and eigenevtors of the conformation tensor for the whole domain
-   !> Assumes scalar being transported is ln(C)
-   subroutine get_eigensystem(this,Eigenvalues,Eigenvectors)
-      implicit none
-      class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(out) :: Eigenvalues   !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:3)
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(out) :: Eigenvectors  !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_,1:3,1:3)
-      integer :: i,j,k
-      ! Used for calculation of conformation tensor eigenvalues and eigenvectors
-      real(WP), dimension(3,3) :: A
-      real(WP), dimension(3) :: d
-      integer , parameter :: order = 3             !< Conformation tensor is 3x3
-      real(WP), dimension(:), allocatable :: work
-      real(WP), dimension(1)   :: lwork_query
-      integer  :: lwork,info,n
-      ! Query optimal work array size
-      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      Eigenvalues=0.0_WP
-      Eigenvectors=0.0_WP
-      do k=this%cfg%kmino_,this%cfg%kmaxo_
-         do j=this%cfg%jmino_,this%cfg%jmaxo_
-            do i=this%cfg%imino_,this%cfg%imaxo_
-               !>Assemble ln(C) tensor
-               A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
-               A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
-               A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
-               !>On exit, A contains eigenvectors, and d contains ln(eigenvalues) in ascending order
-               call dsyev('V','U',order,A,order,d,work,lwork,info)
-               !>Eigenvalues (Eigenvalues(1)=Lambda_xx,Eigenvalues(2)=Lambda_yy,Eigenvalues(3)=Lambda_zz)
-               Eigenvalues(i,j,k,:)=exp(d(:))
-               !>Eigenvectors
-               Eigenvectors(i,j,k,:,:)=A(:,:)
-            end do 
-         end do
-      end do
-   end subroutine get_eigensystem
-
-
-   !> Calculate the eigenvalues and eigenvectors of the conformation tensor for the whole domain
+   !> Calculate the this%eigenval and eigenvectors of the conformation tensor for the whole domain
    !> Assumes scalar being transported is ln(C)
    subroutine get_eigensystem(this)
       use mathtools, only: eigensolve3
