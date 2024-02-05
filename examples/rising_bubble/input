@@ -4,13 +4,16 @@ Partition : 1 8 1
 # Are we using a moving domain?
 Moving domain : .true.
 
+# Are we using log conformation stabilzation 
+Stabilzation : .true.
+
 # Mesh definition
 Lx :	0.0193
 Ly :	0.0193
-Lz :	0.0193
+Lz :	0.0000193
 nx :	64
 ny :	64
-nz :	64
+nz :	1
 
 # Fluid properties
 Gravity :                     0 -9.81 0

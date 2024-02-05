@@ -33,6 +33,8 @@ module tpviscoelastic_class
       ! Eigensystem storage
       real(WP), dimension(:,:,:,:),   allocatable :: eigenval  !< Field of eigenvalues of the conformation tensor
       real(WP), dimension(:,:,:,:,:), allocatable :: eigenvec  !< Field of eigenvectors of the conformation tensor
+      ! Storage for reconstructed conformation tensor
+      real(WP), dimension(:,:,:,:),   allocatable ::SCrec
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
@@ -40,6 +42,7 @@ module tpviscoelastic_class
       procedure :: get_CgradU_log                          !< Calculate streching and distortion term for log-conformation tensor
       procedure :: get_relax_log                           !< Calculate relaxation term for log-conformation tensor
       procedure :: get_eigensystem                         !< Calculate eigenvalues and eigenvectors for conformation tensor
+      procedure :: reconstruct_conformation                !< Reconstruct conformation tensor for decomposed eigenvalues and eigenvectors
    end type tpviscoelastic
    
    
@@ -450,6 +453,38 @@ contains
          end do
       end do
    end subroutine get_eigensystem
+
+   !> Reconstruct the conformation tensor for its decomposed eigenvalues and eigenvectors
+   subroutine reconstruct_conformation(this)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      integer :: i,j,k
+      ! First ensure storage is allocated
+      if (.not.allocated(this%SCrec)) allocate(this%SCrec(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)) 
+      this%SCrec=0.0_WP
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Skip non-solved cells
+               if (this%mask(i,j,k).ne.0) cycle
+               ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
+               !>xx tensor component
+               this%SCrec(i,j,k,1)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2
+               !>xy tensor component
+               this%SCrec(i,j,k,2)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)*this%eigenvec(2,1,i,j,k)+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)*this%eigenvec(2,2,i,j,k)+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)*this%eigenvec(2,3,i,j,k)
+               !>xz tensor component
+               this%SCrec(i,j,k,3)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)*this%eigenvec(3,1,i,j,k)+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)*this%eigenvec(3,2,i,j,k)+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)*this%eigenvec(3,3,i,j,k)
+               !>yy tensor component
+               this%SCrec(i,j,k,4)=this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)**2
+               !>yz tensor component
+               this%SCrec(i,j,k,5)=this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)*this%eigenvec(3,1,i,j,k)+this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)*this%eigenvec(3,2,i,j,k)+this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)*this%eigenvec(3,3,i,j,k)
+               !>zz tensor component
+               this%SCrec(i,j,k,6)=this%eigenval(1,i,j,k)*this%eigenvec(3,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(3,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(3,3,i,j,k)**2
+            end do
+         end do
+      end do
+   end subroutine reconstruct_conformation
+
    
    
 end module tpviscoelastic_class

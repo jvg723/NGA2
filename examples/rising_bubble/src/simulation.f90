@@ -43,6 +43,9 @@ module simulation
    real(WP), dimension(3) :: center,gravity
    real(WP) :: volume,radius,Ycent,Vrise
    real(WP) :: Vin,Vin_old,Vrise_ref,Ycent_ref,G,ti
+
+   !> Check for stabilization 
+   logical :: stabilization 
    
 contains
 
@@ -298,18 +301,38 @@ contains
          end if
          ! Setup without an implicit solver
          call ve%setup()
-         ! Initialize C scalar fields (C=I -> 0 intital value in ln(C) feild) 
-         do k=cfg%kmino_,cfg%kmaxo_
-            do j=cfg%jmino_,cfg%jmaxo_
-               do i=cfg%imino_,cfg%imaxo_
-                  if (vf%VF(i,j,k).gt.0.0_WP) then
-                     ! ve%SC(i,j,k,1)=1.0_WP  !< Cxx
-                     ! ve%SC(i,j,k,4)=1.0_WP  !< Cyy
-                     ! ve%SC(i,j,k,6)=1.0_WP  !< Czz
-                  end if
+         ! Check first if we use a moving domain
+         call param_read('Stabilization',stabilization,default=.false.)
+         ! Initialize C scalar fields
+         if (stabilization) then 
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem()
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation()
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
                end do
             end do
-         end do
+         else
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SC(i,j,k,1)=1.0_WP  !< Cxx
+                        ve%SC(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SC(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+         end if
          ! Get eigenvalues and eigenvectors
          call ve%get_eigensystem()
          ! Apply boundary conditions
@@ -338,9 +361,15 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_surface('plic',smesh)
-         do nsc=1,ve%nscalar
-            call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
-         end do
+         if (stabilization) then 
+            do nsc=1,ve%nscalar
+               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+            end do
+         else
+            do nsc=1,ve%nscalar
+               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
+            end do
+         end if
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -444,10 +473,13 @@ contains
          advance_scalar: block
             integer :: i,j,k,nsc
             ! Add source terms for constitutive model
-            call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
-            call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
-            ! call ve%get_CgradU(gradU,SCtmp,SR); resSC=SCtmp
-            ! call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
+            if (stabilization) then 
+               call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
+               call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
+            else
+               call ve%get_CgradU(gradU,SCtmp);    resSC=SCtmp
+               call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
+            end if
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
             ve%SCold=ve%SC
@@ -462,38 +494,13 @@ contains
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
          
-         ! Update eigenvalues and eigenvectors
-         call ve%get_eigensystem()
-         
-         ! ! Build conformation tensor from its diagonalized state
-         ! reconstruct_conformation: block
-         !    integer :: i,j,k,nsc
-         !    Conf=0.0_WP
-         !    do k=cfg%kmino_,cfg%kmaxo_
-         !       do j=cfg%jmino_,cfg%jmaxo_
-         !          do i=cfg%imino_,cfg%imaxo_
-         !             if (vf%VF(i,j,k).gt.0.0_WP) then
-         !                ! Skip non-solved cells
-         !                if (ve%mask(i,j,k).ne.0) cycle
-         !                ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
-         !                !>xx tensor component
-         !                Conf(i,j,k,1)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)**2
-         !                !>xy tensor component
-         !                Conf(i,j,k,2)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,2,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,2,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,2,3)
-         !                !>xz tensor component
-         !                Conf(i,j,k,3)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,1,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,1,2)*Eigenvectors(i,j,k,3,2)+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,1,3)*Eigenvectors(i,j,k,3,3)
-         !                !>yy tensor component
-         !                Conf(i,j,k,4)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)**2
-         !                !>yz tensor component
-         !                Conf(i,j,k,5)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,2,1)*Eigenvectors(i,j,k,3,1)+Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,2,2)*Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,2,3)*Eigenvectors(i,j,k,3,3)
-         !                !>zz tensor component
-         !                Conf(i,j,k,6)=Eigenvalues(i,j,k,1)*Eigenvectors(i,j,k,3,1)**2                     +Eigenvalues(i,j,k,2)*Eigenvectors(i,j,k,3,2)**2+Eigenvalues(i,j,k,3)*Eigenvectors(i,j,k,3,3)**2
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         ! end block reconstruct_conformation
-         
+         if (stabilization) then 
+            ! Update eigenvalues and eigenvectors
+            call ve%get_eigensystem()
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation()
+         end if
+
          ! Remember old VOF
          vf%VFold=vf%VF
          
