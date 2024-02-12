@@ -285,7 +285,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -449,7 +449,7 @@ contains
    
    !> Perform an NGA2 simulation
    subroutine simulation_run
-      use tpns_class, only: harmonic_visc
+      use tpns_class, only: harmonic_visc, arithmetic_visc
       implicit none
       
       ! Perform time integration
@@ -528,7 +528,7 @@ contains
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
          
          ! Prepare new staggered viscosity (at n+1)
-         call fs%get_viscosity(vf=vf,strat=harmonic_visc)
+         call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
