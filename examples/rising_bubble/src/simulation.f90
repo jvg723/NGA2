@@ -229,7 +229,7 @@ contains
       if (moving_domain) then
          prepare_controller: block
             ! Store target data
-            Ycent_ref=center(2)
+            Ycent_ref=center(2); Ycent=Ycent_ref
             Vrise_ref=0.0_WP
             ! Controller parameters
             G=0.5_WP
@@ -280,12 +280,12 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
-         use tpviscoelastic_class, only: eptt
+         use tpviscoelastic_class, only: eptt,oldroydb
          use tpscalar_class,       only: bcond,neumann
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -301,7 +301,7 @@ contains
          end if
          ! Setup without an implicit solver
          call ve%setup()
-         ! Check first if we use a moving domain
+         ! Check first if we use stabilization
          call param_read('Stabilization',stabilization,default=.false.)
          ! Initialize C scalar fields
          if (stabilization) then 
@@ -682,6 +682,9 @@ contains
             call ens_out%write_data(time%t)
          end if
          
+         ! Calculate rise velocity and Y cent
+         call rise_vel()
+
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
@@ -690,7 +693,6 @@ contains
          else
             call ve%get_max(vf%VF)
          end if
-         call rise_vel()
          call mfile%write()
          call cflfile%write()
          call bubblefile%write()
