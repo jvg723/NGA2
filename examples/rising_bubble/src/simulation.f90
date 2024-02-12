@@ -229,7 +229,7 @@ contains
       if (moving_domain) then
          prepare_controller: block
             ! Store target data
-            Ycent_ref=center(2); Ycent=Ycent_ref
+            Ycent_ref=center(2)
             Vrise_ref=0.0_WP
             ! Controller parameters
             G=0.5_WP
@@ -528,7 +528,7 @@ contains
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
          
          ! Prepare new staggered viscosity (at n+1)
-         call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
+         call fs%get_viscosity(vf=vf,strat=harmonic_visc)
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -681,18 +681,16 @@ contains
             call vf%update_surfmesh(smesh)
             call ens_out%write_data(time%t)
          end if
-         
-         ! Calculate rise velocity and Y cent
-         call rise_vel()
 
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
-         if (stabilization) then
-            call ve%get_max_reconstructed(vf%VF)
-         else
-            call ve%get_max(vf%VF)
-         end if
+         ! if (stabilization) then
+         !    call ve%get_max_reconstructed(vf%VF)
+         ! else
+         !    call ve%get_max(vf%VF)
+         ! end if
+         call rise_vel()
          call mfile%write()
          call cflfile%write()
          call bubblefile%write()
