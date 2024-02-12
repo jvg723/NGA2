@@ -232,7 +232,7 @@ contains
             Ycent_ref=center(2)
             Vrise_ref=0.0_WP
             ! Controller parameters
-            G=0.5_WP
+            G=0.021_WP !< Appears to work better for bubble volume = 70 mm^3 at resolution of 128x128x1 in 2D
             ti=time%dtmax
          end block prepare_controller
       end if
@@ -285,7 +285,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
