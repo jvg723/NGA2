@@ -1,5 +1,5 @@
 # NGA location if not yet defined
-NGA_HOME ?= /Users/kz3917/Repositories/NGA2_Olivier
+NGA_HOME ?= ../..
 
 # Compilation parameters
 PRECISION = DOUBLE
@@ -23,9 +23,6 @@ INCLUDE_LOCATIONS += $(Ulocs)
 VPATH_LOCATIONS   += $(Ulocs)
 
 # External libraries are defined in .profile/.bashrc/.zshrc, but could be defined here as well
-HYPRE_DIR = /Users/kz3917/Builds/hypre
-IRL_DIR = /Users/kz3917/Builds/irl
-FFTW_DIR = /opt/homebrew/Cellar/fftw/3.3.10_1/
 
 # NGA compilation definitions
 include $(NGA_HOME)/tools/GNUMake/Make.defs
