@@ -499,6 +499,10 @@ contains
       real(WP) :: my_SCmax,my_SCmin
       real(WP), dimension(:,:,:), allocatable :: tmp
       allocate(tmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      ! First ensure storage is allocated
+      if (.not.allocated(this%SCrecint)) allocate(this%SCrecint(1:6)) 
+      if (.not.allocated(this%SCrecmin)) allocate(this%SCrecmin(1:6)) 
+      if (.not.allocated(this%SCrecmax)) allocate(this%SCrecmax(1:6)) 
       do nsc=1,this%nscalar
          my_SCmax=maxval(this%SCrec(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmax,this%SCrecmax(nsc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
          my_SCmin=minval(this%SCrec(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmin,this%SCrecmin(nsc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
