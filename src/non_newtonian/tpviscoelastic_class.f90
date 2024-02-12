@@ -35,6 +35,8 @@ module tpviscoelastic_class
       real(WP), dimension(:,:,:,:,:), allocatable :: eigenvec  !< Field of eigenvectors of the conformation tensor
       ! Storage for reconstructed conformation tensor
       real(WP), dimension(:,:,:,:),   allocatable ::SCrec
+      ! Monitoring quantities
+      real(WP), dimension(:), allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
@@ -43,6 +45,7 @@ module tpviscoelastic_class
       procedure :: get_relax_log                           !< Calculate relaxation term for log-conformation tensor
       procedure :: get_eigensystem                         !< Calculate eigenvalues and eigenvectors for conformation tensor
       procedure :: reconstruct_conformation                !< Reconstruct conformation tensor for decomposed eigenvalues and eigenvectors
+      procedure :: get_max_reconstructed                   !< Calculate maximum and integral field value for reconstructed C field
    end type tpviscoelastic
    
    
@@ -484,6 +487,31 @@ contains
          end do
       end do
    end subroutine reconstruct_conformation
+
+   !> Calculate the min, max, and int of our reconstructed C field
+   subroutine get_max_reconstructed(this,VF)
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX,MPI_MIN
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF        !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: ierr,nsc
+      real(WP) :: my_SCmax,my_SCmin
+      real(WP), dimension(:,:,:), allocatable :: tmp
+      allocate(tmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      do nsc=1,this%nscalar
+         my_SCmax=maxval(this%SCrec(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmax,this%SCrecmax(nsc),1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+         my_SCmin=minval(this%SCrec(:,:,:,nsc)); call MPI_ALLREDUCE(my_SCmin,this%SCrecmin(nsc),1,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+         if      (this%phase(nsc).eq.0) then ! Liquid scalar
+            tmp=this%SCrec(:,:,:,nsc)*(       VF(:,:,:))
+         else if (this%phase(nsc).eq.1) then ! Gas scalar
+            tmp=this%SCrec(:,:,:,nsc)*(1.0_WP-VF(:,:,:))
+         end if
+         call this%cfg%integrate(A=tmp,integral=this%SCrecint(nsc))
+      end do
+      deallocate(tmp)
+   end subroutine get_max_reconstructed
+   
 
    
    

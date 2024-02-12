@@ -383,6 +383,11 @@ contains
          call fs%get_max()
          call vf%get_max()
          call rise_vel()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+         else
+            call ve%get_max(vf%VF)
+         end if
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -424,10 +429,17 @@ contains
          scfile=monitor(ve%cfg%amRoot,'scalar')
          call scfile%add_column(time%n,'Timestep number')
          call scfile%add_column(time%t,'Time')
-         do nsc=1,ve%nscalar
-            call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_min')
-            call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_max')
-         end do
+         if (stabilization) then
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+            end do
+         else
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_min')
+               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_max')
+            end do
+         end if
          call scfile%write()
       end block create_monitor
 
@@ -673,6 +685,11 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+         else
+            call ve%get_max(vf%VF)
+         end if
          call rise_vel()
          call mfile%write()
          call cflfile%write()
