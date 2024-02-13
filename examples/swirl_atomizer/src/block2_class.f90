@@ -1,18 +1,20 @@
 !> Definition for block 2 simulation: swirl atomizer
 module block2_class
-   use precision,         only: WP
-   use geometry,          only: Dout,Din
-   use config_class,      only: config
-   use iterator_class,    only: iterator
-   use hypre_str_class,   only: hypre_str
-   use ddadi_class,       only: ddadi
-   use tpns_class,        only: tpns
-   use vfs_class,         only: vfs
-   use timetracker_class, only: timetracker
-   use ensight_class,     only: ensight
-   use surfmesh_class,    only: surfmesh
-   use event_class,       only: event
-   use monitor_class,     only: monitor
+   use precision,          only: WP
+   use geometry,           only: Dout,Din
+   use config_class,       only: config
+   use iterator_class,     only: iterator
+   use hypre_str_class,    only: hypre_str
+   use ddadi_class,        only: ddadi
+   use tpns_class,         only: tpns
+   use vfs_class,          only: vfs
+   use timetracker_class,  only: timetracker
+   use ensight_class,      only: ensight
+   use surfmesh_class,     only: surfmesh
+   use event_class,        only: event
+   use monitor_class,      only: monitor
+   use film_class,         only: film
+   use transfermodel_class,only: transfermodels
    implicit none
    private
 
@@ -25,11 +27,13 @@ module block2_class
       type(ddadi)            :: vs                     !< DDAI implicit solver
       type(tpns)             :: fs                     !< Two phase incompressible flow solver
       type(vfs)              :: vf                     !< VF solve
+      type(film)             :: fm
+      type(transfermodels)   :: tm
       type(timetracker)      :: time                   !< Time tracker
       type(surfmesh)         :: smesh                  !< Surfmesh                                       
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
-      type(monitor)          :: mfile,cflfile          !< Monitor files
+      type(monitor)          :: mfile,cflfile,filmfile !< Monitor files
       type(event)            :: ppevt                  !< Event for post-processing
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
@@ -183,7 +187,7 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call b%vf%initialize(cfg=b%cfg,reconstruction_method=lvira,name='VOF')
+         call b%vf%initialize(cfg=b%cfg,reconstruction_method=r2p,name='VOF')
          ! Set full domain to gas
          do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
             do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
@@ -280,8 +284,6 @@ contains
 			! Setup the solver
 			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
-
-      print *, '3'
       
       ! Initialize our velocity field 
       initialize_velocity: block
@@ -299,29 +301,35 @@ contains
          call b%fs%get_div()
       end block initialize_velocity
 
-      print *, '4'
+      ! Create a film model
+      create_transfer_model: block
+         use param, only: param_read
+         real(WP) :: edgeint
+         call b%fm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs)
+         call b%tm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs,lp=b%lp)
+         b%burst=merge(1,0,b%tm%burst)
+      end block create_transfer_model
+
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         b%smesh=surfmesh(nvar=5,name='plic')
-         ! b%smesh=surfmesh(nvar=1,name='plic')
+         b%smesh=surfmesh(nvar=9,name='plic')
          b%smesh%varname(1)='nplane'
-         ! b%smesh%varname(2)='curv'
-         ! b%smesh%varname(3)='edge_sensor'
-         ! b%smesh%varname(4)='thin_sensor'
-         ! b%smesh%varname(5)='thickness'
+         b%smesh%varname(2)='curv'
+         b%smesh%varname(3)='edge_sensor'
+         b%smesh%varname(4)='thin_sensor'
+         b%smesh%varname(5)='thickness'
+         b%smesh%varname(6)='id'
+         b%smesh%varname(7)='struct_type'
+         b%smesh%varname(8)='struct_thickness'
+         b%smesh%varname(9)='rank'
          ! Transfer polygons to smesh
          call b%vf%update_surfmesh(b%smesh)
          ! Also populate nplane variable
          b%smesh%var(1,:)=1.0_WP
-         ! Initalize variables to 0
-         ! b%smesh%var(2,:)=0.0_WP
-         ! b%smesh%var(3,:)=0.0_WP
-         ! b%smesh%var(4,:)=0.0_WP
-         ! b%smesh%var(5,:)=0.0_WP
          np=0
          do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
             do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -329,10 +337,14 @@ contains
                   do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-                        ! b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
-                        ! b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
-                        ! b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
-                        ! b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                        b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
+                        b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
+                        b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
+                        b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                        b%smesh%var(6,np)=real(b%tm%cc%id(i,j,k),WP)
+                        b%smesh%var(7,np)=real(b%tm%cc%struct_type(i,j,k),WP)
+                        b%smesh%var(8,np)=b%tm%cc%struct_thickness(i,j,k)
+                        b%smesh%var(9,np)=b%cfg%rank
                      end if
                   end do
                end do
@@ -340,7 +352,6 @@ contains
          end do
       end block create_smesh
 
-      print *, '5'
       
       ! Add Ensight output
       create_ensight: block
@@ -359,7 +370,6 @@ contains
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
 
-      print *, '6'
 
       ! Create a monitor file
       create_monitor: block
@@ -398,9 +408,16 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
+         ! Create film thickness monitor
+         this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
+         call this%filmfile%add_column(this%time%n,'Timestep number')
+         call this%filmfile%add_column(b%time%t,'Time')
+         call this%filmfile%add_column(b%tm%min_thickness,'Min thickness')
+         call this%filmfile%add_column(b%tm%film_volume,'Largest Film volume')
+         call this%filmfile%add_column(b%tm%film_ratio,'Vb/V0')
+         call this%filmfile%write()
       end block create_monitor
 
-      print *, '7'
       
    end subroutine init
    
@@ -541,11 +558,6 @@ contains
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
             b%smesh%var(1,:)=1.0_WP
-            ! Initalize variables to 0
-            ! b%smesh%var(2,:)=0.0_WP
-            ! b%smesh%var(3,:)=0.0_WP
-            ! b%smesh%var(4,:)=0.0_WP
-            ! b%smesh%var(5,:)=0.0_WP
             np=0
             do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
                do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
@@ -553,11 +565,15 @@ contains
                      do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
                         if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1
-                           b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-                           ! b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
-                           ! b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
-                           ! b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
-                           ! b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                           np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
+                           b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
+                           b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
+                           b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
+                           b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                           b%smesh%var(6,np)=real(b%tm%cc%id(i,j,k),WP)
+                           b%smesh%var(7,np)=real(b%tm%cc%struct_type(i,j,k),WP)
+                           b%smesh%var(8,np)=b%tm%cc%struct_thickness(i,j,k)
+                           b%smesh%var(9,np)=b%cfg%rank
                         end if
                      end do
                   end do

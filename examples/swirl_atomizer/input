@@ -40,19 +40,14 @@ Gas dynamic viscosity       : 1e-5
 Gas density                 : 1e-3
 Surface tension coefficient : 0.001
 
-# Non-Newtonian modeling
-Carreau powerlaw :              1.0
-Polymer viscosity :             0
-Polymer relaxation time :       1
-Maximum polymer extensibility : 10
 
 # Time integration
 1 Max timestep size : 0.01
 2 Max timestep size : 4e-3
 3 Max timestep size : 4e-2
 Max cfl number      : 0.5
-Max time            : 1
-Transistion         : 0.1
+Max time            : 100
+Transistion         : 100
 
 # Pressure solver
 Pressure tolerance : 1e-5
