@@ -32,6 +32,7 @@ Polymer viscosity :             1.483
 Polymer relaxation time :       0.203        
 Extensional viscosity parameter : 0.05
 Affine parameter                : 0.12
+Maximum polymer extensibility : 10
 
 # Time integration
 Max timestep size : 2e-4
