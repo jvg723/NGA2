@@ -262,7 +262,7 @@ contains
          end if
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=gmres_pfmg,nst=7)
-         ps%maxlevel=12
+         ! ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
@@ -286,7 +286,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=fenep,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -564,6 +564,7 @@ contains
                allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                ! Calculate polymer stress for a given model
+               stress=0.0_WP
                if (stabilization) then !< Build stress tensor from reconstructed C
                   select case (ve%model)
                   case (oldroydb)
@@ -622,6 +623,20 @@ contains
                            end do 
                         end do
                      end do
+                  case (eptt,lptt)
+                     coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
+                     do k=cfg%kmino_,cfg%kmaxo_
+                        do j=cfg%jmino_,cfg%jmaxo_
+                           do i=cfg%imino_,cfg%imaxo_
+                              stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                              stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                              stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                              stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                              stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                              stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                           end do
+                        end do
+                     end do
                   end select 
                else
                   select case (ve%model)
@@ -649,51 +664,6 @@ contains
                      end do
                   end select
                end if
-               
-               
-               ! select case (ve%model)
-               ! case (oldroydb,fenecr,fenep)
-               !    ! Calculate the polymer stress
-               !    if (stabilization) then 
-               !       call ve%get_relax_log(stress)
-               !    else
-               !       call ve%get_relax(stress,time%dt)
-               !    end if
-               !    ! Build liquid stress tensor
-               !    do nsc=1,6
-               !       stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
-               !    end do
-               ! case (eptt,lptt)
-               !    coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
-               !    ! Calculate the polymer stress
-               !    if (stabilization) then 
-               !       do k=cfg%kmino_,cfg%kmaxo_
-               !          do j=cfg%jmino_,cfg%jmaxo_
-               !             do i=cfg%imino_,cfg%imaxo_
-               !                stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-               !                stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-               !                stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-               !                stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-               !                stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-               !                stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-               !             end do
-               !          end do
-               !       end do
-               !    else
-               !       do k=cfg%kmino_,cfg%kmaxo_
-               !          do j=cfg%jmino_,cfg%jmaxo_
-               !             do i=cfg%imino_,cfg%imaxo_
-               !                stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-               !                stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,2)-0.0_WP) !> xy tensor component
-               !                stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,3)-0.0_WP) !> xz tensor component
-               !                stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-               !                stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,5)-0.0_WP) !> yz tensor component
-               !                stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,6)-1.0_WP) !> zz tensor component
-               !             end do
-               !          end do
-               !       end do
-               !    end if
-               ! end select
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1
                   do j=cfg%jmin_,cfg%jmax_+1
