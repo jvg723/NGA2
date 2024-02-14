@@ -232,7 +232,8 @@ contains
             Ycent_ref=center(2)
             Vrise_ref=0.0_WP
             ! Controller parameters
-            G=0.021_WP !< Appears to work better for bubble volume = 70 mm^3 at resolution of 128x128x1 in 2D
+            ! G=0.021_WP !< Appears to work better for bubble volume = 70 mm^3 at resolution of 128x128x1 in 2D
+            G=0.5_WP
             ti=time%dtmax
          end block prepare_controller
       end if
@@ -682,15 +683,17 @@ contains
             call ens_out%write_data(time%t)
          end if
 
+         ! Get rise velocity
+         call rise_vel()
+
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
-         ! if (stabilization) then
-         !    call ve%get_max_reconstructed(vf%VF)
-         ! else
-         !    call ve%get_max(vf%VF)
-         ! end if
-         call rise_vel()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+         else
+            call ve%get_max(vf%VF)
+         end if
          call mfile%write()
          call cflfile%write()
          call bubblefile%write()
