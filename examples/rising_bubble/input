@@ -8,11 +8,11 @@ Moving domain : .true.
 Stabilization : .true.
 
 # Mesh definition
-Lx :	0.06132
-Ly :	0.06132
-Lz :	0.0006132
-nx :	128
-ny :	128
+Lx :	0.04088
+Ly :	0.04088
+Lz :	0.00004088
+nx :	256
+ny :	256
 nz :	1
 
 # Fluid properties
@@ -36,7 +36,7 @@ Affine parameter                : 0.12
 # Time integration
 Max timestep size : 2e-4
 Max cfl number :    1.0
-Max time :          0.5
+Max time :          0.3
 
 # Pressure solver
 Pressure tolerance : 1e-4
