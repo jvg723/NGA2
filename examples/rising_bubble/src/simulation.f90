@@ -1,7 +1,7 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,            only: WP
-   use geometry,             only: cfg,moving_domain
+   use geometry,             only: cfg
    use hypre_str_class,      only: hypre_str
    use ddadi_class,          only: ddadi
    use tpns_class,           only: tpns
@@ -40,6 +40,7 @@ module simulation
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
+   logical :: moving_domain
    real(WP), dimension(3) :: center,gravity
    real(WP) :: volume,radius,Ycent,Vrise
    real(WP) :: Vin,Vin_old,Vrise_ref,Ycent_ref,G,ti
@@ -138,6 +139,10 @@ contains
       use param, only: param_read
       implicit none
       
+
+      ! Check first if we use a moving domain
+      call param_read('Moving domain',moving_domain,default=.false.)
+      
       
       ! Allocate work arrays
       allocate_work_arrays: block
@@ -178,8 +183,7 @@ contains
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF',store_detailed_flux=.true.)
          ! Initialize a bubble
          call param_read('Bubble position',center,default=[0.0_WP,0.0_WP,0.0_WP])
-         call param_read('Bubble volume',radius)
-         radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)
+         call param_read('Bubble volume',radius); radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
