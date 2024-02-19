@@ -184,7 +184,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver with LVIRA
-         vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
+         vf=vfs(cfg=cfg,reconstruction_method=r2p,name='VOF')
          ! Create a VOF solver with R2P
          !vf=vfs(cfg=cfg,reconstruction_method=r2p,name='VOF')
          !vf%VFflot =1.0e-4_WP !< Enables flotsam removal
@@ -686,8 +686,8 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
          
-         ! Perform volume-fraction-to-droplet transfer
-         call transfer_vf_to_drops()
+         ! ! Perform volume-fraction-to-droplet transfer
+         ! call transfer_vf_to_drops()
          
          ! Output to ensight
          if (ens_evt%occurs()) then

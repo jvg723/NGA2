@@ -218,7 +218,7 @@ contains
          integer, parameter :: amr_ref_lvl=5
          real(WP) :: start, finish
          ! Create a VOF solver with r2p reconstruction
-         call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=elvira,name='VOF',store_detailed_flux=.true.)
          ! Initialize droplet parameters
          call param_read('Droplet diameter',radius); radius=0.5_WP*radius
          call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
@@ -344,7 +344,7 @@ contains
                do i=vf%cfg%imin_,vf%cfg%imax_
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                        np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
                      end if
                   end do
                end do
@@ -365,7 +365,7 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
-         call ens_out%add_scalar('id',ccl%id)
+         call ens_out%add_scalar('id',strack%id)
          call ens_out%add_surface('vofplic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -578,8 +578,8 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
          
-         ! Perform CCL
-         call ccl%build(make_label,same_label)
+         ! Perform strack
+         call strack%build(make_label,same_label)
          
          ! Output to ensight
          if (ens_evt%occurs()) then
@@ -597,7 +597,7 @@ contains
                      do i=vf%cfg%imin_,vf%cfg%imax_
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                              np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                              np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
                            end if
                         end do
                      end do
