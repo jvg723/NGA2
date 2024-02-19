@@ -236,7 +236,6 @@ contains
             Ycent_ref=center(2)
             Vrise_ref=0.0_WP
             ! Controller parameters
-            ! G=0.021_WP !< Appears to work better for bubble volume = 70 mm^3 at resolution of 128x128x1 in 2D
             G=0.5_WP
             ti=time%dtmax
          end block prepare_controller
@@ -290,7 +289,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -488,13 +487,14 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
+
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
             integer :: i,j,k,nsc
             ! Add source terms for constitutive model
             if (stabilization) then 
                call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
-               call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
+               ! call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
             else
                call ve%get_CgradU(gradU,SCtmp);    resSC=SCtmp
                call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
@@ -518,6 +518,13 @@ contains
             call ve%get_eigensystem()
             ! Reconstruct conformation tensor
             call ve%reconstruct_conformation()
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec()
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation()
          end if
 
          ! Remember old VOF

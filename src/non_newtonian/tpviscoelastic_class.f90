@@ -41,10 +41,13 @@ module tpviscoelastic_class
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
       procedure :: get_relax                               !< Calculate relaxation term
+      procedure :: get_relax_analytical                    !< Calculate relaxation term based on a semi-analytical integration 
       procedure :: get_CgradU_log                          !< Calculate streching and distortion term for log-conformation tensor
       procedure :: get_relax_log                           !< Calculate relaxation term for log-conformation tensor
       procedure :: get_eigensystem                         !< Calculate eigenvalues and eigenvectors for conformation tensor
+      procedure :: get_eigensystem_SCrec                   !< Calculate eigenvalues and eigenvectors for conformation tensor
       procedure :: reconstruct_conformation                !< Reconstruct conformation tensor for decomposed eigenvalues and eigenvectors
+      procedure :: reconstruct_log_conformation            !< Reconstruct log conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: get_max_reconstructed                   !< Calculate maximum and integral field value for reconstructed C field
    end type tpviscoelastic
    
@@ -306,6 +309,35 @@ contains
       end select
    end subroutine get_relax
 
+   !> Add viscoelastic relaxation source based on semi analtical integration
+   subroutine get_relax_analytical(this,dt)
+      use messager, only: die
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), intent(in) :: dt
+      integer :: i,j,k
+      real(WP) :: coeff
+      select case (this%model)
+      case (oldroydb) ! Add relaxation source for Oldroyd-B (1/t_relax)(C-I)
+         coeff=-1.00_WP*(dt/this%trelax)  
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
+                  this%SCrec(i,j,k,2)=this%SCrec(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
+                  this%SCrec(i,j,k,3)=this%SCrec(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
+                  this%SCrec(i,j,k,4)=this%SCrec(i,j,k,4)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< yy tensor component
+                  this%SCrec(i,j,k,5)=this%SCrec(i,j,k,5)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< yz tensor component
+                  this%SCrec(i,j,k,6)=this%SCrec(i,j,k,6)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< zz tensor component
+               end do
+            end do
+         end do
+      case default
+         call die('[tpviscoelastic get_relax] Unknown viscoelastic model selected')
+      end select
+   end subroutine get_relax_analytical
+
 
    !> Add viscoelastic relaxation source using log-conformation stabilization 
    !> Assumes scalar being transported is ln(C)
@@ -373,7 +405,6 @@ contains
                   resSC(i,j,k,4)=coeff*(this%eigenvec(2,1,i,j,k)**2                      *((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(2,2,i,j,k)**2                      *((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(2,3,i,j,k)**2                      *((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< yy tensor component
                   resSC(i,j,k,5)=coeff*(this%eigenvec(2,1,i,j,k)*this%eigenvec(3,1,i,j,k)*((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(2,2,i,j,k)*this%eigenvec(3,2,i,j,k)*((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(2,3,i,j,k)*this%eigenvec(3,3,i,j,k)*((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< yz tensor component
                   resSC(i,j,k,6)=coeff*(this%eigenvec(3,1,i,j,k)**2                      *((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(3,2,i,j,k)**2                      *((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(3,3,i,j,k)**2                      *((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< zz tensor component
-               
                end do
             end do
          end do
@@ -458,6 +489,35 @@ contains
       end do
    end subroutine get_eigensystem
 
+   !> Calculate the this%eigenval and eigenvectors of the conformation tensor for the whole domain
+   !> Assumes scalar being transported is C
+   subroutine get_eigensystem_SCrec(this)
+      use mathtools, only: eigensolve3
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      integer :: i,j,k
+      real(WP), dimension(3,3) :: A
+      ! First ensure storage is allocated
+      if (.not.allocated(this%eigenval)) allocate(this%eigenval    (1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      if (.not.allocated(this%eigenvec)) allocate(this%eigenvec(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      ! Empty storage
+      this%eigenval=0.0_WP
+      this%eigenvec=0.0_WP
+      ! Loop over full domain
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Form local matrix to diagonalize
+               A(1,1)=this%SCrec(i,j,k,1); A(1,2)=this%SCrec(i,j,k,2); A(1,3)=this%SCrec(i,j,k,3)
+               A(2,1)=this%SCrec(i,j,k,2); A(2,2)=this%SCrec(i,j,k,4); A(2,3)=this%SCrec(i,j,k,5)
+               A(3,1)=this%SCrec(i,j,k,3); A(3,2)=this%SCrec(i,j,k,5); A(3,3)=this%SCrec(i,j,k,6)
+               ! Diagonalize it
+               call eigensolve3(A,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
+            end do
+         end do
+      end do
+   end subroutine get_eigensystem_SCrec
+
    !> Reconstruct the conformation tensor for its decomposed eigenvalues and eigenvectors
    subroutine reconstruct_conformation(this)
       implicit none
@@ -488,6 +548,36 @@ contains
          end do
       end do
    end subroutine reconstruct_conformation
+
+   !> Reconstruct the log conformation tensor for its decomposed eigenvalues and eigenvectors
+   subroutine reconstruct_log_conformation(this)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      integer :: i,j,k
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Skip non-solved cells
+               if (this%mask(i,j,k).ne.0) cycle
+               ! Converteigenvalues into log
+               this%eigenval(:,i,j,k)=log(this%eigenval(:,i,j,k))
+               ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
+               !>xx tensor component
+               this%SC(i,j,k,1)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2
+               !>xy tensor component
+               this%SC(i,j,k,2)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)*this%eigenvec(2,1,i,j,k)+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)*this%eigenvec(2,2,i,j,k)+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)*this%eigenvec(2,3,i,j,k)
+               !>xz tensor component
+               this%SC(i,j,k,3)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)*this%eigenvec(3,1,i,j,k)+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)*this%eigenvec(3,2,i,j,k)+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)*this%eigenvec(3,3,i,j,k)
+               !>yy tensor component
+               this%SC(i,j,k,4)=this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)**2
+               !>yz tensor component
+               this%SC(i,j,k,5)=this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)*this%eigenvec(3,1,i,j,k)+this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)*this%eigenvec(3,2,i,j,k)+this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)*this%eigenvec(3,3,i,j,k)
+               !>zz tensor component
+               this%SC(i,j,k,6)=this%eigenval(1,i,j,k)*this%eigenvec(3,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(3,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(3,3,i,j,k)**2
+            end do
+         end do
+      end do
+   end subroutine reconstruct_log_conformation
 
    !> Calculate the min, max, and int of our reconstructed C field
    subroutine get_max_reconstructed(this,VF)
