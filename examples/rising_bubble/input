@@ -8,9 +8,9 @@ Moving domain : .true.
 Stabilization : .true.
 
 # Mesh definition
-Lx :	0.02555
-Ly :	0.02555
-Lz :	0.02555
+Lx :	0.04088
+Ly :	0.04088
+Lz :	0.04088
 ny :	64
 nx :	64
 nz :	64

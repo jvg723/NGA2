@@ -289,7 +289,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -487,6 +487,8 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
+         ! Remember old reconstructed conformation tensor
+         ve%SCrecold=ve%SCrec
 
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block

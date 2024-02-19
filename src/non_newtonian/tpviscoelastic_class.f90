@@ -35,6 +35,7 @@ module tpviscoelastic_class
       real(WP), dimension(:,:,:,:,:), allocatable :: eigenvec  !< Field of eigenvectors of the conformation tensor
       ! Storage for reconstructed conformation tensor
       real(WP), dimension(:,:,:,:),   allocatable ::SCrec
+      real(WP), dimension(:,:,:,:),   allocatable ::SCrecold
       ! Monitoring quantities
       real(WP), dimension(:), allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
    contains
@@ -316,7 +317,7 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       real(WP), intent(in) :: dt
       integer :: i,j,k
-      real(WP) :: coeff
+      real(WP) :: f,coeff
       select case (this%model)
       case (oldroydb) ! Add relaxation source for Oldroyd-B (1/t_relax)(C-I)
          coeff=-1.00_WP*(dt/this%trelax)  
@@ -324,6 +325,22 @@ contains
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
+                  this%SCrec(i,j,k,2)=this%SCrec(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
+                  this%SCrec(i,j,k,3)=this%SCrec(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
+                  this%SCrec(i,j,k,4)=this%SCrec(i,j,k,4)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< yy tensor component
+                  this%SCrec(i,j,k,5)=this%SCrec(i,j,k,5)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< yz tensor component
+                  this%SCrec(i,j,k,6)=this%SCrec(i,j,k,6)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< zz tensor component
+               end do
+            end do
+         end do
+      case (eptt) ! Add relaxation source for ePTT model
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCrecold(i,j,k,1)+this%SCrecold(i,j,k,4)+this%SCrecold(i,j,k,6))-3.0_WP))
+                  coeff=-1.00_WP*((f*dt)/this%trelax)    
                   this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
                   this%SCrec(i,j,k,2)=this%SCrec(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
                   this%SCrec(i,j,k,3)=this%SCrec(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
@@ -524,7 +541,8 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       integer :: i,j,k
       ! First ensure storage is allocated
-      if (.not.allocated(this%SCrec)) allocate(this%SCrec(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)) 
+      if (.not.allocated(this%SCrec))    allocate(this%SCrec(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)) 
+      if (.not.allocated(this%SCrecold)) allocate(this%SCrecold(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)) 
       this%SCrec=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
