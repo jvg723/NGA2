@@ -8,9 +8,9 @@ Moving domain : .true.
 Stabilization : .true.
 
 # Mesh definition
-Lx :	0.03088
-Ly :	0.03088
-Lz :	0.03088
+Lx :	0.06132
+Ly :	0.06132
+Lz :	0.06132
 ny :	64
 nx :	64
 nz :	64
@@ -24,7 +24,7 @@ Gas density :                 1.226
 Surface tension coefficient : 0.07555
 
 # Bubble definition
-Bubble volume :   3e-8   # in m^3
+Bubble volume :   7e-8   # in m^3
 Bubble position : 0 0 0
 
 # Non-Newtonian modeling                      
