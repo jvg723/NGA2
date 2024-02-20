@@ -487,18 +487,20 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
-         ! ! Remember old reconstructed conformation tensor
-         ! if (stabilization) then 
-         ! ve%SCrecold=ve%SCrec
-         ! end if
+         ! Remember old reconstructed conformation tensor
+         if (stabilization) then 
+         ve%SCrecold=ve%SCrec
+         end if
 
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
             integer :: i,j,k,nsc
             ! Add source terms for constitutive model
             if (stabilization) then 
+               ! Update eigenvalues and eigenvectors
+               call ve%get_eigensystem()
                call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
-               call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
+               ! call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
             else
                call ve%get_CgradU(gradU,SCtmp);    resSC=SCtmp
                call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
@@ -526,12 +528,12 @@ contains
             ! Reconstruct conformation tensor
             call ve%reconstruct_conformation()
             ! Add in relaxtion source from semi-anlaytical integration
-            ! call ve%get_relax_analytical(time%dt)
-            ! ! Reconstruct lnC for next time step
-            ! !> get eigenvalues and eigenvectors based on reconstructed C
-            ! call ve%get_eigensystem_SCrec()
-            ! !> Reconstruct lnC from eigenvalues and eigenvectors
-            ! call ve%reconstruct_log_conformation()
+            call ve%get_relax_analytical(time%dt)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec()
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation()
          end if
 
          ! Remember old VOF
