@@ -244,7 +244,7 @@ contains
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
-         use hypre_str_class, only: pcg_pfmg2,gmres_pfmg
+         use hypre_str_class, only: pcg_pfmg2
          use tpns_class,      only: clipped_neumann,dirichlet
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
@@ -264,8 +264,8 @@ contains
             call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
          end if
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=gmres_pfmg,nst=7)
-         ! ps%maxlevel=12
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
@@ -326,6 +326,8 @@ contains
                   end do
                end do
             end do
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem()
          else
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
@@ -339,8 +341,6 @@ contains
                end do
             end do
          end if
-         ! Get eigenvalues and eigenvectors
-         call ve%get_eigensystem()
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -448,7 +448,7 @@ contains
          end if
          call scfile%write()
       end block create_monitor
-
+        
       
    end subroutine simulation_init
    
@@ -487,8 +487,10 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
-         ! Remember old reconstructed conformation tensor
-         ve%SCrecold=ve%SCrec
+         ! ! Remember old reconstructed conformation tensor
+         ! if (stabilization) then 
+         ! ve%SCrecold=ve%SCrec
+         ! end if
 
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
@@ -496,7 +498,7 @@ contains
             ! Add source terms for constitutive model
             if (stabilization) then 
                call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
-               ! call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
+               call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
             else
                call ve%get_CgradU(gradU,SCtmp);    resSC=SCtmp
                call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
@@ -514,6 +516,9 @@ contains
             ! Apply boundary conditions
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
+
+         ! ! Add in relaxtion source from semi-anlaytical integration
+         ! call ve%get_relax_analytical(time%dt)
          
          if (stabilization) then 
             ! Update eigenvalues and eigenvectors
@@ -521,12 +526,12 @@ contains
             ! Reconstruct conformation tensor
             call ve%reconstruct_conformation()
             ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt)
-            ! Reconstruct lnC for next time step
-            !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec()
-            !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation()
+            ! call ve%get_relax_analytical(time%dt)
+            ! ! Reconstruct lnC for next time step
+            ! !> get eigenvalues and eigenvectors based on reconstructed C
+            ! call ve%get_eigensystem_SCrec()
+            ! !> Reconstruct lnC from eigenvalues and eigenvectors
+            ! call ve%reconstruct_log_conformation()
          end if
 
          ! Remember old VOF

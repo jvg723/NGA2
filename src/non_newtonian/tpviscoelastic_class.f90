@@ -339,6 +339,14 @@ contains
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  ! f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCold(i,j,k,1)+this%SCold(i,j,k,4)+this%SCold(i,j,k,6))-3.0_WP))
+                  ! coeff=-1.00_WP*((f*dt)/this%trelax)    
+                  ! this%SC(i,j,k,1)=this%SC(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
+                  ! this%SC(i,j,k,2)=this%SC(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
+                  ! this%SC(i,j,k,3)=this%SC(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
+                  ! this%SC(i,j,k,4)=this%SC(i,j,k,4)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< yy tensor component
+                  ! this%SC(i,j,k,5)=this%SC(i,j,k,5)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< yz tensor component
+                  ! this%SC(i,j,k,6)=this%SC(i,j,k,6)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< zz tensor component
                   f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCrecold(i,j,k,1)+this%SCrecold(i,j,k,4)+this%SCrecold(i,j,k,6))-3.0_WP))
                   coeff=-1.00_WP*((f*dt)/this%trelax)    
                   this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
