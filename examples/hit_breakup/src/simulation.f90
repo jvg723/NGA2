@@ -401,7 +401,7 @@ contains
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
                do i=vf%cfg%imin_,vf%cfg%imax_
-                  trC=0.0_WP; trC=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,3)+ve%SCrec(i,j,k,3)
+                  trC=0.0_WP; trC=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
@@ -629,11 +629,11 @@ contains
 
             ! Add polymer stress term
             polymer_stress: block
-               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt,fenep
+               use tpviscoelastic_class, only: oldroydb
                integer :: i,j,k,nsc
                real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
                real(WP), dimension(:,:,:,:), allocatable :: stress
-               real(WP) :: coeff,trace
+               real(WP) :: coeff
                ! Allocate work arrays
                allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
                allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -784,11 +784,11 @@ contains
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
                      do i=vf%cfg%imin_,vf%cfg%imax_
-                        trC=0.0_WP; trC=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,3)+ve%SCrec(i,j,k,3)
+                        trC=0.0_WP; trC=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                               np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                              smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,3)+ve%SCrec(i,j,k,3)
+                              smesh%var(2,np)=trC
                               smesh%var(3,np)=ve%SCrec(i,j,k,1)
                               smesh%var(4,np)=ve%SCrec(i,j,k,2)
                               smesh%var(5,np)=ve%SCrec(i,j,k,3)
