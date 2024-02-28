@@ -5,6 +5,7 @@ module simulation
    use fft3d_class,       only: fft3d
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
+   use tpviscoelastic_class, only: tpviscoelastic
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
@@ -15,10 +16,11 @@ module simulation
    private
    
    !> Single-phase incompressible flow solver, pressure and implicit solvers, and a time tracker
-   type(fft3d),       public :: ps
-   type(tpns),        public :: fs
-   type(timetracker), public :: time
-   type(vfs),         public :: vf
+   type(fft3d),          public :: ps
+   type(tpns),           public :: fs
+   type(timetracker),    public :: time
+   type(vfs),            public :: vf
+   type(tpviscoelastic), public :: ve
 
    !> Include structure tracker
    type(stracker) :: strack
@@ -29,14 +31,15 @@ module simulation
    type(surfmesh) :: smesh
   
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,hitfile,cvgfile
+   type(monitor) :: mfile,cflfile,hitfile,cvgfile,scfile
    
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: SR
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Fluid, forcing, and particle parameters
@@ -53,6 +56,9 @@ module simulation
    real(WP) :: Re_L,Re_lambda
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
+
+   !> Check for stabilization 
+   logical :: stabilization 
    
 
 contains
@@ -147,6 +153,8 @@ contains
          allocate(Vi           (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi           (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(SR       (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resSC    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SCtmp    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
@@ -322,6 +330,41 @@ contains
          ! Compute turbulence stats
          call compute_stats()
       end block initialize_velocity
+
+      ! Create a viscoleastic model with log conformation stablization method
+      create_viscoelastic: block
+         use tpviscoelastic_class, only: oldroydb
+         integer :: i,j,k
+         ! Create viscoelastic model solver
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         ! Relaxation time for polymer
+         call param_read('Polymer relaxation time',ve%trelax)
+         ! Polymer viscosity
+         call param_read('Viscosity ratio',ve%visc_p); ve%visc_p=fs%visc_l*((1.00_WP-ve%visc_p)/ve%visc_p)
+         ! Setup without an implicit solver
+         call ve%setup()
+         ! Check first if we use stabilization
+         call param_read('Stabilization',stabilization,default=.false.)
+         ! Get eigenvalues and eigenvectors
+         call ve%get_eigensystem()
+         ! Reconstruct conformation tensor
+         call ve%reconstruct_conformation()
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
+                     ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                     ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                     ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                  end if
+               end do
+            end do
+         end do
+         ! Get eigenvalues and eigenvectors
+         call ve%get_eigensystem()
+         ! Apply boundary conditions
+         call ve%apply_bcond(time%t,time%dt)
+      end block create_viscoelastic
       
       ! Create structure tracker
       create_strack: block
@@ -332,20 +375,43 @@ contains
       create_smesh: block
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
+         real (WP) :: trC
          ! Include an extra variable for number of planes
-         smesh=surfmesh(nvar=1,name='plic')
+         smesh=surfmesh(nvar=8,name='plic')
          smesh%varname(1)='id'
+         smesh%varname(2)='trC'
+         smesh%varname(3)='Cxx'
+         smesh%varname(4)='Cxy'
+         smesh%varname(5)='Cxz'
+         smesh%varname(6)='Cyy'
+         smesh%varname(7)='Cyz'
+         smesh%varname(8)='Czz'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
          smesh%var(1,:)=0.0_WP
+         smesh%var(2,:)=0.0_WP
+         smesh%var(3,:)=0.0_WP
+         smesh%var(4,:)=0.0_WP
+         smesh%var(5,:)=0.0_WP
+         smesh%var(6,:)=0.0_WP
+         smesh%var(7,:)=0.0_WP
+         smesh%var(8,:)=0.0_WP
          np=0
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
                do i=vf%cfg%imin_,vf%cfg%imax_
+                  trC=0.0_WP; trC=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,3)+ve%SCrec(i,j,k,3)
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                        smesh%var(2,np)=trC
+                        smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                        smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                        smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                        smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                        smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                        smesh%var(8,np)=ve%SCrec(i,j,k,6)
                      end if
                   end do
                end do
@@ -355,6 +421,7 @@ contains
       
       ! Add Ensight output
       create_ensight: block
+         integer :: nsc
          ! Create Ensight output from cfg
          ens_out=ensight(cfg=cfg,name='HIT')
          ! Create event for Ensight output
@@ -368,16 +435,21 @@ contains
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('id',strack%id)
          call ens_out%add_surface('vofplic',smesh)
+         do nsc=1,ve%nscalar
+            call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+         end do
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
       
       ! Create a monitor file
       create_monitor: block
+         integer :: nsc
          ! Prepare some info about fields
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
+         call ve%get_max_reconstructed(vf%VF)
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -433,6 +505,15 @@ contains
          call cvgfile%add_column(dx_eta,'dx/eta')
          call cvgfile%add_column(ell_Lx,'ell/Lx')
          call cvgfile%write()
+         ! Create scalar monitor
+         scfile=monitor(ve%cfg%amRoot,'scalar')
+         call scfile%add_column(time%n,'Timestep number')
+         call scfile%add_column(time%t,'Time')
+         do nsc=1,ve%nscalar
+            call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+            call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+         end do
+         call scfile%write()
       end block create_monitor
       
    end subroutine simulation_init
@@ -475,6 +556,45 @@ contains
                end block droplet_injection
             end if
          end if
+
+         ! Calculate grad(U)
+         call fs%get_gradU(gradU)
+
+         ! Remember old reconstructed conformation tensor
+            ve%SCrecold=ve%SCrec
+
+         ! Transport our liquid conformation tensor using log conformation
+         advance_scalar: block
+            integer :: i,j,k,nsc
+            ! Add source terms for constitutive model
+            ! Update eigenvalues and eigenvectors
+            call ve%get_eigensystem()
+            call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
+            ve%SC=ve%SC+time%dt*resSC
+            call ve%apply_bcond(time%t,time%dt)
+            ve%SCold=ve%SC
+            ! Explicit calculation of dSC/dt from scalar equation
+            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Update our scalars
+            do nsc=1,ve%nscalar
+               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+            end do
+            ! Apply boundary conditions
+            call ve%apply_bcond(time%t,time%dt)
+         end block advance_scalar
+
+         ! Update eigenvalues and eigenvectors
+         call ve%get_eigensystem()
+         ! Reconstruct conformation tensor
+         call ve%reconstruct_conformation()
+         ! Add in relaxtion source from semi-anlaytical integration
+         call ve%get_relax_analytical(time%dt)
+         ! Reconstruct lnC for next time step
+         !> get eigenvalues and eigenvectors based on reconstructed C
+         call ve%get_eigensystem_SCrec()
+         !> Reconstruct lnC from eigenvalues and eigenvectors
+         call ve%reconstruct_log_conformation()
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -506,6 +626,66 @@ contains
             
             ! Explicit calculation of drho*u/dt from NS
             call fs%get_dmomdt(resU,resV,resW)
+
+            ! Add polymer stress term
+            polymer_stress: block
+               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt,fenep
+               integer :: i,j,k,nsc
+               real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+               real(WP), dimension(:,:,:,:), allocatable :: stress
+               real(WP) :: coeff,trace
+               ! Allocate work arrays
+               allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+               allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               ! Calculate polymer stress for a given model
+               stress=0.0_WP
+               select case (ve%model)
+               case (oldroydb)
+                  coeff=ve%visc_p/ve%trelax
+                  do k=cfg%kmino_,cfg%kmaxo_
+                     do j=cfg%jmino_,cfg%jmaxo_
+                        do i=cfg%imino_,cfg%imaxo_
+                           stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                           stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                           stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                           stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                           stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                           stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                        end do
+                     end do
+                  end do
+               end select 
+               ! Interpolate tensor components to cell edges
+               do k=cfg%kmin_,cfg%kmax_+1
+                  do j=cfg%jmin_,cfg%jmax_+1
+                     do i=cfg%imin_,cfg%imax_+1
+                        Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+                        Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+                        Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+                     end do
+                  end do
+               end do
+               ! Add divergence of stress to residual
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                        &                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+                        &                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                        &                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+                        &                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+                        if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                        &                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+                        &                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+                     end do
+                  end do
+               end do
+               ! Clean up
+               deallocate(stress,Txy,Tyz,Tzx)
+            end block polymer_stress
             
             ! Assemble explicit residual
             resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
@@ -588,17 +768,33 @@ contains
             update_smesh: block
                use irl_fortran_interface
                integer :: i,j,k,nplane,np
+               real (WP) :: trC
                ! Transfer polygons to smesh
                call vf%update_surfmesh(smesh)
                ! Also populate id variable
                smesh%var(1,:)=0.0_WP
+               smesh%var(2,:)=0.0_WP
+               smesh%var(3,:)=0.0_WP
+               smesh%var(4,:)=0.0_WP
+               smesh%var(5,:)=0.0_WP
+               smesh%var(6,:)=0.0_WP
+               smesh%var(7,:)=0.0_WP
+               smesh%var(8,:)=0.0_WP
                np=0
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
                      do i=vf%cfg%imin_,vf%cfg%imax_
+                        trC=0.0_WP; trC=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,3)+ve%SCrec(i,j,k,3)
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                               np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                              smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,3)+ve%SCrec(i,j,k,3)
+                              smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                              smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                              smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                              smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                              smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                              smesh%var(8,np)=ve%SCrec(i,j,k,6)
                            end if
                         end do
                      end do
@@ -611,6 +807,7 @@ contains
          ! Perform and output monitoring
          call compute_stats()
          call fs%get_max()
+         call ve%get_max_reconstructed(vf%VF)
          call mfile%write()
          call cflfile%write()
          call hitfile%write()
@@ -690,6 +887,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU)
+      deallocate(resSC,SCtmp)
       
    end subroutine simulation_final
    

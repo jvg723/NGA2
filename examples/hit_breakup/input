@@ -11,6 +11,10 @@ Droplet injection time :  2                ! is multiplied by eddy turnover-time
 Weber number :            10
 Viscosity ratio :         1
 
+# Non-Newtonian modeling                      
+Viscosity ratio         : 0.5  
+Polymer relaxation time : 1.0 
+
 # Time integration
 Max timestep size : 5e-3
 Max cfl number :    0.9
