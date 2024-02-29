@@ -19,7 +19,7 @@ Target Re_lambda :     45
 Turbulence intensity : 0.019
 
 # Non-Newtonian modeling                      
-Viscosity ratio         : 0.02  
+Viscosity ratio         : 0.2  
 Polymer relaxation time : 0.2 
 
 # Time integration
