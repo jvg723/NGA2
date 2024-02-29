@@ -263,16 +263,19 @@ contains
          call this%ve%setup()
          ! Initialize C scalar fields
          !>Get eigenvalues and eigenvectors
-         call this%ve%get_eigensystem()
-         !>Reconstruct conformation tensor
-         call this%ve%reconstruct_conformation()
+         ! call this%ve%get_eigensystem()
+         ! !>Reconstruct conformation tensor
+         ! call this%ve%reconstruct_conformation()
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   if (this%vf%VF(i,j,k).gt.0.0_WP) then
-                     this%ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                     this%ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-                     this%ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     ! this%ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                     ! this%ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                     ! this%ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     this%ve%SC(i,j,k,1)=1.0_WP !< Cxx
+                     this%ve%SC(i,j,k,4)=1.0_WP !< Cyy
+                     this%ve%SC(i,j,k,6)=1.0_WP !< Czz
                   end if
                end do
             end do
@@ -327,13 +330,20 @@ contains
                         this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
                         this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
                         this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                        this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
-                        this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
-                        this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
-                        this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
-                        this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
-                        this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
-                        this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                        ! this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
+                        ! this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
+                        ! this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
+                        ! this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
+                        ! this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
+                        ! this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
+                        ! this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                        this%smesh%var(6,np)=this%ve%SC(i,j,k,1)+this%ve%SC(i,j,k,4)+this%ve%SC(i,j,k,6)
+                        this%smesh%var(7,np)=this%ve%SC(i,j,k,1)
+                        this%smesh%var(8,np)=this%ve%SC(i,j,k,2)
+                        this%smesh%var(9,np)=this%ve%SC(i,j,k,3)
+                        this%smesh%var(10,np)=this%ve%SC(i,j,k,4)
+                        this%smesh%var(11,np)=this%ve%SC(i,j,k,5)
+                        this%smesh%var(12,np)=this%ve%SC(i,j,k,6)
                      end if
                   end do
                end do
@@ -345,6 +355,7 @@ contains
       ! Add Ensight output
       create_ensight: block
          use param, only: param_read
+         integer :: nsc
          ! Create Ensight output from cfg
          this%ens_out=ensight(cfg=this%cfg,name='droplet')
          ! Create event for Ensight output
@@ -359,6 +370,10 @@ contains
          call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
          call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
+         do nsc=1,this%ve%nscalar
+            ! call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SCrec(:,:,:,nsc))
+            call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SC(:,:,:,nsc))
+         end do
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -370,7 +385,8 @@ contains
          call this%fs%get_cfl(this%time%dt,this%time%cfl)
          call this%fs%get_max()
          call this%vf%get_max()
-         call this%ve%get_max_reconstructed(this%vf%VF)
+         ! call this%ve%get_max_reconstructed(this%vf%VF)
+         call this%ve%get_max(this%vf%VF)
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -407,8 +423,10 @@ contains
          call this%scfile%add_column(this%time%n,'Timestep number')
          call this%scfile%add_column(this%time%t,'Time')
          do nsc=1,this%ve%nscalar
-            call this%scfile%add_column(this%ve%SCrecmin(nsc),trim(this%ve%SCname(nsc))//'_min')
-            call this%scfile%add_column(this%ve%SCrecmax(nsc),trim(this%ve%SCname(nsc))//'_max')
+            ! call this%scfile%add_column(this%ve%SCrecmin(nsc),trim(this%ve%SCname(nsc))//'_min')
+            ! call this%scfile%add_column(this%ve%SCrecmax(nsc),trim(this%ve%SCname(nsc))//'_max')
+            call this%scfile%add_column(this%ve%SCmin(nsc),trim(this%ve%SCname(nsc))//'_min')
+            call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
          end do
          call this%scfile%write()
       end block create_monitor
@@ -431,17 +449,19 @@ contains
       ! Calculate grad(U)
       call this%fs%get_gradU(this%gradU)
 
-      ! Remember old reconstructed conformation tensor
-      this%ve%SCrecold=this%ve%SCrec
+      ! ! Remember old reconstructed conformation tensor
+      ! this%ve%SCrecold=this%ve%SCrec
 
       ! Transport our liquid conformation tensor using log conformation
       advance_scalar: block
          integer :: i,j,k,nsc
          ! Update eigenvalues and eigenvectors
-         call this%ve%get_eigensystem()
+         ! call this%ve%get_eigensystem()
          ! Add source terms for streching and distortion
-         call this%ve%get_CgradU_log(this%gradU,this%SCtmp); this%resSC=this%SCtmp
-         call this%ve%get_relax_log(this%SCtmp);             this%resSC=this%resSC+this%SCtmp
+         ! call this%ve%get_CgradU_log(this%gradU,this%SCtmp); this%resSC=this%SCtmp
+         ! call this%ve%get_relax_log(this%SCtmp);             this%resSC=this%resSC+this%SCtmp
+         call this%ve%get_CgradU(this%gradU,this%SCtmp);  this%resSC=this%SCtmp
+         call this%ve%get_relax(this%SCtmp,this%time%dt); this%resSC=this%resSC+this%SCtmp
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
          call this%ve%apply_bcond(this%time%t,this%time%dt)
          this%ve%SCold=this%ve%SC
@@ -504,7 +524,7 @@ contains
          ! Add polymer stress term
          polymer_stress: block
             use tpviscoelastic_class, only: oldroydb,eptt
-            integer :: i,j,k,nsc
+            integer :: i,j,k,nsc,n
             real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
             real(WP), dimension(:,:,:,:), allocatable :: stress
             real(WP) :: coeff,trace
@@ -517,19 +537,26 @@ contains
             stress=0.0_WP
             select case (this%ve%model)
             case (oldroydb)
-               coeff=this%ve%visc_p/this%ve%trelax
-               do k=this%cfg%kmino_,this%cfg%kmaxo_
-                  do j=this%cfg%jmino_,this%cfg%jmaxo_
-                     do i=this%cfg%imino_,this%cfg%imaxo_
-                        stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                        stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                        stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                        stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                        stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                        stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                     end do
-                  end do
+               ! Calculate the polymer relaxation
+               call this%ve%get_relax(stress,this%time%dt)
+               ! Build liquid stress tensor
+               do n=1,6
+                  ! stress(:,:,:,n)=-this%nn%visc(:,:,:)*this%vf%VF*stress(:,:,:,n)
+                  stress(:,:,:,n)=-this%ve%visc_p*this%vf%VF*stress(:,:,:,n)
                end do
+               ! coeff=this%ve%visc_p/this%ve%trelax
+               ! do k=this%cfg%kmino_,this%cfg%kmaxo_
+               !    do j=this%cfg%jmino_,this%cfg%jmaxo_
+               !       do i=this%cfg%imino_,this%cfg%imaxo_
+               !          stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+               !          stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+               !          stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+               !          stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+               !          stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+               !          stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+               !       end do
+               !    end do
+               ! end do
             case (eptt)
                coeff=this%ve%visc_p/(this%ve%trelax*(1-this%ve%affinecoeff))
                do k=this%cfg%kmino_,this%cfg%kmaxo_
@@ -668,13 +695,20 @@ contains
                            this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
                            this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
                            this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                           this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
-                           this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
-                           this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
-                           this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
-                           this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
-                           this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
-                           this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                           this%smesh%var(6,np)=this%ve%SC(i,j,k,1)+this%ve%SC(i,j,k,4)+this%ve%SC(i,j,k,6)
+                           this%smesh%var(7,np)=this%ve%SC(i,j,k,1)
+                           this%smesh%var(8,np)=this%ve%SC(i,j,k,2)
+                           this%smesh%var(9,np)=this%ve%SC(i,j,k,3)
+                           this%smesh%var(10,np)=this%ve%SC(i,j,k,4)
+                           this%smesh%var(11,np)=this%ve%SC(i,j,k,5)
+                           this%smesh%var(12,np)=this%ve%SC(i,j,k,6)
+                           ! this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
+                           ! this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
+                           ! this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
+                           ! this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
+                           ! this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
+                           ! this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
+                           ! this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
                         end if
                      end do
                   end do
@@ -692,7 +726,8 @@ contains
       ! Perform and output monitoring
       call this%fs%get_max()
       call this%vf%get_max()
-      call this%ve%get_max_reconstructed(this%vf%VF)
+      call this%ve%get_max(this%vf%VF)
+      ! call this%ve%get_max_reconstructed(this%vf%VF)
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()
