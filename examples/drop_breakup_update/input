@@ -3,20 +3,26 @@ Partition :	1 1 8
 
 # Mesh definition
 X droplet : 2
-Lx : 20  !40
+Lx : 10  !40
 Ly : 10  !20
 Lz : 10  !20
-nx : 256 !512
-ny : 128 !256
-nz : 128 !256
+nx : 64 !512
+ny : 64 !256
+nz : 64 !256
 
 # Flow conditions
-Reynolds number :      100
-Weber number :         10
-Viscosity ratio :      50
-Density ratio :        1000
+Reynolds number :      1778
+Weber number :         13.5
+Viscosity ratio :      66.7
+Density ratio :        657.5
 Target Re_lambda :     45
-Turbulence intensity : 0.1
+Turbulence intensity : 0.019
+
+# Non-Newtonian modeling                      
+Polymer viscosity :             1.483     
+Polymer relaxation time :       0.203        
+Extensional viscosity parameter : 0.05
+Affine parameter                : 0.12
 
 # Time integration
 Max timestep size : 2.5e-2
