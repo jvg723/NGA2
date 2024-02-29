@@ -258,11 +258,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',this%ve%trelax)
          ! Polymer viscosity
-         call param_read('Polymer viscosity',this%ve%visc_p)
-         ! Extensional viscosity parameter (ePTT)
-         call param_read('Extensional viscosity parameter',this%ve%elongvisc)
-         ! Affine parameter (ePTT)
-         call param_read('Extensional viscosity parameter',this%ve%affinecoeff)
+         call param_read('Viscosity ratio',this%ve%visc_p); this%ve%visc_p=this%fs%visc_l*((1.00_WP-this%ve%visc_p)/this%ve%visc_p)
          ! Setup without an implicit solver
          call this%ve%setup()
          ! Initialize C scalar fields
