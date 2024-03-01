@@ -142,14 +142,14 @@ contains
       implicit none
       class(transfermodels), intent(inout) :: this
 
-      ! Transfer detached structs
-      call this%transfer_detached_struct()
+      ! ! Transfer detached structs
+      ! call this%transfer_detached_struct()
       
       if (this%vf%reconstruction_method.eq.r2p) then
 
          if (.not.this%burst) call this%breakup_film_instantaneous()
 
-         if (this%burst) call this%breakup_ligament()
+         ! if (this%burst) call this%breakup_ligament()
 
       end if ! r2p
      
@@ -357,148 +357,148 @@ contains
       np_start=this%lp%np_  ! Remember old number of particles
       has_burst=.false.
 
-      do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
+      ! do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
       
-         ! Skip non-liquid films
-         if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
+      !    ! Skip non-liquid films
+      !    if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
       
-         ! Skip films that are still thick enough
-         if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.this%min_filmthickness) cycle
+      !    ! Skip films that are still thick enough
+      !    if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.this%min_filmthickness) cycle
 
-         ! We are still here: transfer the film to drops
-         has_burst=.true.
-         i=this%cc%film_list(this%cc%film_map_(m))%node(1,1)
-         j=this%cc%film_list(this%cc%film_map_(m))%node(2,1)
-         k=this%cc%film_list(this%cc%film_map_(m))%node(3,1)
-         ! Compute cell-averaged curvature for cell containing thinnest film segment
-         curv_sum=0.0_WP; ncurv=0.0_WP
-         do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-            if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
-               curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
-               ncurv=ncurv+1.0_WP
-            end if
-         end do
-         ! Determine gamma distribution parameters                        
-         call this%bag_droplet_gamma(this%vf%thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)
-         Vt=0.0_WP      ! Transferred volume
-         Vl=0.0_WP      ! We will keep track incrementally of the liquid volume to transfer to ensure conservation
-         np_old=this%lp%np_  ! Remember old number of particles
-         max_film_droplet_diam=2.0_WP*this%d_film_rp
-         Vd=pi/6.0_WP*(min(random_gamma(alpha)*beta*d0,max_film_droplet_diam))**3
-         do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
-            i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
-            j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
-            k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
-            ! Get local coordinate system
-            nref=calculateNormal(this%vf%interface_polygon(1,i,j,k))
-            select case (maxloc(abs(nref),1))
-            case (1)
-               tref=normalize([+nref(2),-nref(1),0.0_WP])
-            case (2)
-               tref=normalize([0.0_WP,+nref(3),-nref(2)])
-            case (3)
-               tref=normalize([-nref(3),0.0_WP,+nref(1)])
-            end select
-            sref=cross_product(nref,tref)
-            ! Increment liquid volume to remove
-            Vl=Vl+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+      !    ! We are still here: transfer the film to drops
+      !    has_burst=.true.
+      !    i=this%cc%film_list(this%cc%film_map_(m))%node(1,1)
+      !    j=this%cc%film_list(this%cc%film_map_(m))%node(2,1)
+      !    k=this%cc%film_list(this%cc%film_map_(m))%node(3,1)
+      !    ! Compute cell-averaged curvature for cell containing thinnest film segment
+      !    curv_sum=0.0_WP; ncurv=0.0_WP
+      !    do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+      !       if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
+      !          curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
+      !          ncurv=ncurv+1.0_WP
+      !       end if
+      !    end do
+      !    ! Determine gamma distribution parameters                        
+      !    call this%bag_droplet_gamma(this%vf%thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)
+      !    Vt=0.0_WP      ! Transferred volume
+      !    Vl=0.0_WP      ! We will keep track incrementally of the liquid volume to transfer to ensure conservation
+      !    np_old=this%lp%np_  ! Remember old number of particles
+      !    max_film_droplet_diam=2.0_WP*this%d_film_rp
+      !    Vd=pi/6.0_WP*(min(random_gamma(alpha)*beta*d0,max_film_droplet_diam))**3
+      !    do n=1,this%cc%film_list(this%cc%film_map_(m))%nnode ! Loops over cells within local film segment
+      !       i=this%cc%film_list(this%cc%film_map_(m))%node(1,n)
+      !       j=this%cc%film_list(this%cc%film_map_(m))%node(2,n)
+      !       k=this%cc%film_list(this%cc%film_map_(m))%node(3,n)
+      !       ! Get local coordinate system
+      !       nref=calculateNormal(this%vf%interface_polygon(1,i,j,k))
+      !       select case (maxloc(abs(nref),1))
+      !       case (1)
+      !          tref=normalize([+nref(2),-nref(1),0.0_WP])
+      !       case (2)
+      !          tref=normalize([0.0_WP,+nref(3),-nref(2)])
+      !       case (3)
+      !          tref=normalize([-nref(3),0.0_WP,+nref(1)])
+      !       end select
+      !       sref=cross_product(nref,tref)
+      !       ! Increment liquid volume to remove
+      !       Vl=Vl+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
 
-            ! Compute cell-averaged curvature
-            curv_sum=0.0_WP; ncurv=0.0_WP
-            do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-               if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
-                  curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
-                  ncurv=ncurv+1.0_WP
-               end if
-            end do
-            ! Determine gamma distribution parameters
-            call this%bag_droplet_gamma(this%vf%thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)
+      !       ! Compute cell-averaged curvature
+      !       curv_sum=0.0_WP; ncurv=0.0_WP
+      !       do l=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+      !          if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
+      !             curv_sum=curv_sum+abs(this%vf%curv2p(l,i,j,k))
+      !             ncurv=ncurv+1.0_WP
+      !          end if
+      !       end do
+      !       ! Determine gamma distribution parameters
+      !       call this%bag_droplet_gamma(this%vf%thickness(i,j,k),2.0_WP*ncurv/curv_sum,alpha,beta)
             
-            ! Create drops from available liquid volume
-            do while (Vl-Vd.gt.0.0_WP)
-               ! Make room for new drop
-               np=this%lp%np_+1; call this%lp%resize(np)
-               ! Add the drop
-               this%lp%p(np)%id  =int(2,8)                                   !< Give id (maybe based on break-up model?)
-               this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
-               this%lp%p(np)%Acol =0.0_WP                                    !< Give zero collision force
-               this%lp%p(np)%Tcol =0.0_WP                                    !< Give zero collision force
-               this%lp%p(np)%d   =(6.0_WP*Vd/pi)**(1.0_WP/3.0_WP)            !< Assign diameter from model above
-               ! theta        =random_uniform(0.0_WP,2.0_WP*pi)           !< Angular position of randomly placed droplet relative to liquid barycenter
-               ! this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+random_uniform(0.0_WP,0.5_WP*this%vf%cfg%meshsize(i,j,k))*(cos(theta)*tref+sin(theta)*sref)
-               this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*tref+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*sref              
-               this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W)    !< Interpolate local cell velocity as drop velocity
-               this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])    !< Place the drop in the proper cell for the this%lp%cfg
-               this%lp%p(np)%flag=0                                          !< Activate it
-               ! Increment particle counter
-               this%lp%np_=np
-               ! Update tracked volumes
-               Vl=Vl-Vd
-               Vt=Vt+Vd
-               ! Output diameter, velocity, and position
-               ! Generate new droplet volume
-               max_film_droplet_diam=2.0_WP*this%d_film_rp
-               Vd=pi/6.0_WP*(min(random_gamma(alpha)*beta*d0,max_film_droplet_diam))**3
-            end do
+      !       ! Create drops from available liquid volume
+      !       do while (Vl-Vd.gt.0.0_WP)
+      !          ! Make room for new drop
+      !          np=this%lp%np_+1; call this%lp%resize(np)
+      !          ! Add the drop
+      !          this%lp%p(np)%id  =int(2,8)                                   !< Give id (maybe based on break-up model?)
+      !          this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
+      !          this%lp%p(np)%Acol =0.0_WP                                    !< Give zero collision force
+      !          this%lp%p(np)%Tcol =0.0_WP                                    !< Give zero collision force
+      !          this%lp%p(np)%d   =(6.0_WP*Vd/pi)**(1.0_WP/3.0_WP)            !< Assign diameter from model above
+      !          ! theta        =random_uniform(0.0_WP,2.0_WP*pi)           !< Angular position of randomly placed droplet relative to liquid barycenter
+      !          ! this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+random_uniform(0.0_WP,0.5_WP*this%vf%cfg%meshsize(i,j,k))*(cos(theta)*tref+sin(theta)*sref)
+      !          this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*tref+random_uniform(-0.5_WP*this%vf%cfg%meshsize(i,j,k),0.5_WP*this%vf%cfg%meshsize(i,j,k))*sref              
+      !          this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W)    !< Interpolate local cell velocity as drop velocity
+      !          this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])    !< Place the drop in the proper cell for the this%lp%cfg
+      !          this%lp%p(np)%flag=0                                          !< Activate it
+      !          ! Increment particle counter
+      !          this%lp%np_=np
+      !          ! Update tracked volumes
+      !          Vl=Vl-Vd
+      !          Vt=Vt+Vd
+      !          ! Output diameter, velocity, and position
+      !          ! Generate new droplet volume
+      !          max_film_droplet_diam=2.0_WP*this%d_film_rp
+      !          Vd=pi/6.0_WP*(min(random_gamma(alpha)*beta*d0,max_film_droplet_diam))**3
+      !       end do
 
-            ! Remove liquid in that cell
-            this%my_converted_volume=this%my_converted_volume+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
-            this%vf%VF(i,j,k)=0.0_WP
+      !       ! Remove liquid in that cell
+      !       this%my_converted_volume=this%my_converted_volume+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+      !       this%vf%VF(i,j,k)=0.0_WP
 
-         end do
+      !    end do
          
-         ! Based on how many particles were created, decide what to do with left-over volume
-         if (Vt.eq.0.0_WP) then ! No particle was created, we need one...
-            ! Add one last drop for remaining liquid volume
-            np=this%lp%np_+1; call this%lp%resize(np)
-            ! Add the drop
-            this%lp%p(np)%id  =int(3,8)                                   !< Give id (maybe based on break-up model?)
-            this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
-            this%lp%p(np)%Acol =0.0_WP                                    !< Give zero collision force
-            this%lp%p(np)%Tcol =0.0_WP                                    !< Give zero collision force
-            this%lp%p(np)%d   =(6.0_WP*Vl/pi)**(1.0_WP/3.0_WP)            !< Assign diameter based on remaining liquid volume
-            this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
-            this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
-            this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
-            this%lp%p(np)%flag=0                                          !< Activate it
-            ! Increment particle counter
-            this%lp%np_=np
-         else ! Some particles were created, make them all larger
-            do ip=np_old+1,this%lp%np_
-               this%lp%p(ip)%d=this%lp%p(ip)%d*((Vt+Vl)/Vt)**(1.0_WP/3.0_WP)
-            end do
-         end if
+      !    ! Based on how many particles were created, decide what to do with left-over volume
+      !    if (Vt.eq.0.0_WP) then ! No particle was created, we need one...
+      !       ! Add one last drop for remaining liquid volume
+      !       np=this%lp%np_+1; call this%lp%resize(np)
+      !       ! Add the drop
+      !       this%lp%p(np)%id  =int(3,8)                                   !< Give id (maybe based on break-up model?)
+      !       this%lp%p(np)%dt  =0.0_WP                                     !< Let the drop find it own integration time
+      !       this%lp%p(np)%Acol =0.0_WP                                    !< Give zero collision force
+      !       this%lp%p(np)%Tcol =0.0_WP                                    !< Give zero collision force
+      !       this%lp%p(np)%d   =(6.0_WP*Vl/pi)**(1.0_WP/3.0_WP)            !< Assign diameter based on remaining liquid volume
+      !       this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                     !< Place the drop at the liquid barycenter
+      !       this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) !< Interpolate local cell velocity as drop velocity
+      !       this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) !< Place the drop in the proper cell for the this%lp%cfg
+      !       this%lp%p(np)%flag=0                                          !< Activate it
+      !       ! Increment particle counter
+      !       this%lp%np_=np
+      !    else ! Some particles were created, make them all larger
+      !       do ip=np_old+1,this%lp%np_
+      !          this%lp%p(ip)%d=this%lp%p(ip)%d*((Vt+Vl)/Vt)**(1.0_WP/3.0_WP)
+      !       end do
+      !    end if
 
-      end do ! local films
+      ! end do ! local films
       
-      ! Sync VF and clean up IRL and band
-      call this%vf%cfg%sync(this%vf%VF)
-      call this%vf%clean_irl_and_band()                  
+      ! ! Sync VF and clean up IRL and band
+      ! call this%vf%cfg%sync(this%vf%VF)
+      ! call this%vf%clean_irl_and_band()                  
 
-      ! Mark as burst if a film has burst
-      call MPI_ALLREDUCE(has_burst,this%burst,1,MPI_LOGICAL,MPI_LOR,this%cfg%comm,ierr)
+      ! ! Mark as burst if a film has burst
+      ! call MPI_ALLREDUCE(has_burst,this%burst,1,MPI_LOGICAL,MPI_LOR,this%cfg%comm,ierr)
 
       ! Clean up CCL
       call this%cc%deallocate_lists()
 
-      ! Write the diameters and velocities
-      filename='spray-all/droplets'
-      do rank=0,this%cfg%nproc-1
-         if (rank.eq.this%cfg%rank) then
-            ! Open the file
-            ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
-            open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
-            if (ierr.ne.0) call die('[transfermodel write spray stats] Could not open file: '//trim(filename))
-            ! Output diameters and velocities
-            do i=np_start+1,this%lp%np_
-               write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3),'film',this%lp%p(np)%id  
-            end do
-            ! Close the file
-            close(iunit)
-         end if
-         ! Force synchronization
-         call MPI_BARRIER(this%cfg%comm,ierr)
-      end do
+      ! ! Write the diameters and velocities
+      ! filename='spray-all/droplets'
+      ! do rank=0,this%cfg%nproc-1
+      !    if (rank.eq.this%cfg%rank) then
+      !       ! Open the file
+      !       ! open(newunit=iunit,file=trim(filename),form='unformatted',status='old',access='stream',position='append',iostat=ierr)
+      !       open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+      !       if (ierr.ne.0) call die('[transfermodel write spray stats] Could not open file: '//trim(filename))
+      !       ! Output diameters and velocities
+      !       do i=np_start+1,this%lp%np_
+      !          write(iunit,*) this%lp%p(i)%d,this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3),norm2([this%lp%p(i)%vel(1),this%lp%p(i)%vel(2),this%lp%p(i)%vel(3)]),this%lp%p(i)%pos(1),this%lp%p(i)%pos(2),this%lp%p(i)%pos(3),'film',this%lp%p(np)%id  
+      !       end do
+      !       ! Close the file
+      !       close(iunit)
+      !    end if
+      !    ! Force synchronization
+      !    call MPI_BARRIER(this%cfg%comm,ierr)
+      ! end do
 
    end subroutine breakup_film_instantaneous
 

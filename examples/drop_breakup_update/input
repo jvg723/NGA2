@@ -3,10 +3,10 @@ Partition :	1 1 8
 
 # Mesh definition
 X droplet : 2
-Lx : 10  !40
+Lx : 20  !40
 Ly : 10  !20
 Lz : 10  !20
-nx : 64 !512
+nx : 128 !512
 ny : 64 !256
 nz : 64 !256
 
@@ -25,7 +25,7 @@ Polymer relaxation time : 0.2
 # Time integration
 Max timestep size : 2.5e-2
 Max cfl number :    0.9
-Max time :          20
+Max time :          200
 
 # Pressure solver
 Pressure tolerance : 1e-5
