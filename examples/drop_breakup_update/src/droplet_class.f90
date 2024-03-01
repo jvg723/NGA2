@@ -11,6 +11,8 @@ module droplet_class
    use tpns_class,           only: tpns
    use tpviscoelastic_class, only: tpviscoelastic
    use timetracker_class,    only: timetracker
+   use lpt_class,            only: lpt
+   use transfermodel_class,  only: transfermodels
    use event_class,          only: event
    use monitor_class,        only: monitor
    implicit none
@@ -30,7 +32,9 @@ module droplet_class
       type(hypre_str)      :: ps    !< Structured Hypre linear solver for pressure
       type(ddadi)          :: vs    !< DDADI solver for velocity 
       type(tpviscoelastic) :: ve
+      type(lpt)            :: lp
       type(timetracker)    :: time  !< Time info
+      type(transfermodels) :: tm
       type(event)          :: ppevt
      
 
@@ -43,6 +47,7 @@ module droplet_class
       type(monitor)  :: mfile       !< General simulation monitoring
       type(monitor)  :: cflfile     !< CFL monitoring
       type(monitor)  :: scfile      !< Scalar monitoring
+      type(monitor)  :: filmfile    !< Film monitoring
       
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
@@ -283,6 +288,29 @@ contains
          !>Apply boundary conditions
          call this%ve%apply_bcond(this%time%t,this%time%dt)
       end block create_viscoelastic
+
+      ! Create a Lagrangian spray tracker
+      create_lpt: block
+         use param, only: param_read
+         ! Create the solver
+         this%lp=lpt(cfg=this%cfg,name='spray')
+         ! Get particle density from the flow solver
+         this%lp%rho=this%fs%rho_l
+         ! Turn off drag
+         this%lp%drag_model='none'         
+         ! Initialize with zero particles
+         call this%lp%resize(0)
+         ! Get initial particle volume fraction
+         call this%lp%update_VF()               
+         ! Get particle statistics
+         call this%lp%get_max()
+      end block create_lpt
+
+      ! Create a transfer model object
+      create_filmmodel: block
+         use param, only: param_read
+         call this%tm%initialize(cfg=this%cfg,vf=this%vf,fs=this%fs,lp=this%lp)
+      end block create_filmmodel
       
 
       ! Create surfmesh object for interface polygon output
@@ -429,6 +457,24 @@ contains
             call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
          end do
          call this%scfile%write()
+         ! Create film thickness monitor
+         this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
+         call this%filmfile%add_column(this%time%n,'Timestep number')
+         call this%filmfile%add_column(this%time%t,'Time')
+         call this%filmfile%add_column(this%tm%min_thickness,'Min thickness')
+         call this%filmfile%add_column(this%tm%film_volume,'Largest Film volume')
+         call this%filmfile%add_column(this%tm%film_ratio,'Vb/V0')
+         call this%filmfile%add_column(this%tm%converted_volume,'VOF-LPT Converted volume')
+         call this%filmfile%add_column(this%tm%xL,'Droplet x-extent')
+         call this%filmfile%add_column(this%tm%yL,'Droplet y-extent')
+         call this%filmfile%add_column(this%tm%zL,'Droplet z-extent')
+         call this%filmfile%add_column(this%tm%xbary,'Droplet x-position')
+         call this%filmfile%add_column(this%tm%ybary,'Droplet y-position')
+         call this%filmfile%add_column(this%tm%zbary,'Droplet z-position')
+         call this%filmfile%add_column(this%tm%ubary,'Droplet x-velocity')
+         call this%filmfile%add_column(this%tm%vbary,'Droplet y-velocity')
+         call this%filmfile%add_column(this%tm%wbary,'Droplet z-velocity')
+         call this%filmfile%write()
       end block create_monitor
 
       
@@ -731,6 +777,7 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()
+      call this%filmfile%write()
       
    end subroutine step
    
