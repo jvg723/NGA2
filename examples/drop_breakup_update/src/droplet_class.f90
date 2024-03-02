@@ -513,7 +513,7 @@ contains
          call this%ve%get_eigensystem()
          ! Add source terms for streching and distortion
          call this%ve%get_CgradU_log(this%gradU,this%SCtmp); this%resSC=this%SCtmp
-         call this%ve%get_relax_log(this%SCtmp);             this%resSC=this%resSC+this%SCtmp
+         ! call this%ve%get_relax_log(this%SCtmp);             this%resSC=this%resSC+this%SCtmp
          ! call this%ve%get_CgradU(this%gradU,this%SCtmp);  this%resSC=this%SCtmp
          ! call this%ve%get_relax(this%SCtmp,this%time%dt); this%resSC=this%resSC+this%SCtmp
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
@@ -545,13 +545,13 @@ contains
       call this%ve%get_eigensystem()
       ! Reconstruct conformation tensor
       call this%ve%reconstruct_conformation()
-      ! ! Add in relaxtion source from semi-anlaytical integration
-      ! call this%ve%get_relax_analytical(this%time%dt)
-      ! ! Reconstruct lnC for next time step
-      ! !> get eigenvalues and eigenvectors based on reconstructed C
-      ! call this%ve%get_eigensystem_SCrec()
-      ! !> Reconstruct lnC from eigenvalues and eigenvectors
-      ! call this%ve%reconstruct_log_conformation()
+      ! Add in relaxtion source from semi-anlaytical integration
+      call this%ve%get_relax_analytical(this%time%dt)
+      ! Reconstruct lnC for next time step
+      !> get eigenvalues and eigenvectors based on reconstructed C
+      call this%ve%get_eigensystem_SCrec()
+      !> Reconstruct lnC from eigenvalues and eigenvectors
+      call this%ve%reconstruct_log_conformation()
 
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
