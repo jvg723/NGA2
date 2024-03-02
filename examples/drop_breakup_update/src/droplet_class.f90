@@ -649,21 +649,21 @@ contains
                end do
             end do
             ! Add divergence of stress to residual
-            ! do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-            !    do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-            !       do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-            !          if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-            !          &                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))                     &
-            !          &                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-            !          if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-            !          &                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))                &
-            !          &                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-            !          if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-            !          &                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))                     &                  
-            !          &                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-            !       end do
-            !    end do
-            ! end do
+            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+                     if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                     &                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))                     &
+                     &                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+                     if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                     &                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))                &
+                     &                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+                     if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                     &                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))                     &                  
+                     &                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+                  end do
+               end do
+            end do
             ! Clean up
             deallocate(stress,Txy,Tyz,Tzx)
          end block polymer_stress
