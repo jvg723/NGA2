@@ -580,13 +580,13 @@ contains
          call this%ve%get_eigensystem()
          ! Reconstruct conformation tensor
          call this%ve%reconstruct_conformation()
-         ! Add in relaxtion source from semi-anlaytical integration
-         call this%ve%get_relax_analytical(this%time%dt)
-         ! Reconstruct lnC for next time step
-         !> get eigenvalues and eigenvectors based on reconstructed C
-         call this%ve%get_eigensystem_SCrec()
-         !> Reconstruct lnC from eigenvalues and eigenvectors
-         call this%ve%reconstruct_log_conformation()
+         ! ! Add in relaxtion source from semi-anlaytical integration
+         ! call this%ve%get_relax_analytical(this%time%dt)
+         ! ! Reconstruct lnC for next time step
+         ! !> get eigenvalues and eigenvectors based on reconstructed C
+         ! call this%ve%get_eigensystem_SCrec()
+         ! !> Reconstruct lnC from eigenvalues and eigenvectors
+         ! call this%ve%reconstruct_log_conformation()
       end if
 
       ! Remember old VOF
