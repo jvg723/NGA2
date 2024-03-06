@@ -71,6 +71,9 @@ module droplet_class
    integer :: id_largest_film
    real(WP) :: initial_volume
 
+   !> Check for stabilization 
+   logical :: stabilization 
+
 
 contains
    
@@ -152,7 +155,7 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: VFlo,VFhi,elvira,r2p
+         use vfs_class, only: VFlo,VFhi,elvira,r2p,Cflux_storage
          use mms_geom,  only: cube_refine_vol
          use param,     only: param_read
          integer :: i,j,k,n,si,sj,sk
@@ -161,7 +164,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,name='VOF',store_detailed_flux=.true.)
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,transport_method=Cflux_storage,name='VOF')
          ! Initialize to a droplet
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
@@ -270,28 +273,41 @@ contains
          this%ve%visc_p=this%fs%visc_l*((1.00_WP-this%ve%visc_p)/this%ve%visc_p)
          ! Setup without an implicit solver
          call this%ve%setup()
+         ! Check first if we use stabilization
+         call param_read('Stabilization',stabilization,default=.false.)
          ! Initialize C scalar fields
-         !>Get eigenvalues and eigenvectors
-         call this%ve%get_eigensystem()
-         !>Reconstruct conformation tensor
-         call this%ve%reconstruct_conformation()
-         do k=this%cfg%kmino_,this%cfg%kmaxo_
-            do j=this%cfg%jmino_,this%cfg%jmaxo_
-               do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%vf%VF(i,j,k).gt.0.0_WP) then
-                     this%ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                     this%ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-                     this%ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-                     ! this%ve%SC(i,j,k,1)=1.0_WP !< Cxx
-                     ! this%ve%SC(i,j,k,4)=1.0_WP !< Cyy
-                     ! this%ve%SC(i,j,k,6)=1.0_WP !< Czz
-                  end if
+         if (stabilization) then 
+            ! Get eigenvalues and eigenvectors
+            call this%ve%get_eigensystem()
+            ! Reconstruct conformation tensor
+            call this%ve%reconstruct_conformation()
+            do k=this%cfg%kmino_,this%cfg%kmaxo_
+               do j=this%cfg%jmino_,this%cfg%jmaxo_
+                  do i=this%cfg%imino_,this%cfg%imaxo_
+                     if (this%vf%VF(i,j,k).gt.0.0_WP) then
+                        this%ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                        this%ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                        this%ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
                end do
             end do
-         end do
-         !>Get eigenvalues and eigenvectors
-         call this%ve%get_eigensystem()
-         !>Apply boundary conditions
+            ! Get eigenvalues and eigenvectors
+            call this%ve%get_eigensystem()
+         else
+            do k=this%cfg%kmino_,this%cfg%kmaxo_
+               do j=this%cfg%jmino_,this%cfg%jmaxo_
+                  do i=this%cfg%imino_,this%cfg%imaxo_
+                     if (this%vf%VF(i,j,k).gt.0.0_WP) then
+                        this%ve%SC(i,j,k,1)=1.0_WP  !< Cxx
+                        this%ve%SC(i,j,k,4)=1.0_WP  !< Cyy
+                        this%ve%SC(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+         end if
+         ! Apply boundary conditions
          call this%ve%apply_bcond(this%time%t,this%time%dt)
       end block create_viscoelastic
 
@@ -356,35 +372,53 @@ contains
          this%smesh%var(11,:)=0.0_WP
          this%smesh%var(12,:)=0.0_WP
          np=0
-         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                        this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
-                        this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
-                        this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
-                        this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                        this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
-                        this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
-                        this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
-                        this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
-                        this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
-                        this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
-                        this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
-                        ! this%smesh%var(6,np)=this%ve%SC(i,j,k,1)+this%ve%SC(i,j,k,4)+this%ve%SC(i,j,k,6)
-                        ! this%smesh%var(7,np)=this%ve%SC(i,j,k,1)
-                        ! this%smesh%var(8,np)=this%ve%SC(i,j,k,2)
-                        ! this%smesh%var(9,np)=this%ve%SC(i,j,k,3)
-                        ! this%smesh%var(10,np)=this%ve%SC(i,j,k,4)
-                        ! this%smesh%var(11,np)=this%ve%SC(i,j,k,5)
-                        ! this%smesh%var(12,np)=this%ve%SC(i,j,k,6)
-                     end if
+         if (stabilization) then
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
+                           this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
+                           this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
+                           this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
+                           this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
+                           this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
+                           this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
+                           this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
+                           this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
+                           this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
+                           this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                        end if
+                     end do
                   end do
                end do
             end do
-         end do
+         else
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
+                           this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
+                           this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
+                           this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
+                           this%smesh%var(6,np)=this%ve%SC(i,j,k,1)+this%ve%SC(i,j,k,4)+this%ve%SC(i,j,k,6)
+                           this%smesh%var(7,np)=this%ve%SC(i,j,k,1)
+                           this%smesh%var(8,np)=this%ve%SC(i,j,k,2)
+                           this%smesh%var(9,np)=this%ve%SC(i,j,k,3)
+                           this%smesh%var(10,np)=this%ve%SC(i,j,k,4)
+                           this%smesh%var(11,np)=this%ve%SC(i,j,k,5)
+                           this%smesh%var(12,np)=this%ve%SC(i,j,k,6)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end if
       end block create_smesh
 
 
@@ -421,8 +455,11 @@ contains
          call this%fs%get_cfl(this%time%dt,this%time%cfl)
          call this%fs%get_max()
          call this%vf%get_max()
-         call this%ve%get_max_reconstructed(this%vf%VF)
-         ! call this%ve%get_max(this%vf%VF)
+         if (stabilization) then
+            call this%ve%get_max_reconstructed(this%vf%VF)
+         else
+            call this%ve%get_max(this%vf%VF)
+         end if
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -458,12 +495,17 @@ contains
          this%scfile=monitor(this%ve%cfg%amRoot,'scalar')
          call this%scfile%add_column(this%time%n,'Timestep number')
          call this%scfile%add_column(this%time%t,'Time')
-         do nsc=1,this%ve%nscalar
-            call this%scfile%add_column(this%ve%SCrecmin(nsc),trim(this%ve%SCname(nsc))//'_min')
-            call this%scfile%add_column(this%ve%SCrecmax(nsc),trim(this%ve%SCname(nsc))//'_max')
-            ! call this%scfile%add_column(this%ve%SCmin(nsc),trim(this%ve%SCname(nsc))//'_min')
-            ! call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
-         end do
+         if (stabilization) then
+            do nsc=1,this%ve%nscalar
+               call this%scfile%add_column(this%ve%SCrecmin(nsc),trim(this%ve%SCname(nsc))//'_min')
+               call this%scfile%add_column(this%ve%SCrecmax(nsc),trim(this%ve%SCname(nsc))//'_max')
+            end do
+         else
+            do nsc=1,this%ve%nscalar
+               call this%scfile%add_column(this%ve%SCmin(nsc),trim(this%ve%SCname(nsc))//'_min')
+               call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
+            end do
+         end if
          call this%scfile%write()
          ! Create film thickness monitor
          this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
@@ -504,18 +546,21 @@ contains
       call this%fs%get_gradU(this%gradU)
 
       ! Remember old reconstructed conformation tensor
-      this%ve%SCrecold=this%ve%SCrec
+      if (stabilization) this%ve%SCrecold=this%ve%SCrec
 
       ! Transport our liquid conformation tensor using log conformation
       advance_scalar: block
          integer :: i,j,k,nsc
-         ! Update eigenvalues and eigenvectors
-         call this%ve%get_eigensystem()
-         ! Add source terms for streching and distortion
-         call this%ve%get_CgradU_log(this%gradU,this%SCtmp); this%resSC=this%SCtmp
-         ! call this%ve%get_relax_log(this%SCtmp);             this%resSC=this%resSC+this%SCtmp
-         ! call this%ve%get_CgradU(this%gradU,this%SCtmp);  this%resSC=this%SCtmp
-         ! call this%ve%get_relax(this%SCtmp,this%time%dt); this%resSC=this%resSC+this%SCtmp
+         ! Add source terms for constitutive model
+         if (stabilization) then 
+            ! Update eigenvalues and eigenvectors
+            call this%ve%get_eigensystem()
+            call this%ve%get_CgradU_log(this%gradU,this%SCtmp); this%resSC=this%SCtmp
+            ! call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
+         else
+            call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
+            call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
+         end if
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
          call this%ve%apply_bcond(this%time%t,this%time%dt)
          this%ve%SCold=this%ve%SC
@@ -528,30 +573,21 @@ contains
          end do
          ! Apply boundary conditions
          call this%ve%apply_bcond(this%time%t,this%time%dt)
-         ! ! Update eigenvalues and eigenvectors
-         ! call this%ve%get_eigensystem()
-         ! ! Reconstruct conformation tensor
-         ! call this%ve%reconstruct_conformation()
-         ! ! Add in relaxtion source from semi-anlaytical integration
-         ! call this%ve%get_relax_analytical(this%time%dt)
-         ! ! Reconstruct lnC for next time step
-         ! !> get eigenvalues and eigenvectors based on reconstructed C
-         ! call this%ve%get_eigensystem_SCrec()
-         ! !> Reconstruct lnC from eigenvalues and eigenvectors
-         ! call this%ve%reconstruct_log_conformation()
       end block advance_scalar
 
-      ! Update eigenvalues and eigenvectors
-      call this%ve%get_eigensystem()
-      ! Reconstruct conformation tensor
-      call this%ve%reconstruct_conformation()
-      ! Add in relaxtion source from semi-anlaytical integration
-      call this%ve%get_relax_analytical(this%time%dt)
-      ! Reconstruct lnC for next time step
-      !> get eigenvalues and eigenvectors based on reconstructed C
-      call this%ve%get_eigensystem_SCrec()
-      !> Reconstruct lnC from eigenvalues and eigenvectors
-      call this%ve%reconstruct_log_conformation()
+      if (stabilization) then 
+         ! Update eigenvalues and eigenvectors
+         call this%ve%get_eigensystem()
+         ! Reconstruct conformation tensor
+         call this%ve%reconstruct_conformation()
+         ! Add in relaxtion source from semi-anlaytical integration
+         call this%ve%get_relax_analytical(this%time%dt)
+         ! Reconstruct lnC for next time step
+         !> get eigenvalues and eigenvectors based on reconstructed C
+         call this%ve%get_eigensystem_SCrec()
+         !> Reconstruct lnC from eigenvalues and eigenvectors
+         call this%ve%reconstruct_log_conformation()
+      end if
 
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
@@ -601,43 +637,34 @@ contains
             allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
             ! Calculate polymer stress for a given model
             stress=0.0_WP
-            select case (this%ve%model)
-            case (oldroydb)
-               ! ! Calculate the polymer relaxation
-               ! call this%ve%get_relax(stress,this%time%dt)
-               ! ! Build liquid stress tensor
-               ! do n=1,6
-               !    ! stress(:,:,:,n)=-this%nn%visc(:,:,:)*this%vf%VF*stress(:,:,:,n)
-               !    stress(:,:,:,n)=-this%ve%visc_p*this%vf%VF*stress(:,:,:,n)
-               ! end do
-               coeff=this%ve%visc_p/this%ve%trelax
-               do k=this%cfg%kmino_,this%cfg%kmaxo_
-                  do j=this%cfg%jmino_,this%cfg%jmaxo_
-                     do i=this%cfg%imino_,this%cfg%imaxo_
-                        stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                        stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                        stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                        stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                        stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                        stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+            if (stabilization) then !< Build stress tensor from reconstructed C
+               select case (this%ve%model)
+               case (oldroydb)
+                  coeff=this%ve%visc_p/this%ve%trelax
+                  do k=this%cfg%kmino_,this%cfg%kmaxo_
+                     do j=this%cfg%jmino_,this%cfg%jmaxo_
+                        do i=this%cfg%imino_,this%cfg%imaxo_
+                           stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                           stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                           stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                           stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                           stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                           stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                        end do
                      end do
                   end do
-               end do
-            case (eptt)
-               coeff=this%ve%visc_p/(this%ve%trelax*(1-this%ve%affinecoeff))
-               do k=this%cfg%kmino_,this%cfg%kmaxo_
-                  do j=this%cfg%jmino_,this%cfg%jmaxo_
-                     do i=this%cfg%imino_,this%cfg%imaxo_
-                        stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                        stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                        stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                        stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                        stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                        stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                     end do
+               end select 
+            else
+               select case (this%ve%model)
+               case (oldroydb)
+                  ! Calculate the polymer stress
+                  call this%ve%get_relax(stress,this%time%dt)
+                  ! Build liquid stress tensor
+                  do nsc=1,6
+                     stress(:,:,:,nsc)=-this%ve%visc_p*this%vf%VF*stress(:,:,:,nsc)
                   end do
-               end do
-            end select 
+               end select
+            end if
             ! Interpolate tensor components to cell edges
             do k=this%cfg%kmin_,this%cfg%kmax_+1
                do j=this%cfg%jmin_,this%cfg%jmax_+1
@@ -751,35 +778,53 @@ contains
             this%smesh%var(11,:)=0.0_WP
             this%smesh%var(12,:)=0.0_WP
             np=0
-            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                           this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
-                           this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
-                           this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
-                           this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
-                           ! this%smesh%var(6,np)=this%ve%SC(i,j,k,1)+this%ve%SC(i,j,k,4)+this%ve%SC(i,j,k,6)
-                           ! this%smesh%var(7,np)=this%ve%SC(i,j,k,1)
-                           ! this%smesh%var(8,np)=this%ve%SC(i,j,k,2)
-                           ! this%smesh%var(9,np)=this%ve%SC(i,j,k,3)
-                           ! this%smesh%var(10,np)=this%ve%SC(i,j,k,4)
-                           ! this%smesh%var(11,np)=this%ve%SC(i,j,k,5)
-                           ! this%smesh%var(12,np)=this%ve%SC(i,j,k,6)
-                           this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
-                           this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
-                           this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
-                           this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
-                           this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
-                           this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
-                           this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
-                        end if
+            if (stabilization) then
+               do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+                  do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                     do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                              this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
+                              this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
+                              this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
+                              this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
+                              this%smesh%var(6,np)=this%ve%SCrec(i,j,k,1)+this%ve%SCrec(i,j,k,4)+this%ve%SCrec(i,j,k,6)
+                              this%smesh%var(7,np)=this%ve%SCrec(i,j,k,1)
+                              this%smesh%var(8,np)=this%ve%SCrec(i,j,k,2)
+                              this%smesh%var(9,np)=this%ve%SCrec(i,j,k,3)
+                              this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
+                              this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
+                              this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                           end if
+                        end do
                      end do
                   end do
                end do
-            end do
+            else
+               do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+                  do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                     do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                              this%smesh%var(2,np)=this%vf%curv2p(nplane,i,j,k)
+                              this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
+                              this%smesh%var(4,np)=this%vf%thin_sensor(i,j,k)
+                              this%smesh%var(5,np)=this%vf%thickness  (i,j,k)
+                              this%smesh%var(6,np)=this%ve%SC(i,j,k,1)+this%ve%SC(i,j,k,4)+this%ve%SC(i,j,k,6)
+                              this%smesh%var(7,np)=this%ve%SC(i,j,k,1)
+                              this%smesh%var(8,np)=this%ve%SC(i,j,k,2)
+                              this%smesh%var(9,np)=this%ve%SC(i,j,k,3)
+                              this%smesh%var(10,np)=this%ve%SC(i,j,k,4)
+                              this%smesh%var(11,np)=this%ve%SC(i,j,k,5)
+                              this%smesh%var(12,np)=this%ve%SC(i,j,k,6)
+                           end if
+                        end do
+                     end do
+                  end do
+               end do
+            end if
          end block update_smesh
          ! Transfer edge normal data
          this%resU=this%vf%edge_normal(1,:,:,:)
@@ -795,8 +840,11 @@ contains
       ! Perform and output monitoring
       call this%fs%get_max()
       call this%vf%get_max()
-      ! call this%ve%get_max(this%vf%VF)
-      call this%ve%get_max_reconstructed(this%vf%VF)
+      if (stabilization) then
+         call this%ve%get_max_reconstructed(this%vf%VF)
+      else
+         call this%ve%get_max(this%vf%VF)
+      end if
       call this%mfile%write()
       call this%cflfile%write()
       call this%scfile%write()

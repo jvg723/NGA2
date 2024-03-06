@@ -1,6 +1,9 @@
 # Parallelization
 Partition :	1 1 8
 
+# Are we using log conformation stabilzation 
+Stabilization : .true.
+
 # Mesh definition
 X droplet : 2
 Lx : 10  !40
