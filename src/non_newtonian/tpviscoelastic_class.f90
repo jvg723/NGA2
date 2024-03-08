@@ -170,94 +170,46 @@ contains
                   !>Set B equal to the strain rate tensor
                   B(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
                   B(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
-                  B(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   B(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   B(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
-                  ! if (this%cfg%amRoot) then
-                  !    print *, 'C is proportion to I at timestep=',time_step
-                  ! end if
+                  B(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   B(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   B(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP  
                else
-                  ! if (this%cfg%amRoot) then
-                  !    print *, 'C is NOT proportion to I at timestep=',time_step
-                  ! end if
-                  ! select case (this%model)
-                  ! case (lptt,eptt)
-                  !    !>Strain rate tensor used for calculating L
-                  !    D(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; D(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   D(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
-                  !    D(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   D(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; D(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
-                  !    D(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   D(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   D(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
-                  !    ! Use L tensor L=gradU^T-zeta*D for PTT models
-                  !    M=matmul(transpose(this%eigenvec(:,:,i,j,k)),matmul((transpose(gradU(:,:,i,j,k))-this%affinecoeff*D),this%eigenvec(:,:,i,j,k)))
-                  ! case default
-                  !    ! M=matmul(transpose(this%eigenvec(:,:,i,j,k)),matmul(transpose(gradU(:,:,i,j,k)),this%eigenvec(:,:,i,j,k)))
-                  ! end select
-                  ! print *, 'time_Step=',time_step
+                  select case (this%model)
+                  case (lptt,eptt)
+                     !>Strain rate tensor used for calculating L
+                     D(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; D(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   D(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
+                     D(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   D(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; D(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
+                     D(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   D(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   D(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
+                     ! Use L tensor L=gradU^T-zeta*D for PTT models
+                     M=matmul(transpose(this%eigenvec(:,:,i,j,k)),matmul((transpose(gradU(:,:,i,j,k))-this%affinecoeff*D),this%eigenvec(:,:,i,j,k)))
+                  case default
+                     M=matmul(transpose(this%eigenvec(:,:,i,j,k)),matmul(transpose(gradU(:,:,i,j,k)),this%eigenvec(:,:,i,j,k)))
+                  end select
                   ! Temp matrix for calculating B
-                  ! print *, 'M(1,1)=',M(1,1)
-                  ! print *, 'M(2,2)=',M(2,2)
-                  ! print *, 'M(3,3)=',M(3,3)
-                  ! tmpMat=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(tmpMat))
-                  ! tmpMat=reshape((/ 1.00_WP,0.0_WP,0.0_WP,0.0_WP,1.00_WP,0.0_WP,0.0_WP,0.0_WP,1.00_WP /),shape(tmpMat))
+                  tmpMat=reshape((/ M(1,1),0.0_WP,0.0_WP,0.0_WP,M(2,2),0.0_WP,0.0_WP,0.0_WP,M(3,3) /),shape(tmpMat))
                   ! Form symmetric extension component of confomration tensor (B=R*{{mxx,0,0},{0,myy,0},{0,0,mzz}}*R^T={{Bxx,Bxy,Bxz},{Bxy,Byy,Byz},{Bxz,Byz,Bzz}})
-                  ! B=matmul(this%eigenvec(:,:,i,j,k),matmul(tmpMat,transpose(this%eigenvec(:,:,i,j,k))))
-                  ! B(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
-                  ! B(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
-                  ! B(3,1)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k));                                   B(3,2)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k));                                   B(3,3)=gradU(3,3,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
-                  ! B=0.0_WP
+                  B=matmul(this%eigenvec(:,:,i,j,k),matmul(tmpMat,transpose(this%eigenvec(:,:,i,j,k))))
                   ! Antisymmetric components
-                  ! omega_xy=(this%eigenval(2,i,j,k)*M(1,2)+this%eigenval(1,i,j,k)*M(2,1))/(this%eigenval(2,i,j,k)-this%eigenval(1,i,j,k)) 
-                  ! omega_xy=(this%eigenval(2,i,j,k)*M(1,2)+this%eigenval(1,i,j,k)*M(2,1))
-                  ! print *, 'omega_xy=',omega_xy
-                  ! omega_xz=(this%eigenval(3,i,j,k)*M(1,3)+this%eigenval(1,i,j,k)*M(3,1))/(this%eigenval(3,i,j,k)-this%eigenval(1,i,j,k))
-                  ! omega_xz=(this%eigenval(3,i,j,k)*M(1,3)+this%eigenval(1,i,j,k)*M(3,1))
-                  ! print *, 'omega_xz=',omega_xz 
-                  ! omega_yz=(this%eigenval(3,i,j,k)*M(2,3)+this%eigenval(2,i,j,k)*M(3,2))/(this%eigenval(3,i,j,k)-this%eigenval(2,i,j,k))
-                  ! omega_yz=(this%eigenval(3,i,j,k)*M(2,3)+this%eigenval(2,i,j,k)*M(3,2))
-                  ! print *, 'omega_yz=',omega_yz
-                  ! print *, 'eigval1=',this%eigenval(1,i,j,k)
-                  ! print *, 'eigval2=',this%eigenval(2,i,j,k)
-                  ! print *, 'eigval3=',this%eigenval(3,i,j,k)
+                  omega_xy=(this%eigenval(2,i,j,k)*M(1,2)+this%eigenval(1,i,j,k)*M(2,1))/(this%eigenval(2,i,j,k)-this%eigenval(1,i,j,k)) 
+                  omega_xz=(this%eigenval(3,i,j,k)*M(1,3)+this%eigenval(1,i,j,k)*M(3,1))/(this%eigenval(3,i,j,k)-this%eigenval(1,i,j,k))
+                  omega_yz=(this%eigenval(3,i,j,k)*M(2,3)+this%eigenval(2,i,j,k)*M(3,2))/(this%eigenval(3,i,j,k)-this%eigenval(2,i,j,k))
                   ! Temp matrix for calculating Omega
-                  ! tmpMat=0.0_WP
-                  ! tmpMat=reshape((/ 0.0_WP,-omega_xy,-omega_xz,omega_xy,0.0_WP,-omega_yz,omega_xz,omega_yz,0.0_WP /),shape(tmpMat))
-                  ! ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
-                  ! Omega=matmul(this%eigenvec(:,:,i,j,k),matmul(tmpMat,transpose(this%eigenvec(:,:,i,j,k))))
+                  tmpMat=0.0_WP
+                  tmpMat=reshape((/ 0.0_WP,-omega_xy,-omega_xz,omega_xy,0.0_WP,-omega_yz,omega_xz,omega_yz,0.0_WP /),shape(tmpMat))
+                  ! Form rotation component of conformation tensor (Omega=R*{{0,omega_xy,omega_xz},{-omega_xy,0,omega_yz},{-omega_xz,-omega_yz,0}}*R^T={{Omegaxx,Omegaxy,Omegaxz},{Omegayx,Omegayy,Omegayz},{Omegazx,Omegazy,Omegazz}})
+                  Omega=matmul(this%eigenvec(:,:,i,j,k),matmul(tmpMat,transpose(this%eigenvec(:,:,i,j,k))))
                end if
                ! Add extension and rotation components to resSC (Omega*log(C)-log(C)*Omega+2B)
-               ! !>xx tensor component
-               ! resSC(i,j,k,1)=2.00_WP*B(1,1)+Omega(1,2)*this%SC(i,j,k,2)-Omega(2,1)*this%SC(i,j,k,2)+Omega(1,3)*this%SC(i,j,k,3)-Omega(3,1)*this%SC(i,j,k,3)
-               ! !>xy tensor component
-               ! resSC(i,j,k,2)=2.00_WP*B(2,1)+Omega(2,1)*this%SC(i,j,k,1)-Omega(1,1)*this%SC(i,j,k,2)+Omega(2,2)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,3)-Omega(2,1)*this%SC(i,j,k,4)-Omega(3,1)*this%SC(i,j,k,5)
-               ! !>xz tensor component
-               ! resSC(i,j,k,3)=2.00_WP*B(3,1)+Omega(3,1)*this%SC(i,j,k,1)+Omega(3,2)*this%SC(i,j,k,2)-Omega(1,1)*this%SC(i,j,k,3)+Omega(3,3)*this%SC(i,j,k,3)-Omega(2,1)*this%SC(i,j,k,5)-Omega(3,1)*this%SC(i,j,k,6)
-               ! !>yy tensor component
-               ! resSC(i,j,k,4)=2.00_WP*B(2,2)-Omega(1,2)*this%SC(i,j,k,2)+Omega(2,1)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,5)
-               ! !>yz tensor component
-               ! resSC(i,j,k,5)=2.00_WP*B(3,2)+Omega(3,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,3)+Omega(3,2)*this%SC(i,j,k,4)-Omega(2,2)*this%SC(i,j,k,5)+Omega(3,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,6)
-               ! !>zz tensor component
-               ! resSC(i,j,k,6)=2.00_WP*B(3,3)-Omega(1,3)*this%SC(i,j,k,3)+Omega(3,1)*this%SC(i,j,k,3)-Omega(2,3)*this%SC(i,j,k,5)+Omega(3,2)*this%SC(i,j,k,5)
-               ! !>xx tensor component
-               resSC(i,j,k,1)=B(1,1)
+               !>xx tensor component
+               resSC(i,j,k,1)=2.00_WP*B(1,1)+Omega(1,2)*this%SC(i,j,k,2)-Omega(2,1)*this%SC(i,j,k,2)+Omega(1,3)*this%SC(i,j,k,3)-Omega(3,1)*this%SC(i,j,k,3)
                !>xy tensor component
-               resSC(i,j,k,2)=B(2,1)
+               resSC(i,j,k,2)=2.00_WP*B(2,1)+Omega(2,1)*this%SC(i,j,k,1)-Omega(1,1)*this%SC(i,j,k,2)+Omega(2,2)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,3)-Omega(2,1)*this%SC(i,j,k,4)-Omega(3,1)*this%SC(i,j,k,5)
                !>xz tensor component
-               resSC(i,j,k,3)=B(3,1)
+               resSC(i,j,k,3)=2.00_WP*B(3,1)+Omega(3,1)*this%SC(i,j,k,1)+Omega(3,2)*this%SC(i,j,k,2)-Omega(1,1)*this%SC(i,j,k,3)+Omega(3,3)*this%SC(i,j,k,3)-Omega(2,1)*this%SC(i,j,k,5)-Omega(3,1)*this%SC(i,j,k,6)
                !>yy tensor component
-               resSC(i,j,k,4)=B(2,2)
+               resSC(i,j,k,4)=2.00_WP*B(2,2)-Omega(1,2)*this%SC(i,j,k,2)+Omega(2,1)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,5)
                !>yz tensor component
-               resSC(i,j,k,5)=B(3,2)
+               resSC(i,j,k,5)=2.00_WP*B(3,2)+Omega(3,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,3)+Omega(3,2)*this%SC(i,j,k,4)-Omega(2,2)*this%SC(i,j,k,5)+Omega(3,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,6)
                !>zz tensor component
-               resSC(i,j,k,6)=B(3,3)
-               ! !>xx tensor component
-               ! resSC(i,j,k,1)=Omega(1,2)*this%SC(i,j,k,2)-Omega(2,1)*this%SC(i,j,k,2)+Omega(1,3)*this%SC(i,j,k,3)-Omega(3,1)*this%SC(i,j,k,3)
-               ! !>xy tensor component
-               ! resSC(i,j,k,2)=Omega(2,1)*this%SC(i,j,k,1)-Omega(1,1)*this%SC(i,j,k,2)+Omega(2,2)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,3)-Omega(2,1)*this%SC(i,j,k,4)-Omega(3,1)*this%SC(i,j,k,5)
-               ! !>xz tensor component
-               ! resSC(i,j,k,3)=Omega(3,1)*this%SC(i,j,k,1)+Omega(3,2)*this%SC(i,j,k,2)-Omega(1,1)*this%SC(i,j,k,3)+Omega(3,3)*this%SC(i,j,k,3)-Omega(2,1)*this%SC(i,j,k,5)-Omega(3,1)*this%SC(i,j,k,6)
-               ! !>yy tensor component
-               ! resSC(i,j,k,4)=Omega(1,2)*this%SC(i,j,k,2)+Omega(2,1)*this%SC(i,j,k,2)+Omega(2,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,5)
-               ! !>yz tensor component
-               ! resSC(i,j,k,5)=Omega(3,1)*this%SC(i,j,k,2)-Omega(1,2)*this%SC(i,j,k,3)+Omega(3,2)*this%SC(i,j,k,4)-Omega(2,2)*this%SC(i,j,k,5)+Omega(3,3)*this%SC(i,j,k,5)-Omega(3,2)*this%SC(i,j,k,6)
-               ! !>zz tensor component
-               ! resSC(i,j,k,6)=Omega(1,3)*this%SC(i,j,k,3)+Omega(3,1)*this%SC(i,j,k,3)-Omega(2,3)*this%SC(i,j,k,5)+Omega(3,2)*this%SC(i,j,k,5)
+               resSC(i,j,k,6)=2.00_WP*B(3,3)-Omega(1,3)*this%SC(i,j,k,3)+Omega(3,1)*this%SC(i,j,k,3)-Omega(2,3)*this%SC(i,j,k,5)+Omega(3,2)*this%SC(i,j,k,5)
             end do 
          end do
       end do
