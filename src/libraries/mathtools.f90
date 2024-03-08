@@ -197,7 +197,7 @@ contains
             end do cvg
             if (m.eq.l) cycle outer
             niter=niter+1
-            if (niter.ge.100) call die('[DSYEVQ3] Failed to converge')
+            if (niter.ge.30) call die('[DSYEVQ3] Failed to converge')
             G=(W(l+1)-W(l))/(2.0_WP*E(l))
             R=sqrt(1.0_WP+G**2)
             if (G.ge.0.0_WP) then

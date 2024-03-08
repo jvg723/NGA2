@@ -1,17 +1,17 @@
 # Parallelization
-Partition :	1 1 8
+Partition :	1 12 24
 
 # Are we using log conformation stabilzation 
 Stabilization : .true.
 
 # Mesh definition
 X droplet : 2
-Lx : 10  !40
+Lx : 20  !40
 Ly : 10  !20
 Lz : 10  !20
-nx : 64 !512
-ny : 64 !256
-nz : 64 !256
+nx : 512
+ny : 256
+nz : 256
 
 # Flow conditions
 Reynolds number :      1778
@@ -39,3 +39,4 @@ Ensight output period : 1
 
 # Post-processing output
 Postproc output period : 1
+

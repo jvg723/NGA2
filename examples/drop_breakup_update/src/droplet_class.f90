@@ -54,6 +54,7 @@ module droplet_class
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
       real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+      real(WP), dimension(:,:,:,:,:), allocatable :: Atmp
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -138,7 +139,6 @@ contains
          this%time%itmax=2
       end block initialize_timetracker
       
-      
       ! Allocate work arrays
       allocate_work_arrays: block
          allocate(this%resU      (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
@@ -150,6 +150,7 @@ contains
          allocate(this%resSC     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%Atmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:3,1:3))
       end block allocate_work_arrays
       
       
@@ -165,6 +166,7 @@ contains
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
          call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2p,transport_method=Cflux_storage,name='VOF')
+         this%vf%thin_thld_min=0.0_WP
          ! Initialize to a droplet
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
@@ -277,10 +279,12 @@ contains
          call param_read('Stabilization',stabilization,default=.false.)
          ! Initialize C scalar fields
          if (stabilization) then 
-            ! Get eigenvalues and eigenvectors
-            call this%ve%get_eigensystem()
-            ! Reconstruct conformation tensor
-            call this%ve%reconstruct_conformation()
+            !> Allocate storage fo eigenvalues and vectors
+            allocate(this%ve%eigenval    (1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%ve%eigenval=0.0_WP
+            allocate(this%ve%eigenvec(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%ve%eigenvec=0.0_WP
+            !> Allocate storage for reconstructured C and Cold
+            allocate(this%ve%SCrec   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)); this%ve%SCrec=0.0_WP
+            allocate(this%ve%SCrecold(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)); this%ve%SCrecold=0.0_WP
             do k=this%cfg%kmino_,this%cfg%kmaxo_
                do j=this%cfg%jmino_,this%cfg%jmaxo_
                   do i=this%cfg%imino_,this%cfg%imaxo_
@@ -292,8 +296,13 @@ contains
                   end do
                end do
             end do
+            ! Form temp A mat to get eigensystem (this is passing in an standard C matrix)
+            this%Atmp=0.0_WP
+            this%Atmp(1,1,:,:,:)=this%ve%SCrec(:,:,:,1); this%Atmp(1,2,:,:,:)=this%ve%SCrec(:,:,:,2); this%Atmp(1,3,:,:,:)=this%ve%SCrec(:,:,:,3)
+            this%Atmp(2,1,:,:,:)=this%ve%SCrec(:,:,:,2); this%Atmp(2,2,:,:,:)=this%ve%SCrec(:,:,:,4); this%Atmp(2,3,:,:,:)=this%ve%SCrec(:,:,:,5)
+            this%Atmp(3,1,:,:,:)=this%ve%SCrec(:,:,:,3); this%Atmp(3,2,:,:,:)=this%ve%SCrec(:,:,:,5); this%Atmp(3,3,:,:,:)=this%ve%SCrec(:,:,:,6)
             ! Get eigenvalues and eigenvectors
-            call this%ve%get_eigensystem()
+            call this%ve%get_eigensystem(this%Atmp)
          else
             do k=this%cfg%kmino_,this%cfg%kmaxo_
                do j=this%cfg%jmino_,this%cfg%jmaxo_
@@ -457,9 +466,11 @@ contains
          call this%vf%get_max()
          if (stabilization) then
             call this%ve%get_max_reconstructed(this%vf%VF)
+            call this%ve%get_max(this%vf%VF)
          else
             call this%ve%get_max(this%vf%VF)
          end if
+         call this%ve%get_max_eig()
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -497,8 +508,12 @@ contains
          call this%scfile%add_column(this%time%t,'Time')
          if (stabilization) then
             do nsc=1,this%ve%nscalar
-               call this%scfile%add_column(this%ve%SCrecmin(nsc),trim(this%ve%SCname(nsc))//'_min')
-               call this%scfile%add_column(this%ve%SCrecmax(nsc),trim(this%ve%SCname(nsc))//'_max')
+               call this%scfile%add_column(this%ve%SCrecmin(nsc),trim(this%ve%SCname(nsc))//'_RCmin')
+               call this%scfile%add_column(this%ve%SCrecmax(nsc),trim(this%ve%SCname(nsc))//'_RCmax')
+            end do
+            do nsc=1,this%ve%nscalar
+               call this%scfile%add_column(this%ve%SCmin(nsc),trim(this%ve%SCname(nsc))//'_lnmin')
+               call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_lnmax')
             end do
          else
             do nsc=1,this%ve%nscalar
@@ -506,6 +521,9 @@ contains
                call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
             end do
          end if
+         call this%scfile%add_column(this%ve%eigval1_max,'Max Eig1')
+         call this%scfile%add_column(this%ve%eigval2_max,'Max Eig2')
+         call this%scfile%add_column(this%ve%eigval3_max,'Max Eig3')
          call this%scfile%write()
          ! Create film thickness monitor
          this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
@@ -554,8 +572,8 @@ contains
          ! Add source terms for constitutive model
          if (stabilization) then 
             ! Update eigenvalues and eigenvectors
-            call this%ve%get_eigensystem()
-            call this%ve%get_CgradU_log(this%gradU,this%SCtmp); this%resSC=this%SCtmp
+            ! call this%ve%get_eigensystem()
+            call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%time%n); this%resSC=this%SCtmp
             ! call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
          else
             call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
@@ -576,8 +594,15 @@ contains
       end block advance_scalar
 
       if (stabilization) then 
-         ! Update eigenvalues and eigenvectors
-         call this%ve%get_eigensystem()
+         ! Form temp A mat to get eigensystem (this is passing in lnC matrix)
+         this%Atmp=0.0_WP
+         this%Atmp(1,1,:,:,:)=this%ve%SC(:,:,:,1); this%Atmp(1,2,:,:,:)=this%ve%SC(:,:,:,2); this%Atmp(1,3,:,:,:)=this%ve%SC(:,:,:,3)
+         this%Atmp(2,1,:,:,:)=this%ve%SC(:,:,:,2); this%Atmp(2,2,:,:,:)=this%ve%SC(:,:,:,4); this%Atmp(2,3,:,:,:)=this%ve%SC(:,:,:,5)
+         this%Atmp(3,1,:,:,:)=this%ve%SC(:,:,:,3); this%Atmp(3,2,:,:,:)=this%ve%SC(:,:,:,5); this%Atmp(3,3,:,:,:)=this%ve%SC(:,:,:,6)
+         ! Get eigenvalues and eigenvectors
+         call this%ve%get_eigensystem(this%Atmp)
+         this%ve%eigenval=exp(this%ve%eigenval)
+         ! Get exp of eigenvalues
          ! Reconstruct conformation tensor
          call this%ve%reconstruct_conformation()
          ! ! Add in relaxtion source from semi-anlaytical integration
@@ -623,77 +648,77 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         ! Add polymer stress term
-         polymer_stress: block
-            use tpviscoelastic_class, only: oldroydb,eptt
-            integer :: i,j,k,nsc,n
-            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-            real(WP), dimension(:,:,:,:), allocatable :: stress
-            real(WP) :: coeff,trace
-            ! Allocate work arrays
-            allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-            allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-            ! Calculate polymer stress for a given model
-            stress=0.0_WP
-            if (stabilization) then !< Build stress tensor from reconstructed C
-               select case (this%ve%model)
-               case (oldroydb)
-                  coeff=this%ve%visc_p/this%ve%trelax
-                  do k=this%cfg%kmino_,this%cfg%kmaxo_
-                     do j=this%cfg%jmino_,this%cfg%jmaxo_
-                        do i=this%cfg%imino_,this%cfg%imaxo_
-                           stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                           stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                           stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                           stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                           stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                           stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                        end do
-                     end do
-                  end do
-               end select 
-            else
-               select case (this%ve%model)
-               case (oldroydb)
-                  ! Calculate the polymer stress
-                  call this%ve%get_relax(stress,this%time%dt)
-                  ! Build liquid stress tensor
-                  do nsc=1,6
-                     stress(:,:,:,nsc)=-this%ve%visc_p*this%vf%VF*stress(:,:,:,nsc)
-                  end do
-               end select
-            end if
-            ! Interpolate tensor components to cell edges
-            do k=this%cfg%kmin_,this%cfg%kmax_+1
-               do j=this%cfg%jmin_,this%cfg%jmax_+1
-                  do i=this%cfg%imin_,this%cfg%imax_+1
-                     Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-                     Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-                     Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-                  end do
-               end do
-            end do
-            ! Add divergence of stress to residual
-            ! do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-            !    do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-            !       do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-            !          if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-            !          &                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))                     &
-            !          &                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-            !          if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-            !          &                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))                &
-            !          &                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-            !          if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-            !          &                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))                     &                  
-            !          &                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-            !       end do
-            !    end do
-            ! end do
-            ! Clean up
-            deallocate(stress,Txy,Tyz,Tzx)
-         end block polymer_stress
+         ! ! Add polymer stress term
+         ! polymer_stress: block
+         !    use tpviscoelastic_class, only: oldroydb,eptt
+         !    integer :: i,j,k,nsc,n
+         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+         !    real(WP), dimension(:,:,:,:), allocatable :: stress
+         !    real(WP) :: coeff,trace
+         !    ! Allocate work arrays
+         !    allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+         !    allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         !    ! Calculate polymer stress for a given model
+         !    stress=0.0_WP
+         !    if (stabilization) then !< Build stress tensor from reconstructed C
+         !       select case (this%ve%model)
+         !       case (oldroydb)
+         !          coeff=this%ve%visc_p/this%ve%trelax
+         !          do k=this%cfg%kmino_,this%cfg%kmaxo_
+         !             do j=this%cfg%jmino_,this%cfg%jmaxo_
+         !                do i=this%cfg%imino_,this%cfg%imaxo_
+         !                   stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+         !                   stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+         !                   stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+         !                   stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+         !                   stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+         !                   stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+         !                end do
+         !             end do
+         !          end do
+         !       end select 
+         !    else
+         !       select case (this%ve%model)
+         !       case (oldroydb)
+         !          ! Calculate the polymer stress
+         !          call this%ve%get_relax(stress,this%time%dt)
+         !          ! Build liquid stress tensor
+         !          do nsc=1,6
+         !             stress(:,:,:,nsc)=-this%ve%visc_p*this%vf%VF*stress(:,:,:,nsc)
+         !          end do
+         !       end select
+         !    end if
+         !    ! Interpolate tensor components to cell edges
+         !    do k=this%cfg%kmin_,this%cfg%kmax_+1
+         !       do j=this%cfg%jmin_,this%cfg%jmax_+1
+         !          do i=this%cfg%imin_,this%cfg%imax_+1
+         !             Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+         !             Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+         !             Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+         !          end do
+         !       end do
+         !    end do
+         !    ! Add divergence of stress to residual
+         !    ! do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+         !    !    do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+         !    !       do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+         !    !          if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+         !    !          &                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))                     &
+         !    !          &                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+         !    !          if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+         !    !          &                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))                &
+         !    !          &                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+         !    !          if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+         !    !          &                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))                     &                  
+         !    !          &                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+         !    !       end do
+         !    !    end do
+         !    ! end do
+         !    ! Clean up
+         !    deallocate(stress,Txy,Tyz,Tzx)
+         ! end block polymer_stress
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
@@ -840,8 +865,10 @@ contains
       ! Perform and output monitoring
       call this%fs%get_max()
       call this%vf%get_max()
+      call this%ve%get_max_eig()
       if (stabilization) then
          call this%ve%get_max_reconstructed(this%vf%VF)
+         call this%ve%get_max(this%vf%VF)
       else
          call this%ve%get_max(this%vf%VF)
       end if
@@ -860,7 +887,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
-      deallocate(this%resSC,this%gradU,this%SCtmp)
+      deallocate(this%resSC,this%gradU,this%SCtmp,this%Atmp)
       
    end subroutine final
    
