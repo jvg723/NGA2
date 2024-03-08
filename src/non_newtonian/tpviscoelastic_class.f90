@@ -570,7 +570,7 @@ contains
       use mathtools, only: eigensolve3
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:,1:), intent(in) :: Atmp
+      real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: Atmp
       integer :: i,j,k
       ! real(WP), dimension(3,3) :: A
       ! First ensure storage is allocated

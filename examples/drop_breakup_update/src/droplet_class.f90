@@ -150,7 +150,7 @@ contains
          allocate(this%resSC     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%Atmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:3,1:3))
+         allocate(this%Atmp(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -298,9 +298,15 @@ contains
             end do
             ! Form temp A mat to get eigensystem (this is passing in an standard C matrix)
             this%Atmp=0.0_WP
-            this%Atmp(1,1,:,:,:)=this%ve%SCrec(:,:,:,1); this%Atmp(1,2,:,:,:)=this%ve%SCrec(:,:,:,2); this%Atmp(1,3,:,:,:)=this%ve%SCrec(:,:,:,3)
-            this%Atmp(2,1,:,:,:)=this%ve%SCrec(:,:,:,2); this%Atmp(2,2,:,:,:)=this%ve%SCrec(:,:,:,4); this%Atmp(2,3,:,:,:)=this%ve%SCrec(:,:,:,5)
-            this%Atmp(3,1,:,:,:)=this%ve%SCrec(:,:,:,3); this%Atmp(3,2,:,:,:)=this%ve%SCrec(:,:,:,5); this%Atmp(3,3,:,:,:)=this%ve%SCrec(:,:,:,6)
+            do k=this%cfg%kmino_,this%cfg%kmaxo_
+               do j=this%cfg%jmino_,this%cfg%jmaxo_
+                  do i=this%cfg%imino_,this%cfg%imaxo_
+                     this%Atmp(1,1,i,j,k)=this%ve%SCrec(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SCrec(i,j,k,3)
+                     this%Atmp(2,1,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SCrec(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SCrec(i,j,k,5)
+                     this%Atmp(3,1,i,j,k)=this%ve%SCrec(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SCrec(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SCrec(i,j,k,6)
+                  end do
+               end do
+            end do
             ! Get eigenvalues and eigenvectors
             call this%ve%get_eigensystem(this%Atmp)
          else
@@ -320,6 +326,7 @@ contains
          call this%ve%apply_bcond(this%time%t,this%time%dt)
       end block create_viscoelastic
 
+      print *, '2'
       ! Create a Lagrangian spray tracker
       create_lpt: block
          use param, only: param_read
@@ -429,7 +436,6 @@ contains
             end do
          end if
       end block create_smesh
-
 
       ! Add Ensight output
       create_ensight: block
@@ -545,7 +551,6 @@ contains
          call this%filmfile%write()
       end block create_monitor
 
-      
    end subroutine init
    
    
@@ -595,10 +600,19 @@ contains
 
       if (stabilization) then 
          ! Form temp A mat to get eigensystem (this is passing in lnC matrix)
-         this%Atmp=0.0_WP
-         this%Atmp(1,1,:,:,:)=this%ve%SC(:,:,:,1); this%Atmp(1,2,:,:,:)=this%ve%SC(:,:,:,2); this%Atmp(1,3,:,:,:)=this%ve%SC(:,:,:,3)
-         this%Atmp(2,1,:,:,:)=this%ve%SC(:,:,:,2); this%Atmp(2,2,:,:,:)=this%ve%SC(:,:,:,4); this%Atmp(2,3,:,:,:)=this%ve%SC(:,:,:,5)
-         this%Atmp(3,1,:,:,:)=this%ve%SC(:,:,:,3); this%Atmp(3,2,:,:,:)=this%ve%SC(:,:,:,5); this%Atmp(3,3,:,:,:)=this%ve%SC(:,:,:,6)
+         Temp_mat: block
+            integer :: i,j,k,nsc
+            do k=this%cfg%kmino_,this%cfg%kmaxo_
+               this%Atmp=0.0_WP
+               do j=this%cfg%jmino_,this%cfg%jmaxo_
+                  do i=this%cfg%imino_,this%cfg%imaxo_
+                     this%Atmp(1,1,i,j,k)=this%ve%SC(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SC(i,j,k,3)
+                     this%Atmp(2,1,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SC(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SC(i,j,k,5)
+                     this%Atmp(3,1,i,j,k)=this%ve%SC(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SC(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SC(i,j,k,6)
+                  end do
+               end do
+            end do
+         end block Temp_mat
          ! Get eigenvalues and eigenvectors
          call this%ve%get_eigensystem(this%Atmp)
          this%ve%eigenval=exp(this%ve%eigenval)
