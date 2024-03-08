@@ -634,8 +634,8 @@ contains
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Skip non-solved cells
                if (this%mask(i,j,k).ne.0) cycle
-               ! Converteigenvalues into log
-               this%eigenval(:,i,j,k)=log(this%eigenval(:,i,j,k))
+               ! ! Converteigenvalues into log
+               ! this%eigenval(:,i,j,k)=log(this%eigenval(:,i,j,k))
                ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
                !>xx tensor component
                this%SC(i,j,k,1)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2

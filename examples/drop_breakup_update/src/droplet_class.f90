@@ -578,7 +578,7 @@ contains
             ! Update eigenvalues and eigenvectors
             ! call this%ve%get_eigensystem()
             call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%time%n); this%resSC=this%SCtmp
-            call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
+            ! call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
          else
             call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
             call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
@@ -614,17 +614,33 @@ contains
          end block Temp_mat
          ! Get eigenvalues and eigenvectors
          call this%ve%get_eigensystem(this%Atmp)
-         this%ve%eigenval=exp(this%ve%eigenval)
          ! Get exp of eigenvalues
+         this%ve%eigenval=exp(this%ve%eigenval)
          ! Reconstruct conformation tensor
          call this%ve%reconstruct_conformation()
-         ! ! Add in relaxtion source from semi-anlaytical integration
-         ! call this%ve%get_relax_analytical(this%time%dt)
-         ! ! Reconstruct lnC for next time step
-         ! !> get eigenvalues and eigenvectors based on reconstructed C
-         ! call this%ve%get_eigensystem_SCrec()
-         ! !> Reconstruct lnC from eigenvalues and eigenvectors
-         ! call this%ve%reconstruct_log_conformation()
+         ! Add in relaxtion source from semi-anlaytical integration
+         call this%ve%get_relax_analytical(this%time%dt)
+         ! Reconstruct lnC for next time step
+         !> get eigenvalues and eigenvectors based on reconstructed C
+         Temp_mat2: block
+         integer :: i,j,k,nsc
+         this%Atmp=0.0_WP
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  this%Atmp(1,1,i,j,k)=this%ve%SCrec(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SCrec(i,j,k,3)
+                  this%Atmp(2,1,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SCrec(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SCrec(i,j,k,5)
+                  this%Atmp(3,1,i,j,k)=this%ve%SCrec(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SCrec(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SCrec(i,j,k,6)
+               end do
+            end do
+         end do
+      end block Temp_mat2
+      ! Get eigenvalues and eigenvectors
+      call this%ve%get_eigensystem(this%Atmp)
+      ! Get log of eigenvalues
+      this%ve%eigenval=log(this%ve%eigenval)
+      !> Reconstruct lnC from eigenvalues and eigenvectors
+      call this%ve%reconstruct_log_conformation()
       end if
 
       ! Remember old VOF
