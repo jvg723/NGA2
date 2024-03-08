@@ -601,8 +601,8 @@ contains
          ! Form temp A mat to get eigensystem (this is passing in lnC matrix)
          Temp_mat: block
             integer :: i,j,k,nsc
+            this%Atmp=0.0_WP
             do k=this%cfg%kmino_,this%cfg%kmaxo_
-               this%Atmp=0.0_WP
                do j=this%cfg%jmino_,this%cfg%jmaxo_
                   do i=this%cfg%imino_,this%cfg%imaxo_
                      this%Atmp(1,1,i,j,k)=this%ve%SC(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SC(i,j,k,3)
