@@ -578,7 +578,7 @@ contains
             ! Update eigenvalues and eigenvectors
             ! call this%ve%get_eigensystem()
             call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%time%n); this%resSC=this%SCtmp
-            ! call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
+            call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
          else
             call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
             call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
