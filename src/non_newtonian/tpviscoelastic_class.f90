@@ -595,9 +595,9 @@ contains
                   this%eigenvec(2,1,i,j,k)=0.00_WP; this%eigenvec(2,2,i,j,k)=1.00_WP; this%eigenvec(2,3,i,j,k)=0.00_WP
                   this%eigenvec(3,1,i,j,k)=0.00_WP; this%eigenvec(3,2,i,j,k)=0.00_WP; this%eigenvec(3,3,i,j,k)=1.00_WP
                   ! Eigenvalues
-                  this%eigenval(1,:,:,:)=1.00_WP
-                  this%eigenval(2,:,:,:)=1.00_WP
-                  this%eigenval(3,:,:,:)=1.00_WP
+                  this%eigenval(1,i,j,k)=1.00_WP
+                  this%eigenval(2,i,j,k)=1.00_WP
+                  this%eigenval(3,i,j,k)=1.00_WP
                else
                   ! Diagonalize it
                   call eigensolve3(Atmp,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))

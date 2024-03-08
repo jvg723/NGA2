@@ -326,7 +326,6 @@ contains
          call this%ve%apply_bcond(this%time%t,this%time%dt)
       end block create_viscoelastic
 
-      print *, '2'
       ! Create a Lagrangian spray tracker
       create_lpt: block
          use param, only: param_read
