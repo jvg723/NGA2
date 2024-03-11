@@ -605,9 +605,11 @@ contains
             do k=this%cfg%kmino_,this%cfg%kmaxo_
                do j=this%cfg%jmino_,this%cfg%jmaxo_
                   do i=this%cfg%imino_,this%cfg%imaxo_
-                     this%Atmp(1,1,i,j,k)=this%ve%SC(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SC(i,j,k,3)
-                     this%Atmp(2,1,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SC(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SC(i,j,k,5)
-                     this%Atmp(3,1,i,j,k)=this%ve%SC(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SC(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SC(i,j,k,6)
+                     if (this%vf%VF(i,j,k).gt.0.0_WP) then
+                        this%Atmp(1,1,i,j,k)=this%ve%SC(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SC(i,j,k,3)
+                        this%Atmp(2,1,i,j,k)=this%ve%SC(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SC(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SC(i,j,k,5)
+                        this%Atmp(3,1,i,j,k)=this%ve%SC(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SC(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SC(i,j,k,6)
+                     end if
                   end do
                end do
             end do
@@ -628,9 +630,11 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  this%Atmp(1,1,i,j,k)=this%ve%SCrec(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SCrec(i,j,k,3)
-                  this%Atmp(2,1,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SCrec(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SCrec(i,j,k,5)
-                  this%Atmp(3,1,i,j,k)=this%ve%SCrec(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SCrec(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SCrec(i,j,k,6)
+                  if (this%vf%VF(i,j,k).gt.0.0_WP) then
+                     this%Atmp(1,1,i,j,k)=this%ve%SCrec(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SCrec(i,j,k,3)
+                     this%Atmp(2,1,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SCrec(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SCrec(i,j,k,5)
+                     this%Atmp(3,1,i,j,k)=this%ve%SCrec(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SCrec(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SCrec(i,j,k,6)
+                  end if
                end do
             end do
          end do

@@ -540,7 +540,7 @@ contains
                ! A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
                ! A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
                ! Check if A is proprtional to I
-               if (Atmp(2,1,i,j,k)**2.le.1e-15.and.Atmp(3,1,i,j,k)**2.le.1e-15.and.Atmp(3,2,i,j,k)**2.le.1e-15) then
+               if (Atmp(2,1,i,j,k).le.1e-15.and.Atmp(3,1,i,j,k).le.1e-15.and.Atmp(3,2,i,j,k).le.1e-15) then
                   !>If C is propotional to I, set eigenvalues and eigenvectors to that of the identifty tensor
                   ! Eigenvectors
                   this%eigenvec(1,1,i,j,k)=1.00_WP; this%eigenvec(1,2,i,j,k)=0.00_WP; this%eigenvec(1,3,i,j,k)=0.00_WP
