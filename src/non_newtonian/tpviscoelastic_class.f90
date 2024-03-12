@@ -495,6 +495,7 @@ contains
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       integer :: i,j,k
       real(WP), dimension(3,3) :: A
+      real(WP) :: trace
       ! First ensure storage is allocated
       ! if (.not.allocated(this%eigenval)) allocate(this%eigenval    (1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       ! if (.not.allocated(this%eigenvec)) allocate(this%eigenvec(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
@@ -506,14 +507,31 @@ contains
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                if (VF(i,j,k).gt.0.0_WP) then
+                  A=0.0_WP
                   ! Form local matrix to diagonalize
                   A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
                   A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
                   A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
+                  trace=A(1,1)+A(2,2)+A(3,3)
+                  if (A(2,1)**2.le.1e-15.and.A(3,1)**2.le.1e-15.and.A(3,2)**2.le.1e-15) then
+                  ! >If C is propotional to I, set eigenvalues and eigenvectors to that of the identifty tensor
+                  ! Eigenvectors
+                  this%eigenvec(1,1,i,j,k)=1.00_WP; this%eigenvec(1,2,i,j,k)=0.00_WP; this%eigenvec(1,3,i,j,k)=0.00_WP
+                  this%eigenvec(2,1,i,j,k)=0.00_WP; this%eigenvec(2,2,i,j,k)=1.00_WP; this%eigenvec(2,3,i,j,k)=0.00_WP
+                  this%eigenvec(3,1,i,j,k)=0.00_WP; this%eigenvec(3,2,i,j,k)=0.00_WP; this%eigenvec(3,3,i,j,k)=1.00_WP
+                  ! Eigenvalues
+                  this%eigenval(1,i,j,k)=1.00_WP
+                  this%eigenval(2,i,j,k)=1.00_WP
+                  this%eigenval(3,i,j,k)=1.00_WP
+                  else
                   ! Diagonalize it
-                  call eigensolve3(A,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
-                  ! Take the exponential
-                  this%eigenval(:,i,j,k)=exp(this%eigenval(:,i,j,k))
+                     call eigensolve3(A,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
+                     ! Take the exponential
+                     this%eigenval(:,i,j,k)=exp(this%eigenval(:,i,j,k))
+                     ! ! Scale by alpha
+                     ! this%eigenvec(:,:,i,j,k)=VF(i,j,k)*this%eigenvec(:,:,i,j,k)
+                     ! this%eigenval(:,i,j,k)=VF(i,j,k)*this%eigenval(:,i,j,k)
+                  end if
                end if
             end do
          end do
@@ -574,6 +592,7 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       integer :: i,j,k
       real(WP), dimension(3,3) :: A
+      real(WP) :: trace
       ! First ensure storage is allocated
       ! if (.not.allocated(this%eigenval)) allocate(this%eigenval    (1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       ! if (.not.allocated(this%eigenvec)) allocate(this%eigenvec(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
@@ -585,11 +604,16 @@ contains
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Form local matrix to diagonalize
+               A=0.0_WP
                A(1,1)=this%SCrec(i,j,k,1); A(1,2)=this%SCrec(i,j,k,2); A(1,3)=this%SCrec(i,j,k,3)
                A(2,1)=this%SCrec(i,j,k,2); A(2,2)=this%SCrec(i,j,k,4); A(2,3)=this%SCrec(i,j,k,5)
                A(3,1)=this%SCrec(i,j,k,3); A(3,2)=this%SCrec(i,j,k,5); A(3,3)=this%SCrec(i,j,k,6)
+               trace=A(1,1)+A(2,2)+A(3,3)
+               if (A(2,1).le.1e-15.and.A(3,1).le.1e-15.and.A(3,2).le.1e-15.and.trace.le.3.10_WP.and.trace.ge.2.90_WP) then
+               else
                ! Diagonalize it
                call eigensolve3(A,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
+               end if
             end do
          end do
       end do
