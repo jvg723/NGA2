@@ -2,12 +2,12 @@
 Partition :	8 1 1
 
 # Domain definition
-Lx : 5
-Ly : 5
-Lz : 5
-nx : 128
-ny : 128
-nz : 128
+Lx : 4
+Ly : 4
+Lz : 4
+nx : 64
+ny : 64
+nz : 64
 
 # Problem definition
 Inner radius :    0.4
@@ -25,7 +25,7 @@ Surface tension coefficient : 1e-3
 # Time integration
 Max timestep size : 4e-3
 Max cfl number :    0.5
-Max time :          100
+Max time :          10
 
 # Pressure solver
 Pressure tolerance : 1e-5

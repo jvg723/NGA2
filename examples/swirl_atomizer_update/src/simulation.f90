@@ -328,8 +328,12 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         smesh=surfmesh(nvar=1,name='plic')
+         smesh=surfmesh(nvar=5,name='plic')
          smesh%varname(1)='nplane'
+         smesh%varname(2)='curv'
+         smesh%varname(3)='edge_sensor'
+         smesh%varname(4)='thin_sensor'
+         smesh%varname(5)='thickness'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate nplane variable
@@ -341,6 +345,10 @@ contains
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                        smesh%var(2,np)=vf%curv2p(nplane,i,j,k)
+                        smesh%var(3,np)=vf%edge_sensor(i,j,k)
+                        smesh%var(4,np)=vf%thin_sensor(i,j,k)
+                        smesh%var(5,np)=vf%thickness  (i,j,k)
                      end if
                   end do
                end do
@@ -532,6 +540,10 @@ contains
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                               np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                              smesh%var(2,np)=vf%curv2p(nplane,i,j,k)
+                              smesh%var(3,np)=vf%edge_sensor(i,j,k)
+                              smesh%var(4,np)=vf%thin_sensor(i,j,k)
+                              smesh%var(5,np)=vf%thickness  (i,j,k)
                            end if
                         end do
                      end do
