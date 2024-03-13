@@ -14,7 +14,6 @@ module block2_class
    use event_class,        only: event
    use monitor_class,      only: monitor
    use film_class,         only: film
-   use transfermodel_class,only: transfermodels
    implicit none
    private
 
@@ -27,8 +26,6 @@ module block2_class
       type(ddadi)            :: vs                     !< DDAI implicit solver
       type(tpns)             :: fs                     !< Two phase incompressible flow solver
       type(vfs)              :: vf                     !< VF solve
-      type(film)             :: fm
-      type(transfermodels)   :: tm
       type(timetracker)      :: time                   !< Time tracker
       type(surfmesh)         :: smesh                  !< Surfmesh                                       
       type(ensight)          :: ens_out                !< Ensight output
@@ -301,31 +298,18 @@ contains
          call b%fs%get_div()
       end block initialize_velocity
 
-      ! Create a film model
-      create_transfer_model: block
-         use param, only: param_read
-         real(WP) :: edgeint
-         call b%fm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs)
-         call b%tm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs,lp=b%lp)
-         b%burst=merge(1,0,b%tm%burst)
-      end block create_transfer_model
-
 
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         b%smesh=surfmesh(nvar=9,name='plic')
+         b%smesh=surfmesh(nvar=5,name='plic')
          b%smesh%varname(1)='nplane'
          b%smesh%varname(2)='curv'
          b%smesh%varname(3)='edge_sensor'
          b%smesh%varname(4)='thin_sensor'
          b%smesh%varname(5)='thickness'
-         b%smesh%varname(6)='id'
-         b%smesh%varname(7)='struct_type'
-         b%smesh%varname(8)='struct_thickness'
-         b%smesh%varname(9)='rank'
          ! Transfer polygons to smesh
          call b%vf%update_surfmesh(b%smesh)
          ! Also populate nplane variable
@@ -341,10 +325,6 @@ contains
                         b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
                         b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                         b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
-                        b%smesh%var(6,np)=real(b%tm%cc%id(i,j,k),WP)
-                        b%smesh%var(7,np)=real(b%tm%cc%struct_type(i,j,k),WP)
-                        b%smesh%var(8,np)=b%tm%cc%struct_thickness(i,j,k)
-                        b%smesh%var(9,np)=b%cfg%rank
                      end if
                   end do
                end do
@@ -408,14 +388,6 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
-         ! Create film thickness monitor
-         this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
-         call this%filmfile%add_column(this%time%n,'Timestep number')
-         call this%filmfile%add_column(b%time%t,'Time')
-         call this%filmfile%add_column(b%tm%min_thickness,'Min thickness')
-         call this%filmfile%add_column(b%tm%film_volume,'Largest Film volume')
-         call this%filmfile%add_column(b%tm%film_ratio,'Vb/V0')
-         call this%filmfile%write()
       end block create_monitor
 
       
@@ -570,10 +542,6 @@ contains
                            b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
                            b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
-                           b%smesh%var(6,np)=real(b%tm%cc%id(i,j,k),WP)
-                           b%smesh%var(7,np)=real(b%tm%cc%struct_type(i,j,k),WP)
-                           b%smesh%var(8,np)=b%tm%cc%struct_thickness(i,j,k)
-                           b%smesh%var(9,np)=b%cfg%rank
                         end if
                      end do
                   end do
