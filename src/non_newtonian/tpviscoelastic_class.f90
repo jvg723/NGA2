@@ -145,12 +145,12 @@ contains
    
    !> Get CgradU source terms to add to multiscalar residual
    !> Assumes scalar being transported is ln(C)
-   subroutine get_CgradU_log(this,gradu,resSC,time_step)
+   subroutine get_CgradU_log(this,gradu,resSC,VF)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
-      integer, intent(in) :: time_step
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       integer :: i,j,k
       ! Temp scalar values for matrix multiplication
       real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
@@ -161,7 +161,7 @@ contains
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Skip non-solved cells
-               if (this%mask(i,j,k).ne.0) cycle
+               if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                ! Zero out diagonaliztion matrices
                B=0.0_WP; Omega=0.0_WP; D=0.0_WP; M=0.0_WP; tmpMat=0.0_WP
                omega_xy=0.0_WP; omega_xz=0.0_WP; omega_yz=0.0_WP
