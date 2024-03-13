@@ -579,7 +579,7 @@ contains
             ! Streching 
             call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
             ! Relxation
-            ! call this%ve%get_relax_log(this%SCtmp);           this%resSC=this%resSC+this%SCtmp
+            call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);           this%resSC=this%resSC+this%SCtmp
          else
             call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
             call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
