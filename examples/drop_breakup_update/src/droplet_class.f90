@@ -579,7 +579,7 @@ contains
             ! Streching 
             call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
             ! Relxation
-            call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);           this%resSC=this%resSC+this%SCtmp
+            call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
          else
             call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
             call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
@@ -601,29 +601,12 @@ contains
       if (stabilization) then 
          ! Get eigenvalues and eigenvectors
          call this%ve%get_eigensystem(this%vf%VF)
-         ! Get exp of eigenvalues
-         ! this%ve%eigenval=exp(this%ve%eigenval)
          ! Reconstruct conformation tensor
-         call this%ve%reconstruct_conformation()
+         call this%ve%reconstruct_conformation(this%vf%VF)
          ! Add in relaxtion source from semi-anlaytical integration
-      !    call this%ve%get_relax_analytical(this%time%dt)
-      !    ! Reconstruct lnC for next time step
-      !    !> get eigenvalues and eigenvectors based on reconstructed C
-      !    Temp_mat2: block
-      !    integer :: i,j,k,nsc
-      !    this%Atmp=0.0_WP
-      !    do k=this%cfg%kmino_,this%cfg%kmaxo_
-      !       do j=this%cfg%jmino_,this%cfg%jmaxo_
-      !          do i=this%cfg%imino_,this%cfg%imaxo_
-      !             if (this%vf%VF(i,j,k).gt.0.0_WP) then
-      !                this%Atmp(1,1,i,j,k)=this%ve%SCrec(i,j,k,1); this%Atmp(1,2,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(1,3,i,j,k)=this%ve%SCrec(i,j,k,3)
-      !                this%Atmp(2,1,i,j,k)=this%ve%SCrec(i,j,k,2); this%Atmp(2,2,i,j,k)=this%ve%SCrec(i,j,k,4); this%Atmp(2,3,i,j,k)=this%ve%SCrec(i,j,k,5)
-      !                this%Atmp(3,1,i,j,k)=this%ve%SCrec(i,j,k,3); this%Atmp(3,2,i,j,k)=this%ve%SCrec(i,j,k,5); this%Atmp(3,3,i,j,k)=this%ve%SCrec(i,j,k,6)
-      !             end if
-      !          end do
-      !       end do
-      !    end do
-      ! end block Temp_mat2
+         ! call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
+         ! Reconstruct lnC for next time step
+         !> get eigenvalues and eigenvectors based on reconstructed C
       ! ! Get eigenvalues and eigenvectors
       ! call this%ve%get_eigensystem(this%Atmp)
       ! ! Get log of eigenvalues

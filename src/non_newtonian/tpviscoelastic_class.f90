@@ -314,10 +314,11 @@ contains
    end subroutine get_relax
 
    !> Add viscoelastic relaxation source based on semi analtical integration
-   subroutine get_relax_analytical(this,dt)
+   subroutine get_relax_analytical(this,dt,VF)
       use messager, only: die
       implicit none
       class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       real(WP), intent(in) :: dt
       integer :: i,j,k
       real(WP) :: f,coeff
@@ -327,7 +328,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                   this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
                   this%SCrec(i,j,k,2)=this%SCrec(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
                   this%SCrec(i,j,k,3)=this%SCrec(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
@@ -341,15 +342,8 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
-                  ! f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCold(i,j,k,1)+this%SCold(i,j,k,4)+this%SCold(i,j,k,6))-3.0_WP))
-                  ! coeff=-1.00_WP*((f*dt)/this%trelax)    
-                  ! this%SC(i,j,k,1)=this%SC(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
-                  ! this%SC(i,j,k,2)=this%SC(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
-                  ! this%SC(i,j,k,3)=this%SC(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
-                  ! this%SC(i,j,k,4)=this%SC(i,j,k,4)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< yy tensor component
-                  ! this%SC(i,j,k,5)=this%SC(i,j,k,5)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< yz tensor component
-                  ! this%SC(i,j,k,6)=this%SC(i,j,k,6)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< zz tensor component
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
+                  f=0.0_WP; coeff=0.0_WP
                   f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCrecold(i,j,k,1)+this%SCrecold(i,j,k,4)+this%SCrecold(i,j,k,6))-3.0_WP))
                   coeff=-1.00_WP*((f*dt)/this%trelax)    
                   this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
@@ -517,51 +511,6 @@ contains
       end do
    end subroutine get_eigensystem
 
-   ! !> Calculate the this%eigenval and eigenvectors of the conformation tensor for the whole domain
-   ! subroutine get_eigensystem(this,Atmp)
-   !    use mathtools, only: eigensolve3
-   !    implicit none
-   !    class(tpviscoelastic), intent(inout) :: this
-   !    real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: Atmp
-   !    integer :: i,j,k
-   !    ! real(WP), dimension(3,3) :: A
-   !    ! First ensure storage is allocated
-   !    ! if (.not.allocated(this%eigenval)) allocate(this%eigenval    (1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-   !    ! if (.not.allocated(this%eigenvec)) allocate(this%eigenvec(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-   !    ! Empty storage
-   !    this%eigenval=0.0_WP
-   !    this%eigenvec=0.0_WP
-   !    ! Loop over the domain
-   !    do k=this%cfg%kmino_,this%cfg%kmaxo_
-   !       do j=this%cfg%jmino_,this%cfg%jmaxo_
-   !          do i=this%cfg%imino_,this%cfg%imaxo_
-   !             ! Form local matrix to diagonalize
-   !             ! A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
-   !             ! A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
-   !             ! A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
-   !             ! Check if A is proprtional to I
-   !             ! if (Atmp(2,1,i,j,k).le.1e-15.and.Atmp(3,1,i,j,k).le.1e-15.and.Atmp(3,2,i,j,k).le.1e-15) then
-   !                !>If C is propotional to I, set eigenvalues and eigenvectors to that of the identifty tensor
-   !                ! Eigenvectors
-   !                ! this%eigenvec(1,1,i,j,k)=1.00_WP; this%eigenvec(1,2,i,j,k)=0.00_WP; this%eigenvec(1,3,i,j,k)=0.00_WP
-   !                ! this%eigenvec(2,1,i,j,k)=0.00_WP; this%eigenvec(2,2,i,j,k)=1.00_WP; this%eigenvec(2,3,i,j,k)=0.00_WP
-   !                ! this%eigenvec(3,1,i,j,k)=0.00_WP; this%eigenvec(3,2,i,j,k)=0.00_WP; this%eigenvec(3,3,i,j,k)=1.00_WP
-   !                ! Eigenvalues
-   !                ! this%eigenval(1,i,j,k)=1.00_WP
-   !                ! this%eigenval(2,i,j,k)=1.00_WP
-   !                ! this%eigenval(3,i,j,k)=1.00_WP
-   !             ! else
-   !                ! Diagonalize it
-   !                call eigensolve3(Atmp,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
-   !                ! Take the exponential
-   !                ! this%eigenval(:,i,j,k)=exp(this%eigenval(:,i,j,k))
-   !                ! this%eigenval(:,i,j,k)=this%eigenval(:,i,j,k)
-   !             ! end if
-   !          end do
-   !       end do
-   !    end do
-   ! end subroutine get_eigensystem
-
    
    !> Calculate the this%eigenval and eigenvectors of the conformation tensor for the whole domain
    !> Assumes scalar being transported is C
@@ -599,19 +548,17 @@ contains
    end subroutine get_eigensystem_SCrec
 
    !> Reconstruct the conformation tensor for its decomposed eigenvalues and eigenvectors
-   subroutine reconstruct_conformation(this)
+   subroutine reconstruct_conformation(this,VF)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       integer :: i,j,k
-      ! First ensure storage is allocated
-      ! if (.not.allocated(this%SCrec))    allocate(this%SCrec(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)) 
-      ! if (.not.allocated(this%SCrecold)) allocate(this%SCrecold(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6)) 
       this%SCrec=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Skip non-solved cells
-               if (this%mask(i,j,k).ne.0) cycle
+               if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                ! Reconstruct conformation tensor (C=R*exp(ln(Lambda))*R^T={{Cxx,Cxy,Cxz},{Cxy,Cyy,Cyz},{Cxz,Cyz,Czz}})
                !>xx tensor component
                this%SCrec(i,j,k,1)=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2                      +this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2                      +this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2
