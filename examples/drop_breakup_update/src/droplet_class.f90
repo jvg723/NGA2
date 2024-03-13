@@ -579,7 +579,7 @@ contains
             ! Streching 
             call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
             ! Relxation
-            call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
+            ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
          else
             call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
             call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
@@ -604,15 +604,14 @@ contains
          ! Reconstruct conformation tensor
          call this%ve%reconstruct_conformation(this%vf%VF)
          ! Add in relaxtion source from semi-anlaytical integration
-         ! call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
+         call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
          ! Reconstruct lnC for next time step
          !> get eigenvalues and eigenvectors based on reconstructed C
-      ! ! Get eigenvalues and eigenvectors
-      ! call this%ve%get_eigensystem(this%Atmp)
-      ! ! Get log of eigenvalues
-      ! this%ve%eigenval=log(this%ve%eigenval)
-      ! !> Reconstruct lnC from eigenvalues and eigenvectors
-      ! call this%ve%reconstruct_log_conformation()
+         call this%ve%get_eigensystem_SCrec(this%vf%VF)
+         !> Reconstruct lnC from eigenvalues and eigenvectors
+         call this%ve%reconstruct_log_conformation(this%vf%VF)
+         ! Take exp(eigenvalues) to use in next time-step
+         this%ve%eigenval=exp(this%ve%eigenval)
       end if
 
       ! Remember old VOF
