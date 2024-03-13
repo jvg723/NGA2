@@ -494,16 +494,20 @@ contains
       do k=this%cfg%kmino_,this%cfg%kmaxo_
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
-               if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
-               A=0.0_WP
-               ! Form local matrix to diagonalize
-               A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
-               A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
-               A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
-               ! Diagonalize it
-               call eigensolve3(A,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
-               ! Take the exponential
-               this%eigenval(:,i,j,k)=exp(this%eigenval(:,i,j,k))
+               if (this%mask(i,j,k).eq.0.and.VF(i,j,k).ne.0.0_WP) then
+                  A=0.0_WP
+                  ! Form local matrix to diagonalize
+                  A(1,1)=this%SC(i,j,k,1); A(1,2)=this%SC(i,j,k,2); A(1,3)=this%SC(i,j,k,3)
+                  A(2,1)=this%SC(i,j,k,2); A(2,2)=this%SC(i,j,k,4); A(2,3)=this%SC(i,j,k,5)
+                  A(3,1)=this%SC(i,j,k,3); A(3,2)=this%SC(i,j,k,5); A(3,3)=this%SC(i,j,k,6)
+                  ! Diagonalize it
+                  call eigensolve3(A,this%eigenvec(:,:,i,j,k),this%eigenval(:,i,j,k))
+                  ! Take the exponential
+                  this%eigenval(:,i,j,k)=exp(this%eigenval(:,i,j,k))
+               else
+                  this%eigenvec(:,:,i,j,k)=0.0_WP 
+                  this%eigenval(:,i,j,k)=0.0_WP
+               end if
             end do
          end do
       end do

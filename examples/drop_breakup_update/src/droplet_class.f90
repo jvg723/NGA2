@@ -570,19 +570,19 @@ contains
       ! Transport our liquid conformation tensor using log conformation
       advance_scalar: block
          integer :: i,j,k,nsc
-         ! ! Add source terms for constitutive model
-         ! if (stabilization) then 
-         !    ! Streching 
-         !    call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
-         !    ! Relxation
-         !    ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
-         ! else
-         !    call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
-         !    call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
-         ! end if
-         ! this%ve%SC=this%ve%SC+this%time%dt*this%resSC
-         ! call this%ve%apply_bcond(this%time%t,this%time%dt)
-         ! this%ve%SCold=this%ve%SC
+         ! Add source terms for constitutive model
+         if (stabilization) then 
+            ! Streching 
+            call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
+            ! Relxation
+            ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
+         else
+            call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
+            call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
+         end if
+         this%ve%SC=this%ve%SC+this%time%dt*this%resSC
+         call this%ve%apply_bcond(this%time%t,this%time%dt)
+         this%ve%SCold=this%ve%SC
          ! Explicit calculation of dSC/dt from scalar equation
          call this%ve%get_dSCdt(dSCdt=this%resSC,U=this%fs%U,V=this%fs%V,W=this%fs%W,VFold=this%vf%VFold,VF=this%vf%VF,detailed_face_flux=this%vf%detailed_face_flux,dt=this%time%dt)
          ! Update our scalars
@@ -590,20 +590,8 @@ contains
             where (this%ve%mask.eq.0.and.this%vf%VF.ne.0.0_WP) this%ve%SC(:,:,:,nsc)=(this%vf%VFold*this%ve%SCold(:,:,:,nsc)+this%time%dt*this%resSC(:,:,:,nsc))/this%vf%VF
             where (this%vf%VF.eq.0.0_WP) this%ve%SC(:,:,:,nsc)=0.0_WP
          end do
-         ! Add source terms for constitutive model
-         if (stabilization) then 
-            ! Streching 
-            call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VF); this%resSC=this%SCtmp
-            ! Relxation
-            ! call this%ve%get_relax_log(this%SCtmp,this%vf%VF);             this%resSC=this%resSC+this%SCtmp
-         else
-            call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
-            call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
-         end if
-         this%ve%SC=this%ve%SC+this%time%dt*this%resSC
-         call this%ve%apply_bcond(this%time%t,this%time%dt)
          ! Apply boundary conditions
-         ! call this%ve%apply_bcond(this%time%t,this%time%dt)
+         call this%ve%apply_bcond(this%time%t,this%time%dt)
       end block advance_scalar
 
       if (stabilization) then 
@@ -611,15 +599,15 @@ contains
          call this%ve%get_eigensystem(this%vf%VF)
          ! Reconstruct conformation tensor
          call this%ve%reconstruct_conformation(this%vf%VF)
-         ! Add in relaxtion source from semi-anlaytical integration
-         call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
-         ! Reconstruct lnC for next time step
-         !> get eigenvalues and eigenvectors based on reconstructed C
-         call this%ve%get_eigensystem_SCrec(this%vf%VF)
-         !> Reconstruct lnC from eigenvalues and eigenvectors
-         call this%ve%reconstruct_log_conformation(this%vf%VF)
-         ! Take exp(eigenvalues) to use in next time-step
-         this%ve%eigenval=exp(this%ve%eigenval)
+         ! ! Add in relaxtion source from semi-anlaytical integration
+         ! call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
+         ! ! Reconstruct lnC for next time step
+         ! !> get eigenvalues and eigenvectors based on reconstructed C
+         ! call this%ve%get_eigensystem_SCrec(this%vf%VF)
+         ! !> Reconstruct lnC from eigenvalues and eigenvectors
+         ! call this%ve%reconstruct_log_conformation(this%vf%VF)
+         ! ! Take exp(eigenvalues) to use in next time-step
+         ! this%ve%eigenval=exp(this%ve%eigenval)
       end if
 
       ! Remember old VOF
