@@ -4,9 +4,9 @@ module simulation
    use geometry,          only: cfg
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
-   use iterator_class,     only: iterator
-   use hypre_str_class,    only: hypre_str
-   use ddadi_class,        only: ddadi
+   use iterator_class,    only: iterator
+   use hypre_str_class,   only: hypre_str
+   use ddadi_class,       only: ddadi
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
@@ -239,6 +239,12 @@ contains
          ! Reset moments to guarantee compatibility with interface reconstruction
          call vf%reset_volume_moments()
       end block create_and_initialize_vof
+
+      ! Create an iterator for removing VOF at edges
+      create_iterator: block
+         vof_removal_layer=iterator(cfg,'VOF removal',vof_removal_layer_locator)
+         vof_removed=0.0_WP
+      end block create_iterator
       
       
       ! Create a two-phase flow solver without bconds
@@ -259,7 +265,7 @@ contains
          ! Inflow on the left of domain
          call fs%add_bcond(name='inflow',type=dirichlet,      face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
          ! Clipped Neumann outflow on the right of domain
-         call fs%add_bcond(name='bc_xp' ,type=clipped_neumann,face='x',dir=+1,canCorrect=.true. ,locator=xp_locator)
+         call fs%add_bcond(name='bc_xp' ,type=clipped_neumann,face='x',dir=+1,canCorrect=.false. ,locator=xp_locator)
          ! Slip on the sides
          call fs%add_bcond(name='bc_yp',type=slip,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          call fs%add_bcond(name='bc_ym',type=slip,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
@@ -405,6 +411,7 @@ contains
    
    !> Perform an NGA2 simulation - this mimicks NGA's old time integration for multiphase
    subroutine simulation_run
+      use tpns_class, only: arithmetic_visc
       implicit none
       
       ! Perform time integration
@@ -430,7 +437,7 @@ contains
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
          
          ! Prepare new staggered viscosity (at n+1)
-         call fs%get_viscosity(vf=vf)
+         call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -446,8 +453,8 @@ contains
             ! Explicit calculation of drho*u/dt from NS
             call fs%get_dmomdt(resU,resV,resW)
             
-            ! Add momentum source terms
-            call fs%addsrc_gravity(resU,resV,resW)
+            ! ! Add momentum source terms
+            ! call fs%addsrc_gravity(resU,resV,resW)
             
             ! Assemble explicit residual
             resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
@@ -491,6 +498,23 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
 
+      ! Remove VOF at edge of domain
+      remove_vof: block
+         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+         use parallel, only: MPI_REAL_WP
+         integer :: n,i,j,k,ierr
+         real(WP) :: my_vof_removed
+         my_vof_removed=0.0_WP
+         do n=1,vof_removal_layer%no_
+            i=vof_removal_layer%map(1,n)
+            j=vof_removal_layer%map(2,n)
+            k=vof_removal_layer%map(3,n)
+            my_vof_removed=my_vof_removed+cfg%vol(i,j,k)*vf%VF(i,j,k)
+            vf%VF(i,j,k)=0.0_WP
+         end do
+         call MPI_ALLREDUCE(my_vof_removed,vof_removed,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      end block remove_vof
+
          ! Output to ensight
          if (ens_evt%occurs()) then 
             ! Update surfmesh object
@@ -523,22 +547,6 @@ contains
          call vf%get_max()
          call mfile%write()
          call cflfile%write()
-         
-         ! After we're done clip all VOF at the exit area and along the sides - hopefully nothing's left
-         clip_vof: block
-            integer :: i,j,k
-            do k=fs%cfg%kmino_,fs%cfg%kmaxo_
-               do j=fs%cfg%jmino_,fs%cfg%jmaxo_
-                  do i=fs%cfg%imino_,fs%cfg%imaxo_
-                     if (i.ge.vf%cfg%imax-5) vf%VF(i,j,k)=0.0_WP
-                     if (j.ge.vf%cfg%jmax-5) vf%VF(i,j,k)=0.0_WP
-                     if (j.le.vf%cfg%jmin+5) vf%VF(i,j,k)=0.0_WP
-                     if (k.ge.vf%cfg%kmax-5) vf%VF(i,j,k)=0.0_WP
-                     if (k.le.vf%cfg%kmin+5) vf%VF(i,j,k)=0.0_WP
-                  end do
-               end do
-            end do
-         end block clip_vof
          
       end do
       
