@@ -50,7 +50,6 @@ module tpviscoelastic_class
       procedure :: reconstruct_conformation                !< Reconstruct conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: reconstruct_log_conformation            !< Reconstruct log conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: get_max_reconstructed                   !< Calculate maximum and integral field value for reconstructed C field
-      procedure :: get_max_eig
    end type tpviscoelastic
    
    
@@ -513,7 +512,7 @@ contains
    
    !> Calculate the ln(eigenval) and eigenvectors of the conformation tensor in cells where VF>0
    !> Assumes scalar being transported is C
-   subroutine get_eigensystem_SCrec(this)
+   subroutine get_eigensystem_SCrec(this,VF)
       use mathtools, only: eigensolve3
       implicit none
       class(tpviscoelastic), intent(inout) :: this
