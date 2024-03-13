@@ -593,7 +593,7 @@ contains
          ! Add source terms for constitutive model
          if (stabilization) then 
             ! Streching 
-            call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
+            call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VF); this%resSC=this%SCtmp
             ! Relxation
             ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
          else
