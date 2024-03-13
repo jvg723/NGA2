@@ -476,7 +476,6 @@ contains
          else
             call this%ve%get_max(this%vf%VF)
          end if
-         call this%ve%get_max_eig()
          ! Create simulation monitor
          this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
@@ -527,9 +526,6 @@ contains
                call this%scfile%add_column(this%ve%SCmax(nsc),trim(this%ve%SCname(nsc))//'_max')
             end do
          end if
-         call this%scfile%add_column(this%ve%eigval1_max,'Max Eig1')
-         call this%scfile%add_column(this%ve%eigval2_max,'Max Eig2')
-         call this%scfile%add_column(this%ve%eigval3_max,'Max Eig3')
          call this%scfile%write()
          ! Create film thickness monitor
          this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
@@ -865,7 +861,6 @@ contains
       ! Perform and output monitoring
       call this%fs%get_max()
       call this%vf%get_max()
-      call this%ve%get_max_eig()
       if (stabilization) then
          call this%ve%get_max_reconstructed(this%vf%VF)
          call this%ve%get_max(this%vf%VF)

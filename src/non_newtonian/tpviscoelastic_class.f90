@@ -38,7 +38,6 @@ module tpviscoelastic_class
       real(WP), dimension(:,:,:,:),   allocatable ::SCrecold
       ! Monitoring quantities
       real(WP), dimension(:), allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
-      real(WP) :: eigval1_max,eigval2_max,eigval3_max
       contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
@@ -631,36 +630,5 @@ contains
       deallocate(tmp)
    end subroutine get_max_reconstructed
 
-   !> Calculate the max of our fields
-   subroutine get_max_eig(this)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX
-      use parallel, only: MPI_REAL_WP
-      implicit none
-      class(tpviscoelastic), intent(inout) :: this
-      integer :: i,j,k,ierr
-      real(WP) :: my_Eigval1_max,my_Eigval2_max,my_Eigval3_max
-      
-      ! Set all to zero
-      my_Eigval1_max=0.0_WP; my_Eigval2_max=0.0_WP; my_Eigval3_max=0.0_WP;
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               my_Eigval1_max=max(my_Eigval1_max,abs(this%eigenval(1,i,j,k)))
-               my_Eigval2_max=max(my_Eigval2_max,abs(this%eigenval(2,i,j,k)))
-               my_Eigval3_max=max(my_Eigval3_max,abs(this%eigenval(3,i,j,k)))
-            end do
-         end do
-      end do
-      
-      ! Get the parallel max
-      call MPI_ALLREDUCE(my_Eigval1_max  ,this%eigenval(1,i,j,k)  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eigval2_max  ,this%eigenval(2,i,j,k)  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eigval3_max  ,this%eigenval(3,i,j,k)  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      
-   end subroutine get_max_eig
-   
-   
 
-   
-   
 end module tpviscoelastic_class
