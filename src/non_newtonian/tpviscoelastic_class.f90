@@ -369,11 +369,12 @@ contains
 
    !> Add viscoelastic relaxation source using log-conformation stabilization 
    !> Assumes scalar being transported is ln(C)
-   subroutine get_relax_log(this,resSC)
+   subroutine get_relax_log(this,resSC,VF)
       use messager, only: die
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       integer :: i,j,k
       real(WP) :: coeff,trace
       resSC=0.0_WP
@@ -382,7 +383,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                   !>Trace of reconstructed conformation tensor
                   trace=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2+&
                   &     this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)**2+&
@@ -403,7 +404,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                   !>Trace of reconstructed conformation tensor
                   trace=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2+&
                   &     this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)**2+&
@@ -425,7 +426,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                   coeff=1.00_WP/this%trelax
                   resSC(i,j,k,1)=coeff*(this%eigenvec(1,1,i,j,k)**2                      *((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(1,2,i,j,k)**2                      *((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(1,3,i,j,k)**2                      *((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< xx tensor component
                   resSC(i,j,k,2)=coeff*(this%eigenvec(1,1,i,j,k)*this%eigenvec(2,1,i,j,k)*((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(1,2,i,j,k)*this%eigenvec(2,2,i,j,k)*((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(1,3,i,j,k)*this%eigenvec(2,3,i,j,k)*((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< xy tensor component
@@ -440,7 +441,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle                              !< Skip non-solved cells
                   !>Trace of reconstructed conformation tensor
                   trace=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2+&
                   &     this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)**2+&
@@ -455,7 +456,6 @@ contains
                   resSC(i,j,k,4)=coeff*(this%eigenvec(2,1,i,j,k)**2                      *((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(2,2,i,j,k)**2                      *((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(2,3,i,j,k)**2                      *((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< yy tensor component
                   resSC(i,j,k,5)=coeff*(this%eigenvec(2,1,i,j,k)*this%eigenvec(3,1,i,j,k)*((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(2,2,i,j,k)*this%eigenvec(3,2,i,j,k)*((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(2,3,i,j,k)*this%eigenvec(3,3,i,j,k)*((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< yz tensor component
                   resSC(i,j,k,6)=coeff*(this%eigenvec(3,1,i,j,k)**2                      *((1.00_WP/this%eigenval(1,i,j,k))-1.00_WP)+this%eigenvec(3,2,i,j,k)**2                      *((1.00_WP/this%eigenval(2,i,j,k))-1.00_WP)+this%eigenvec(3,3,i,j,k)**2                      *((1.00_WP/this%eigenval(3,i,j,k))-1.00_WP))  !< zz tensor component
-               
                end do
             end do
          end do
@@ -463,7 +463,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle !< Skip non-solved cells
                   !>Trace of reconstructed conformation tensor
                   trace=this%eigenval(1,i,j,k)*this%eigenvec(1,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(1,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(1,3,i,j,k)**2+&
                   &     this%eigenval(1,i,j,k)*this%eigenvec(2,1,i,j,k)**2+this%eigenval(2,i,j,k)*this%eigenvec(2,2,i,j,k)**2+this%eigenval(3,i,j,k)*this%eigenvec(2,3,i,j,k)**2+&
