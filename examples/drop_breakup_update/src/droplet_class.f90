@@ -570,6 +570,26 @@ contains
       ! Transport our liquid conformation tensor using log conformation
       advance_scalar: block
          integer :: i,j,k,nsc
+         ! ! Add source terms for constitutive model
+         ! if (stabilization) then 
+         !    ! Streching 
+         !    call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
+         !    ! Relxation
+         !    ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
+         ! else
+         !    call this%ve%get_CgradU(this%gradU,this%SCtmp);    this%resSC=this%SCtmp
+         !    call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
+         ! end if
+         ! this%ve%SC=this%ve%SC+this%time%dt*this%resSC
+         ! call this%ve%apply_bcond(this%time%t,this%time%dt)
+         this%ve%SCold=this%ve%SC
+         ! Explicit calculation of dSC/dt from scalar equation
+         call this%ve%get_dSCdt(dSCdt=this%resSC,U=this%fs%U,V=this%fs%V,W=this%fs%W,VFold=this%vf%VFold,VF=this%vf%VF,detailed_face_flux=this%vf%detailed_face_flux,dt=this%time%dt)
+         ! Update our scalars
+         do nsc=1,this%ve%nscalar
+            where (this%ve%mask.eq.0.and.this%vf%VF.ne.0.0_WP) this%ve%SC(:,:,:,nsc)=(this%vf%VFold*this%ve%SCold(:,:,:,nsc)+this%time%dt*this%resSC(:,:,:,nsc))/this%vf%VF
+            where (this%vf%VF.eq.0.0_WP) this%ve%SC(:,:,:,nsc)=0.0_WP
+         end do
          ! Add source terms for constitutive model
          if (stabilization) then 
             ! Streching 
@@ -581,15 +601,6 @@ contains
             call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
          end if
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
-         call this%ve%apply_bcond(this%time%t,this%time%dt)
-         this%ve%SCold=this%ve%SC
-         ! Explicit calculation of dSC/dt from scalar equation
-         call this%ve%get_dSCdt(dSCdt=this%resSC,U=this%fs%U,V=this%fs%V,W=this%fs%W,VFold=this%vf%VFold,VF=this%vf%VF,detailed_face_flux=this%vf%detailed_face_flux,dt=this%time%dt)
-         ! Update our scalars
-         do nsc=1,this%ve%nscalar
-            where (this%ve%mask.eq.0.and.this%vf%VF.ne.0.0_WP) this%ve%SC(:,:,:,nsc)=(this%vf%VFold*this%ve%SCold(:,:,:,nsc)+this%time%dt*this%resSC(:,:,:,nsc))/this%vf%VF
-            where (this%vf%VF.eq.0.0_WP) this%ve%SC(:,:,:,nsc)=0.0_WP
-         end do
          ! Apply boundary conditions
          call this%ve%apply_bcond(this%time%t,this%time%dt)
       end block advance_scalar
