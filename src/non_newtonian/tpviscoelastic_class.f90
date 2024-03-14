@@ -73,11 +73,12 @@ contains
    
    
    !> Add upper-convected time derivative
-   subroutine get_CgradU(this,gradU,resSC)
+   subroutine get_CgradU(this,gradU,resSC,VF)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       integer :: i,j,k
       real(WP), dimension(6) :: SR
       resSC=0.0_WP
@@ -85,7 +86,7 @@ contains
          do j=this%cfg%jmino_,this%cfg%jmaxo_
             do i=this%cfg%imino_,this%cfg%imaxo_
                ! Skip non-solved cells
-               if (this%mask(i,j,k).ne.0) cycle
+               if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                ! xx tensor component
                resSC(i,j,k,1)=2.0_WP*(this%SC(i,j,k,1)*gradU(1,1,i,j,k)+this%SC(i,j,k,2)*gradU(2,1,i,j,k)+this%SC(i,j,k,3)*gradU(3,1,i,j,k))
                ! xy tensor component
@@ -111,7 +112,7 @@ contains
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
                   ! Skip non-solved cells
-                  if (this%mask(i,j,k).ne.0) cycle
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                   ! Build strain rate tensor in same order as conformation tensor
                   SR(1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP
                   SR(2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k))
