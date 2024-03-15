@@ -447,21 +447,21 @@ contains
          call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
          if (stabilization) then
-         do nsc=1,this%ve%nscalar
-            call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SCrec(:,:,:,nsc))
-         end do
-         call this%ens_out%add_scalar('eigval1',this%ve%eigenval(1,:,:,:))
-         call this%ens_out%add_scalar('eigval2',this%ve%eigenval(2,:,:,:))
-         call this%ens_out%add_scalar('eigval3',this%ve%eigenval(3,:,:,:))
-         call this%ens_out%add_scalar('eigvec11',this%ve%eigenvec(1,1,:,:,:))
-         call this%ens_out%add_scalar('eigvec12',this%ve%eigenvec(1,2,:,:,:))
-         call this%ens_out%add_scalar('eigvec13',this%ve%eigenvec(1,3,:,:,:))
-         call this%ens_out%add_scalar('eigvec21',this%ve%eigenvec(2,1,:,:,:))
-         call this%ens_out%add_scalar('eigvec22',this%ve%eigenvec(2,2,:,:,:))
-         call this%ens_out%add_scalar('eigvec23',this%ve%eigenvec(2,3,:,:,:))
-         call this%ens_out%add_scalar('eigvec31',this%ve%eigenvec(3,1,:,:,:))
-         call this%ens_out%add_scalar('eigvec32',this%ve%eigenvec(3,2,:,:,:))
-         call this%ens_out%add_scalar('eigvec33',this%ve%eigenvec(3,3,:,:,:))
+            do nsc=1,this%ve%nscalar
+               call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SCrec(:,:,:,nsc))
+            end do
+            call this%ens_out%add_scalar('eigval1',this%ve%eigenval(1,:,:,:))
+            call this%ens_out%add_scalar('eigval2',this%ve%eigenval(2,:,:,:))
+            call this%ens_out%add_scalar('eigval3',this%ve%eigenval(3,:,:,:))
+            call this%ens_out%add_scalar('eigvec11',this%ve%eigenvec(1,1,:,:,:))
+            call this%ens_out%add_scalar('eigvec12',this%ve%eigenvec(1,2,:,:,:))
+            call this%ens_out%add_scalar('eigvec13',this%ve%eigenvec(1,3,:,:,:))
+            call this%ens_out%add_scalar('eigvec21',this%ve%eigenvec(2,1,:,:,:))
+            call this%ens_out%add_scalar('eigvec22',this%ve%eigenvec(2,2,:,:,:))
+            call this%ens_out%add_scalar('eigvec23',this%ve%eigenvec(2,3,:,:,:))
+            call this%ens_out%add_scalar('eigvec31',this%ve%eigenvec(3,1,:,:,:))
+            call this%ens_out%add_scalar('eigvec32',this%ve%eigenvec(3,2,:,:,:))
+            call this%ens_out%add_scalar('eigvec33',this%ve%eigenvec(3,3,:,:,:))
          else
             do nsc=1,this%ve%nscalar
                call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SC(:,:,:,nsc))
