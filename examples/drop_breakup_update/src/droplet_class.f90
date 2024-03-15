@@ -571,6 +571,23 @@ contains
       call this%time%adjust_dt()
       call this%time%increment()
 
+      ! Remember old VOF
+      this%vf%VFold=this%vf%VF
+
+      ! Remember old velocity
+      this%fs%Uold=this%fs%U
+      this%fs%Vold=this%fs%V
+      this%fs%Wold=this%fs%W
+      
+      ! Prepare old staggered density (at n)
+      call this%fs%get_olddensity(vf=this%vf)
+         
+      ! VOF solver step
+      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      
+      ! Prepare new staggered viscosity (at n+1)
+      call this%fs%get_viscosity(vf=this%vf,strat=harmonic_visc)
+
       ! Calculate grad(U)
       call this%fs%get_gradU(this%gradU)
 
@@ -587,8 +604,8 @@ contains
             ! Relxation
             ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
          else
-            ! call this%ve%get_CgradU(this%gradU,this%SCtmp,this%vf%VFold);    this%resSC=this%SCtmp
-            call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
+            call this%ve%get_CgradU(this%gradU,this%SCtmp,this%vf%VFold);    this%resSC=this%SCtmp
+            ! call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
          end if
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
          call this%ve%apply_bcond(this%time%t,this%time%dt)
@@ -620,22 +637,6 @@ contains
          ! this%ve%eigenval=exp(this%ve%eigenval)
       end if
 
-      ! Remember old VOF
-      this%vf%VFold=this%vf%VF
-
-      ! Remember old velocity
-      this%fs%Uold=this%fs%U
-      this%fs%Vold=this%fs%V
-      this%fs%Wold=this%fs%W
-      
-      ! Prepare old staggered density (at n)
-      call this%fs%get_olddensity(vf=this%vf)
-         
-      ! VOF solver step
-      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-      
-      ! Prepare new staggered viscosity (at n+1)
-      call this%fs%get_viscosity(vf=this%vf,strat=harmonic_visc)
 
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
