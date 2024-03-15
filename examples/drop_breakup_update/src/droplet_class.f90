@@ -628,15 +628,15 @@ contains
          call this%ve%get_eigensystem(this%vf%VF)
          ! Reconstruct conformation tensor
          call this%ve%reconstruct_conformation(this%vf%VF)
-         ! ! Add in relaxtion source from semi-anlaytical integration
-         ! call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
-         ! ! Reconstruct lnC for next time step
-         ! !> get eigenvalues and eigenvectors based on reconstructed C
-         ! call this%ve%get_eigensystem_SCrec(this%vf%VF)
-         ! !> Reconstruct lnC from eigenvalues and eigenvectors
-         ! call this%ve%reconstruct_log_conformation(this%vf%VF)
-         ! ! Take exp(eigenvalues) to use in next time-step
-         ! this%ve%eigenval=exp(this%ve%eigenval)
+         ! Add in relaxtion source from semi-anlaytical integration
+         call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
+         ! Reconstruct lnC for next time step
+         !> get eigenvalues and eigenvectors based on reconstructed C
+         call this%ve%get_eigensystem_SCrec(this%vf%VF)
+         !> Reconstruct lnC from eigenvalues and eigenvectors
+         call this%ve%reconstruct_log_conformation(this%vf%VF)
+         ! Take exp(eigenvalues) to use in next time-step
+         this%ve%eigenval=exp(this%ve%eigenval)
       end if
 
 
