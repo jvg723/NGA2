@@ -7,4 +7,4 @@
 #SBATCH -J viz
 #SBATCH --mail-user=jvg36@cornell.edu
 
-mpirun /opt/ohpc/pub/apps/paraview/5.11.0/bin/pvserver --sp 21096
+mpirun /opt/ohpc/pub/apps/paraview/5.11.0/bin/pvserver --sp 23790
