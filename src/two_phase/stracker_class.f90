@@ -2,6 +2,7 @@
 !> Based on cclabel object with greometric transport of index for persistent tracking of structures
 module stracker_class
    use precision, only: WP
+   use string,    only: str_medium
    use vfs_class, only: vfs
    implicit none
    private
@@ -44,9 +45,9 @@ module stracker_class
       integer :: nstruct_old
       type(struct_type), dimension(:), allocatable :: struct_old
    contains
-      procedure :: initialize         !< Initialization of stracker based on a provided VFS object
-      procedure, private :: build     !< Private cclabel step without persistent id
-      procedure :: advance            !< Perform cclabel step with persistent id
+      procedure :: initialize           !< Initialization of stracker based on a provided VFS object
+      procedure, private :: build       !< Private cclabel step without persistent id
+      procedure :: advance              !< Perform cclabel step with persistent id
    end type stracker
    
    
@@ -215,10 +216,12 @@ contains
                      ! Neighbor is labeled, but are we?
                      if (this%id(i,j,k).ne.0) then
                         ! We already have a label, perform a union of both labels
-                        if (same_label(i,j,k,ii,jj,kk)) this%id(i,j,k)=union_struct(this%id(i,j,k),this%id(ii,jj,kk))
+                        ! if (same_label(i,j,k,ii,jj,kk)) this%id(i,j,k)=union_struct(this%id(i,j,k),this%id(ii,jj,kk))
+                        if (same_label(this%id(i,j,k),this%id(ii,jj,kk))) this%id(i,j,k)=union_struct(this%id(i,j,k),this%id(ii,jj,kk))
                      else
                         ! We don't have a label, check if we take the neighbor's label
-                        if (same_label(i,j,k,ii,jj,kk)) then
+                        ! if (same_label(i,j,k,ii,jj,kk)) then
+                        if (same_label(this%id(i,j,k),this%id(ii,jj,kk))) then
                            this%id(i,j,k)=this%id(ii,jj,kk)
                         else
                            this%id(i,j,k)=add()
@@ -330,7 +333,8 @@ contains
          if (this%vf%cfg%imin_.ne.this%vf%cfg%imin) then
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_; do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
                if (this%id(this%vf%cfg%imin_,j,k).gt.0.and.this%id(this%vf%cfg%imin_-1,j,k).gt.0) then
-                  if (same_label(this%vf%cfg%imin_,j,k,this%vf%cfg%imin_-1,j,k)) call union_parent(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))
+                  ! if (same_label(this%vf%cfg%imin_,j,k,this%vf%cfg%imin_-1,j,k)) call union_parent(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))
+                  if (same_label(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))) call union_parent(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))
                end if
             end do; end do
          end if
@@ -338,7 +342,8 @@ contains
          if (this%vf%cfg%jmin_.ne.this%vf%cfg%jmin) then
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_; do i=this%vf%cfg%imin_,this%vf%cfg%imax_
                if (this%id(i,this%vf%cfg%jmin_,k).gt.0.and.this%id(i,this%vf%cfg%jmin_-1,k).gt.0) then
-                  if (same_label(i,this%vf%cfg%jmin_,k,i,this%vf%cfg%jmin_-1,k)) call union_parent(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))
+                  ! if (same_label(i,this%vf%cfg%jmin_,k,i,this%vf%cfg%jmin_-1,k)) call union_parent(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))
+                  if (same_label(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))) call union_parent(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))
                end if
             end do; end do
          end if
@@ -346,7 +351,8 @@ contains
          if (this%vf%cfg%kmin_.ne.this%vf%cfg%kmin) then
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_; do i=this%vf%cfg%imin_,this%vf%cfg%imax_
                if (this%id(i,j,this%vf%cfg%kmin_).gt.0.and.this%id(i,j,this%vf%cfg%kmin_-1).gt.0) then
-                  if (same_label(i,j,this%vf%cfg%kmin_,i,j,this%vf%cfg%kmin_-1)) call union_parent(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))
+                  ! if (same_label(i,j,this%vf%cfg%kmin_,i,j,this%vf%cfg%kmin_-1)) call union_parent(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))
+                  if (same_label(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))) call union_parent(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))
                end if
             end do; end do
          end if
@@ -437,7 +443,8 @@ contains
          if (this%vf%cfg%imin_.eq.this%vf%cfg%imin) then
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_; do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
                if (this%id(this%vf%cfg%imin_,j,k).gt.0.and.this%id(this%vf%cfg%imin_-1,j,k).gt.0) then
-                  if (same_label(this%vf%cfg%imin_,j,k,this%vf%cfg%imin_-1,j,k)) call union_parent(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))
+                  if (same_label(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))) call union_parent(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))
+                  ! if (same_label(this%vf%cfg%imin_,j,k,this%vf%cfg%imin_-1,j,k)) call union_parent(this%id(this%vf%cfg%imin_,j,k),this%id(this%vf%cfg%imin_-1,j,k))
                end if
             end do; end do
          end if
@@ -445,7 +452,8 @@ contains
          if (this%vf%cfg%jmin_.eq.this%vf%cfg%jmin) then
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_; do i=this%vf%cfg%imin_,this%vf%cfg%imax_
                if (this%id(i,this%vf%cfg%jmin_,k).gt.0.and.this%id(i,this%vf%cfg%jmin_-1,k).gt.0) then
-                  if (same_label(i,this%vf%cfg%jmin_,k,i,this%vf%cfg%jmin_-1,k)) call union_parent(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))
+                  if (same_label(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))) call union_parent(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))
+                  ! if (same_label(i,this%vf%cfg%jmin_,k,i,this%vf%cfg%jmin_-1,k)) call union_parent(this%id(i,this%vf%cfg%jmin_,k),this%id(i,this%vf%cfg%jmin_-1,k))
                end if
             end do; end do
          end if
@@ -453,7 +461,8 @@ contains
          if (this%vf%cfg%kmin_.eq.this%vf%cfg%kmin) then
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_; do i=this%vf%cfg%imin_,this%vf%cfg%imax_
                if (this%id(i,j,this%vf%cfg%kmin_).gt.0.and.this%id(i,j,this%vf%cfg%kmin_-1).gt.0) then
-                  if (same_label(i,j,this%vf%cfg%kmin_,i,j,this%vf%cfg%kmin_-1)) call union_parent(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))
+                  ! if (same_label(i,j,this%vf%cfg%kmin_,i,j,this%vf%cfg%kmin_-1)) call union_parent(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))
+                  if (same_label(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))) call union_parent(this%id(i,j,this%vf%cfg%kmin_),this%id(i,j,this%vf%cfg%kmin_-1))
                end if
             end do; end do
          end if
@@ -585,6 +594,18 @@ contains
       end block compact_struct
       
    contains
+
+      !> Function that identifies if cell pairs have same label
+      !> This implements merging and break-up of structures
+      logical function same_label(x,y)
+        implicit none
+        integer, intent(in) :: x,y
+        if (x.eq.y) then
+           same_label=.true.
+        else
+           same_label=.false.
+        end if
+      end function same_label
       
       !> This recursive function that points the lineage of a structure to its root and returns that root
       recursive function rootify_struct(x) result(y)
@@ -696,6 +717,7 @@ contains
             y=parent_own(y)
          end if
       end function find_own
+      
       
    end subroutine build
    
