@@ -172,7 +172,7 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: elvira,VFhi,VFlo,remap
+         use vfs_class, only: elvira,VFhi,VFlo,flux_storage
          use mathtools, only: Pi
          integer :: i,j,k,n,si,sj,sk
          real(WP), dimension(3,8) :: cube_vertex
@@ -180,7 +180,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=remap,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF')
          !vf%cons_correct=.false.
          ! Initialize a bubble
          call param_read('Bubble position',center,default=[0.0_WP,0.0_WP,0.0_WP])
@@ -312,10 +312,12 @@ contains
          call param_read('Stabilization',stabilization,default=.false.)
          ! Initialize C scalar fields
          if (stabilization) then 
-            ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem()
-            ! Reconstruct conformation tensor
-            call ve%reconstruct_conformation()
+            !> Allocate storage fo eigenvalues and vectors
+            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+            !> Allocate storage for reconstructured C and Cold
+            allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
+            allocate(ve%SCrecold(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrecold=0.0_WP
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
                   do i=cfg%imino_,cfg%imaxo_
@@ -328,7 +330,7 @@ contains
                end do
             end do
             ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem()
+            call ve%get_eigensystem(vf%VF)
          else
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
@@ -368,14 +370,26 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_surface('plic',smesh)
-         if (stabilization) then 
+         if (stabilization) then
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
             end do
+            call ens_out%add_scalar('eigval1',ve%eigenval(1,:,:,:))
+            call ens_out%add_scalar('eigval2',ve%eigenval(2,:,:,:))
+            call ens_out%add_scalar('eigval3',ve%eigenval(3,:,:,:))
+            call ens_out%add_scalar('eigvec11',ve%eigenvec(1,1,:,:,:))
+            call ens_out%add_scalar('eigvec12',ve%eigenvec(1,2,:,:,:))
+            call ens_out%add_scalar('eigvec13',ve%eigenvec(1,3,:,:,:))
+            call ens_out%add_scalar('eigvec21',ve%eigenvec(2,1,:,:,:))
+            call ens_out%add_scalar('eigvec22',ve%eigenvec(2,2,:,:,:))
+            call ens_out%add_scalar('eigvec23',ve%eigenvec(2,3,:,:,:))
+            call ens_out%add_scalar('eigvec31',ve%eigenvec(3,1,:,:,:))
+            call ens_out%add_scalar('eigvec32',ve%eigenvec(3,2,:,:,:))
+            call ens_out%add_scalar('eigvec33',ve%eigenvec(3,3,:,:,:))
          else
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
-            end do
+            end do 
          end if
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -392,6 +406,7 @@ contains
          call rise_vel()
          if (stabilization) then
             call ve%get_max_reconstructed(vf%VF)
+            call ve%get_max(vf%VF)
          else
             call ve%get_max(vf%VF)
          end if
@@ -438,8 +453,12 @@ contains
          call scfile%add_column(time%t,'Time')
          if (stabilization) then
             do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
-               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_RCmin')
+               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_RCmax')
+            end do
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_lnmin')
+               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_lnmax')
             end do
          else
             do nsc=1,ve%nscalar
@@ -450,7 +469,6 @@ contains
          call scfile%write()
       end block create_monitor
         
-      
    end subroutine simulation_init
    
    
@@ -485,58 +503,6 @@ contains
             end block control_inflow
          end if
 
-         ! Calculate grad(U)
-         call fs%get_gradU(gradU)
-
-         ! Remember old reconstructed conformation tensor
-         if (stabilization) then 
-         ve%SCrecold=ve%SCrec
-         end if
-
-         ! Transport our liquid conformation tensor using log conformation
-         advance_scalar: block
-            integer :: i,j,k,nsc
-            ! Add source terms for constitutive model
-            if (stabilization) then 
-               ! Update eigenvalues and eigenvectors
-               call ve%get_eigensystem()
-               call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
-               ! call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
-            else
-               call ve%get_CgradU(gradU,SCtmp);    resSC=SCtmp
-               call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
-            end if
-            ve%SC=ve%SC+time%dt*resSC
-            call ve%apply_bcond(time%t,time%dt)
-            ve%SCold=ve%SC
-            ! Explicit calculation of dSC/dt from scalar equation
-            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
-            ! Update our scalars
-            do nsc=1,ve%nscalar
-               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
-               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
-            end do
-            ! Apply boundary conditions
-            call ve%apply_bcond(time%t,time%dt)
-         end block advance_scalar
-
-         ! ! Add in relaxtion source from semi-anlaytical integration
-         ! call ve%get_relax_analytical(time%dt)
-         
-         if (stabilization) then 
-            ! Update eigenvalues and eigenvectors
-            call ve%get_eigensystem()
-            ! Reconstruct conformation tensor
-            call ve%reconstruct_conformation()
-            ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt)
-            ! Reconstruct lnC for next time step
-            !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec()
-            !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation()
-         end if
-
          ! Remember old VOF
          vf%VFold=vf%VF
          
@@ -553,7 +519,58 @@ contains
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf,strat=harmonic_visc)
-         
+
+         ! Calculate grad(U)
+         call fs%get_gradU(gradU)
+
+         ! Remember old reconstructed conformation tensor
+         if (stabilization) ve%SCrecold=ve%SCrec
+
+         ! Transport our liquid conformation tensor using log conformation
+         advance_scalar: block
+            integer :: i,j,k,nsc
+            ! Add source terms for constitutive model
+            if (stabilization) then 
+               ! Streching 
+               call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
+               ! Relxation
+               ! call ve%get_relax_log(SCtmp,vf%VFold);             resSC=resSC+SCtmp
+            else
+               ! Streching
+               call ve%get_CgradU(gradU,SCtmp,vf%VFold);    resSC=SCtmp
+               ! Relxation
+               call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
+            end if
+            ve%SC=ve%SC+time%dt*resSC
+            call ve%apply_bcond(time%t,time%dt)
+            ve%SCold=ve%SC
+            ! Explicit calculation of dSC/dt from scalar equation
+            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Update our scalars
+            do nsc=1,ve%nscalar
+               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+            end do
+            ! Apply boundary conditions
+            call ve%apply_bcond(time%t,time%dt)
+         end block advance_scalar
+
+         if (stabilization) then 
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation(vf%VF)
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt,vf%VF)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec(vf%VF)
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation(vf%VF)
+            ! Take exp(eigenvalues) to use in next time-step
+            ve%eigenval=exp(ve%eigenval)
+         end if
+
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
             
