@@ -2,7 +2,7 @@
 Partition :	2 2 2
 
 # Are we using log conformation stabilzation 
-Stabilization : .true.
+Stabilization : .false.
 
 # Mesh definition
 X droplet : 2
