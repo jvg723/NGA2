@@ -604,8 +604,10 @@ contains
             ! Relxation
             ! call this%ve%get_relax_log(this%SCtmp,this%vf%VFold);             this%resSC=this%resSC+this%SCtmp
          else
+            ! Streching
             call this%ve%get_CgradU(this%gradU,this%SCtmp,this%vf%VFold);    this%resSC=this%SCtmp
-            ! call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
+            ! Relxation
+            call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
          end if
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
          call this%ve%apply_bcond(this%time%t,this%time%dt)
