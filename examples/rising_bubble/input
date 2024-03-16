@@ -8,12 +8,12 @@ Moving domain : .true.
 Stabilization : .true.
 
 # Mesh definition
-Lx :	0.02044
-Ly :	0.02044
-Lz :	0.02044
-ny :	128
-nx :	128
-nz :	128
+Lx :	0.04088
+Ly :	0.04088
+Lz :	0.04088
+ny :	64
+nx :	64
+nz :	64
 
 # Fluid properties
 Gravity :                     0 -9.81 0
