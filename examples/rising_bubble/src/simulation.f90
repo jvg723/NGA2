@@ -149,7 +149,47 @@ contains
       logical :: isIn
       isIn=.false.
       if (j.eq.pg%jmax+1) isIn=.true.
-   end function yp_locator_sc 
+   end function yp_locator_sc
+   
+   !> Function that localizes x- boundary for scalar
+   function xm_locator_sc(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid),intent(in) :: pg
+      integer,intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin-1) isIn=.true.
+   end function xm_locator_sc
+
+   !> Function that localizes x+ boundary for scalar
+   function xp_locator_sc(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid),intent(in) :: pg
+      integer,intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imax+1) isIn=.true.
+   end function xp_locator_sc
+
+   !> Function that localizes z- boundary for scalar
+   function zm_locator_sc(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid),intent(in) :: pg
+      integer,intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmin-1) isIn=.true.
+   end function zm_locator_sc
+
+   !> Function that localizes z+ boundary for scalar
+   function zp_locator_sc(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid),intent(in) :: pg
+      integer,intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmax+1) isIn=.true.
+   end function zp_locator_sc
    
    
    !> Routine that computes rise velocity
@@ -353,6 +393,8 @@ contains
          if (moving_domain) then
             call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
             call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator_sc,dir='ym')
+            call ve%add_bcond(name='xp_sc',type=neumann,locator=xp_locator_sc,dir='xp')
+            call ve%add_bcond(name='xm_sc',type=neumann,locator=xm_locator_sc,dir='xm')
          end if
          ! Setup without an implicit solver
          call ve%setup()
