@@ -347,10 +347,6 @@ contains
          if (moving_domain) then
             call fs%add_bcond(name='inflow' ,type=dirichlet      ,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
             call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
-            call fs%add_bcond(name='xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
-            call fs%add_bcond(name='xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
-            call fs%add_bcond(name='zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
-            call fs%add_bcond(name='zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          end if
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
@@ -393,8 +389,6 @@ contains
          if (moving_domain) then
             call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
             call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator_sc,dir='ym')
-            call ve%add_bcond(name='xp_sc',type=neumann,locator=xp_locator_sc,dir='xp')
-            call ve%add_bcond(name='xm_sc',type=neumann,locator=xm_locator_sc,dir='xm')
          end if
          ! Setup without an implicit solver
          call ve%setup()
