@@ -216,11 +216,12 @@ contains
    
    
    !> Add viscoelastic relaxation source
-   subroutine get_relax(this,resSC,dt)
+   subroutine get_relax(this,resSC,dt,VF)
       use messager, only: die
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
       real(WP), intent(in) :: dt
       integer :: i,j,k
       real(WP) :: coeff
@@ -295,7 +296,7 @@ contains
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  if (this%mask(i,j,k).ne.0) cycle                              !< Skip non-solved cells
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
                   coeff=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SC(i,j,k,1)+this%SC(i,j,k,4)+this%SC(i,j,k,6))-3.0_WP))
                   coeff=coeff/this%trelax                                       !< Divide by relaxation time scale
                   resSC(i,j,k,1)=-coeff*(this%SC(i,j,k,1)-1.0_WP)               !< xx tensor component
