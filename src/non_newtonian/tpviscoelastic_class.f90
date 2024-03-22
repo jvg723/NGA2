@@ -38,7 +38,9 @@ module tpviscoelastic_class
       real(WP), dimension(:,:,:,:),   allocatable ::SCrecold
       ! Monitoring quantities
       real(WP), dimension(:), allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
-      contains
+      real(WP)                            :: Eval1max,Eval2max,Eval3max   !< Maximum eigenvalue in domain
+      real(WP)                            :: Eval1min,Eval2min,Eval3min   !< Minimum eigenvalue in domain
+   contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
       procedure :: get_relax                               !< Calculate relaxation term
@@ -50,6 +52,7 @@ module tpviscoelastic_class
       procedure :: reconstruct_conformation                !< Reconstruct conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: reconstruct_log_conformation            !< Reconstruct log conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: get_max_reconstructed                   !< Calculate maximum and integral field value for reconstructed C field
+      procedure :: get_max_eign                            !< Calculate maximum and minimum of eigenvalues
    end type tpviscoelastic
    
    
@@ -78,7 +81,7 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: gradU
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),       intent(in) :: VF
       integer :: i,j,k
       real(WP), dimension(6) :: SR
       resSC=0.0_WP
@@ -149,7 +152,7 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),       intent(in) :: VF
       integer :: i,j,k
       ! Temp scalar values for matrix multiplication
       real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
@@ -221,7 +224,7 @@ contains
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),    intent(in)    :: VF
       real(WP), intent(in) :: dt
       integer :: i,j,k
       real(WP) :: coeff
@@ -318,7 +321,7 @@ contains
       use messager, only: die
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
       real(WP), intent(in) :: dt
       integer :: i,j,k
       real(WP) :: f,coeff
@@ -369,7 +372,7 @@ contains
       implicit none
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:), intent(inout) :: resSC
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),    intent(in)    :: VF
       integer :: i,j,k
       real(WP) :: coeff,trace
       resSC=0.0_WP
@@ -487,7 +490,7 @@ contains
       use mathtools, only: eigensolve3
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
       integer :: i,j,k
       real(WP), dimension(3,3) :: A
       ! Empty storage
@@ -523,7 +526,7 @@ contains
       use mathtools, only: eigensolve3
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
       integer :: i,j,k
       real(WP), dimension(3,3) :: A
       ! Empty storage
@@ -552,7 +555,7 @@ contains
    subroutine reconstruct_conformation(this,VF)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
       integer :: i,j,k
       this%SCrec=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
@@ -582,7 +585,7 @@ contains
    subroutine reconstruct_log_conformation(this,VF)
       implicit none
       class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
       integer :: i,j,k
       this%SC=0.0_WP
       do k=this%cfg%kmino_,this%cfg%kmaxo_
@@ -635,6 +638,41 @@ contains
       end do
       deallocate(tmp)
    end subroutine get_max_reconstructed
+
+   !> Calculate the max of our fields
+   subroutine get_max_eign(this,VF)
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
+      integer :: i,j,k,ierr
+      real(WP) :: my_Eval1max,my_Eval2max,my_Eval3max
+      real(WP) :: my_Eval1min,my_Eval2min,my_Eval3min
+      ! Initalize to 1 becuase C=I at begining of simulation 
+      my_Eval1max=1.0_WP; my_Eval2max=1.0_WP; my_Eval3max=1.0_WP
+      my_Eval1min=1.0_WP; my_Eval2min=1.0_WP; my_Eval3min=1.0_WP
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
+               my_Eval1max=max(my_Eval1max,this%eigenval(1,i,j,k))
+               my_Eval2max=max(my_Eval2max,this%eigenval(2,i,j,k))
+               my_Eval3max=max(my_Eval3max,this%eigenval(3,i,j,k))
+               my_Eval1min=min(my_Eval1min,this%eigenval(1,i,j,k))
+               my_Eval2min=min(my_Eval2min,this%eigenval(2,i,j,k))
+               my_Eval3min=min(my_Eval3min,this%eigenval(3,i,j,k))
+            end do
+         end do
+      end do
+      ! Get the parallel max
+      call MPI_ALLREDUCE(my_Eval1max  ,this%Eval1max  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_Eval2max  ,this%Eval2max  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_Eval3max  ,this%Eval3max  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_Eval1min  ,this%Eval1min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_Eval2min  ,this%Eval2min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_Eval3min  ,this%Eval3min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+   end subroutine get_max_eign
 
 
 end module tpviscoelastic_class

@@ -29,7 +29,7 @@ module simulation
    type(event)    :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,bubblefile,scfile
+   type(monitor) :: mfile,cflfile,bubblefile,scfile,eigfile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -491,6 +491,7 @@ contains
          if (stabilization) then
             call ve%get_max_reconstructed(vf%VF)
             call ve%get_max(vf%VF)
+            call ve%get_max_eign(vf%VF)
          else
             call ve%get_max(vf%VF)
          end if
@@ -551,6 +552,19 @@ contains
             end do
          end if
          call scfile%write()
+         ! Create Eigenvalue monitor
+         if (stabilization) then
+         eigfile=monitor(ve%cfg%amRoot,'eigenvlaue')
+            call eigfile%add_column(time%n,'Timestep number')
+            call eigfile%add_column(time%t,'Time')
+            call eigfile%add_column(ve%Eval1max,'Eval1max')
+            call eigfile%add_column(ve%Eval2max,'Eval2max')
+            call eigfile%add_column(ve%Eval3max,'Eval3max')
+            call eigfile%add_column(ve%Eval1min,'Eval1min')
+            call eigfile%add_column(ve%Eval2min,'Eval2min')
+            call eigfile%add_column(ve%Eval3min,'Eval3min')
+            call eigfile%write()
+         end if
       end block create_monitor
         
    end subroutine simulation_init
@@ -872,6 +886,9 @@ contains
          call vf%get_max()
          if (stabilization) then
             call ve%get_max_reconstructed(vf%VF)
+            call ve%get_max(vf%VF)
+            call ve%get_max_eign(vf%VF)
+            call eigfile%write()
          else
             call ve%get_max(vf%VF)
          end if
