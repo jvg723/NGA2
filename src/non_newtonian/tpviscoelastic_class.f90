@@ -37,7 +37,8 @@ module tpviscoelastic_class
       real(WP), dimension(:,:,:,:),   allocatable ::SCrec
       real(WP), dimension(:,:,:,:),   allocatable ::SCrecold
       ! Monitoring quantities
-      real(WP), dimension(:), allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
+      real(WP), dimension(:),     allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
+      real(WP), dimension(:,:,:), allocatable :: positive_definite_eign       !< Check to ensure C is positive definte based upon eigenvalues (=1 it is positive definite, =2 it is NOT positive definite)
       real(WP)                            :: Eval1max,Eval2max,Eval3max   !< Maximum eigenvalue in domain
       real(WP)                            :: Eval1min,Eval2min,Eval3min   !< Minimum eigenvalue in domain
    contains
@@ -53,6 +54,7 @@ module tpviscoelastic_class
       procedure :: reconstruct_log_conformation            !< Reconstruct log conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: get_max_reconstructed                   !< Calculate maximum and integral field value for reconstructed C field
       procedure :: get_max_eign                            !< Calculate maximum and minimum of eigenvalues
+      procedure :: check_positive_def_eign                 !< Check if the conformation tensor is positive definite in a cell based upon its eigenvalues
    end type tpviscoelastic
    
    
@@ -72,6 +74,8 @@ contains
       this%phase=phase; this%SCname=['Cxx','Cxy','Cxz','Cyy','Cyz','Czz']
       ! Assign closure model for viscoelastic fluid
       this%model=model
+      ! Allocate monitoring array
+      allocate(this%positive_definite_eign(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%positive_definite_eign=0.0_WP
    end subroutine init
    
    
@@ -673,6 +677,34 @@ contains
       call MPI_ALLREDUCE(my_Eval2min  ,this%Eval2min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
       call MPI_ALLREDUCE(my_Eval3min  ,this%Eval3min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
    end subroutine get_max_eign
+
+   !> Mark if a cell is not positive definite based upon eigenvalues
+   subroutine check_positive_def_eign(this,VF)
+      implicit none
+      class(tpviscoelastic), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
+      integer :: i,j,k
+      ! Default value is 0
+      this%positive_definite_eign=0.0_WP
+      do k=this%cfg%kmino_,this%cfg%kmaxo_
+         do j=this%cfg%jmino_,this%cfg%jmaxo_
+            do i=this%cfg%imino_,this%cfg%imaxo_
+               ! Skip wall/bcond cells
+               if (this%mask(i,j,k).ne.0) cycle
+               ! Skip gas cells
+               if (VF(i,j,k).eq.0.0_WP) cycle
+               ! Check eigenvalues
+               if (this%eigenval(1,i,j,k).le.0.0_WP.or.this%eigenval(2,i,j,k).le.0.0_WP.or.this%eigenval(2,i,j,k).le.0.0_WP) then
+                  !< C has eignevlaues less than or equal to 0 (positive_def=2)
+                  this%positive_definite_eign(i,j,k)=2.00_WP
+               else
+                  !< C has eignevlaues greater than 0 (positive_def=1)
+                  this%positive_definite_eign(i,j,k)=1.00_WP
+               end if
+            end do
+         end do
+      end do
+   end subroutine check_positive_def_eign
 
 
 end module tpviscoelastic_class
