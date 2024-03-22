@@ -607,7 +607,7 @@ contains
             ! Streching
             call this%ve%get_CgradU(this%gradU,this%SCtmp,this%vf%VFold);    this%resSC=this%SCtmp
             ! Relxation
-            call this%ve%get_relax(this%SCtmp,this%time%dt);   this%resSC=this%resSC+this%SCtmp
+            call this%ve%get_relax(this%SCtmp,this%time%dt,this%vf%VFold);   this%resSC=this%resSC+this%SCtmp
          end if
          this%ve%SC=this%ve%SC+this%time%dt*this%resSC
          call this%ve%apply_bcond(this%time%t,this%time%dt)
@@ -692,7 +692,7 @@ contains
                select case (this%ve%model)
                case (oldroydb)
                   ! Calculate the polymer stress
-                  call this%ve%get_relax(stress,this%time%dt)
+                  call this%ve%get_relax(stress,this%time%dt,this%vf%VF)
                   ! Build liquid stress tensor
                   do nsc=1,6
                      stress(:,:,:,nsc)=-this%ve%visc_p*this%vf%VF*stress(:,:,:,nsc)
