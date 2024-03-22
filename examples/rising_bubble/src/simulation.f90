@@ -417,6 +417,8 @@ contains
             call ve%get_eigensystem(vf%VF)
             ! Check for positive definte C based upon eigenvalues
             call ve%check_positive_def_eign(vf%VF)
+            ! Check for positive definte C based upon determiant
+            call ve%check_positive_def_det(vf%VF)
          else
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
@@ -461,6 +463,7 @@ contains
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
             end do
             call ens_out%add_scalar('pos_def_eign',ve%positive_definite_eign)
+            call ens_out%add_scalar('pos_def_det',ve%positive_definite_det)
             call ens_out%add_scalar('eigval1',ve%eigenval(1,:,:,:))
             call ens_out%add_scalar('eigval2',ve%eigenval(2,:,:,:))
             call ens_out%add_scalar('eigval3',ve%eigenval(3,:,:,:))
@@ -672,6 +675,8 @@ contains
             ve%eigenval=exp(ve%eigenval)
             ! Check for positive definte C based upon eigenvalues
             call ve%check_positive_def_eign(vf%VF)
+            ! Check for positive definte C based upon determiant
+            call ve%check_positive_def_det(vf%VF)
          end if
 
          ! Perform sub-iterations
