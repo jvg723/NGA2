@@ -732,7 +732,7 @@ contains
                det2x2=this%SCrec(i,j,k,1)*this%SCrec(i,j,k,4)-this%SCrec(i,j,k,2)*this%SCrec(i,j,k,2)
                ! upper left 3-by-3 corner of C
                det3x3=this%SCrec(i,j,k,1)*(this%SCrec(i,j,k,4)*this%SCrec(i,j,k,6)-this%SCrec(i,j,k,5)*this%SCrec(i,j,k,5))-&
-               &      this%SCrec(i,j,k,2)*(this%SCrec(i,j,k,2)*this%SCrec(i,j,k,6)-this%SCrec(i,j,k,5)*this%SCrec(i,j,k,3))-&
+               &      this%SCrec(i,j,k,2)*(this%SCrec(i,j,k,2)*this%SCrec(i,j,k,6)-this%SCrec(i,j,k,5)*this%SCrec(i,j,k,3))+&
                &      this%SCrec(i,j,k,3)*(this%SCrec(i,j,k,2)*this%SCrec(i,j,k,5)-this%SCrec(i,j,k,4)*this%SCrec(i,j,k,3))
                ! Check determinant values
                if (det1x1.le.0.0_WP.or.det2x2.le.0.0_WP.or.det3x3.le.0.0_WP) then
