@@ -48,13 +48,13 @@ module droplet_class
       type(monitor)  :: cflfile     !< CFL monitoring
       type(monitor)  :: scfile      !< Scalar monitoring
       type(monitor)  :: filmfile    !< Film monitoring
+      type(monitor)  :: eigfile     !< Eigenvalue monitoring
       
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
       real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU
-      real(WP), dimension(:,:,:,:,:), allocatable :: Atmp
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -150,7 +150,6 @@ contains
          allocate(this%resSC     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%Atmp(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -230,9 +229,9 @@ contains
          ! Create flow solver
          this%fs=tpns(cfg=this%cfg,name='Two-phase NS')
          ! Set fluid properties
-         this%fs%rho_g=1.0_WP; call param_read('Density ratio',this%fs%rho_l)
+         this%fs%rho_g=1.0_WP; call param_read('Liquid density',this%fs%rho_l)
          call param_read('Reynolds number',this%fs%visc_g); this%fs%visc_g=1.0_WP/this%fs%visc_g
-         call param_read('Viscosity ratio',this%fs%visc_l); this%fs%visc_l=this%fs%visc_g*this%fs%visc_l
+         call param_read('Solvent viscosity',this%fs%visc_l)
          call param_read('Weber number',this%fs%sigma); this%fs%sigma=1.0_WP/this%fs%sigma
          ! Define inflow boundary condition on the left
          call this%fs%add_bcond(name='inflow',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_locator)
@@ -271,8 +270,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',this%ve%trelax)
          ! Polymer viscosity
-         call param_read('Polymer viscosity ratio',this%ve%visc_p);
-         this%ve%visc_p=this%fs%visc_l*((1.00_WP-this%ve%visc_p)/this%ve%visc_p)
+         call param_read('Polymer viscosity',this%ve%visc_p);
          ! Setup without an implicit solver
          call this%ve%setup()
          ! Check first if we use stabilization
@@ -482,6 +480,7 @@ contains
          if (stabilization) then
             call this%ve%get_max_reconstructed(this%vf%VF)
             call this%ve%get_max(this%vf%VF)
+            call this%ve%get_max_eign(this%vf%VF)
          else
             call this%ve%get_max(this%vf%VF)
          end if
@@ -536,6 +535,19 @@ contains
             end do
          end if
          call this%scfile%write()
+         ! Create Eigenvalue monitor
+         if (stabilization) then
+            this%eigfile=monitor(this%ve%cfg%amRoot,'eigenvlaue')
+               call this%eigfile%add_column(this%time%n,'Timestep number')
+               call this%eigfile%add_column(this%time%t,'Time')
+               call this%eigfile%add_column(this%ve%Eval1max,'Eval1max')
+               call this%eigfile%add_column(this%ve%Eval2max,'Eval2max')
+               call this%eigfile%add_column(this%ve%Eval3max,'Eval3max')
+               call this%eigfile%add_column(this%ve%Eval1min,'Eval1min')
+               call this%eigfile%add_column(this%ve%Eval2min,'Eval2min')
+               call this%eigfile%add_column(this%ve%Eval3min,'Eval3min')
+               call this%eigfile%write()
+            end if
          ! Create film thickness monitor
          this%filmfile=monitor(amroot=this%fs%cfg%amRoot,name='film')
          call this%filmfile%add_column(this%time%n,'Timestep number')
@@ -877,6 +889,8 @@ contains
       if (stabilization) then
          call this%ve%get_max_reconstructed(this%vf%VF)
          call this%ve%get_max(this%vf%VF)
+         call this%ve%get_max_eign(this%vf%VF)
+         call this%eigfile%write()
       else
          call this%ve%get_max(this%vf%VF)
       end if
