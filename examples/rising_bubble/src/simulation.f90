@@ -369,12 +369,12 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
-         use tpviscoelastic_class, only: eptt,oldroydb,fenecr,fenep
+         use tpviscoelastic_class, only: eptt,oldroydb,fenecr,fenep,lptt
          use tpscalar_class,       only: bcond,neumann
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -462,20 +462,20 @@ contains
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
             end do
-            call ens_out%add_scalar('pos_def_eign',ve%positive_definite_eign)
-            call ens_out%add_scalar('pos_def_det',ve%positive_definite_det)
-            call ens_out%add_scalar('eigval1',ve%eigenval(1,:,:,:))
-            call ens_out%add_scalar('eigval2',ve%eigenval(2,:,:,:))
-            call ens_out%add_scalar('eigval3',ve%eigenval(3,:,:,:))
-            call ens_out%add_scalar('eigvec11',ve%eigenvec(1,1,:,:,:))
-            call ens_out%add_scalar('eigvec12',ve%eigenvec(1,2,:,:,:))
-            call ens_out%add_scalar('eigvec13',ve%eigenvec(1,3,:,:,:))
-            call ens_out%add_scalar('eigvec21',ve%eigenvec(2,1,:,:,:))
-            call ens_out%add_scalar('eigvec22',ve%eigenvec(2,2,:,:,:))
-            call ens_out%add_scalar('eigvec23',ve%eigenvec(2,3,:,:,:))
-            call ens_out%add_scalar('eigvec31',ve%eigenvec(3,1,:,:,:))
-            call ens_out%add_scalar('eigvec32',ve%eigenvec(3,2,:,:,:))
-            call ens_out%add_scalar('eigvec33',ve%eigenvec(3,3,:,:,:))
+            ! call ens_out%add_scalar('pos_def_eign',ve%positive_definite_eign)
+            ! call ens_out%add_scalar('pos_def_det',ve%positive_definite_det)
+            ! call ens_out%add_scalar('eigval1',ve%eigenval(1,:,:,:))
+            ! call ens_out%add_scalar('eigval2',ve%eigenval(2,:,:,:))
+            ! call ens_out%add_scalar('eigval3',ve%eigenval(3,:,:,:))
+            ! call ens_out%add_scalar('eigvec11',ve%eigenvec(1,1,:,:,:))
+            ! call ens_out%add_scalar('eigvec12',ve%eigenvec(1,2,:,:,:))
+            ! call ens_out%add_scalar('eigvec13',ve%eigenvec(1,3,:,:,:))
+            ! call ens_out%add_scalar('eigvec21',ve%eigenvec(2,1,:,:,:))
+            ! call ens_out%add_scalar('eigvec22',ve%eigenvec(2,2,:,:,:))
+            ! call ens_out%add_scalar('eigvec23',ve%eigenvec(2,3,:,:,:))
+            ! call ens_out%add_scalar('eigvec31',ve%eigenvec(3,1,:,:,:))
+            ! call ens_out%add_scalar('eigvec32',ve%eigenvec(3,2,:,:,:))
+            ! call ens_out%add_scalar('eigvec33',ve%eigenvec(3,3,:,:,:))
          else
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
@@ -673,10 +673,10 @@ contains
             call ve%reconstruct_log_conformation(vf%VF)
             ! Take exp(eigenvalues) to use in next time-step
             ve%eigenval=exp(ve%eigenval)
-            ! Check for positive definte C based upon eigenvalues
-            call ve%check_positive_def_eign(vf%VF)
-            ! Check for positive definte C based upon determiant
-            call ve%check_positive_def_det(vf%VF)
+            ! ! Check for positive definte C based upon eigenvalues
+            ! call ve%check_positive_def_eign(vf%VF)
+            ! ! Check for positive definte C based upon determiant
+            ! call ve%check_positive_def_det(vf%VF)
          end if
 
          ! Perform sub-iterations

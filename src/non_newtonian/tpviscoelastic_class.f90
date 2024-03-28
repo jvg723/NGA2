@@ -348,6 +348,23 @@ contains
                end do
             end do
          end do
+      case (lptt) ! Add relaxation source for lPTT model
+         do k=this%cfg%kmino_,this%cfg%kmaxo_
+            do j=this%cfg%jmino_,this%cfg%jmaxo_
+               do i=this%cfg%imino_,this%cfg%imaxo_
+                  if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
+                  f=0.0_WP; coeff=0.0_WP
+                  f=1.00_WP+(this%elongvisc/(1.0_WP-this%affinecoeff))*((this%SCrec(i,j,k,1)+this%SCrec(i,j,k,4)+this%SCrec(i,j,k,6))-3.0_WP)
+                  coeff=-1.00_WP*((f*dt)/this%trelax)    
+                  this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
+                  this%SCrec(i,j,k,2)=this%SCrec(i,j,k,2)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xy tensor component
+                  this%SCrec(i,j,k,3)=this%SCrec(i,j,k,3)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< xz tensor component
+                  this%SCrec(i,j,k,4)=this%SCrec(i,j,k,4)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< yy tensor component
+                  this%SCrec(i,j,k,5)=this%SCrec(i,j,k,5)*exp(coeff)+(1.00_WP-exp(coeff))*0.0_WP !< yz tensor component
+                  this%SCrec(i,j,k,6)=this%SCrec(i,j,k,6)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< zz tensor component
+               end do
+            end do
+         end do
       case (eptt) ! Add relaxation source for ePTT model
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
