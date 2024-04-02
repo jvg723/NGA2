@@ -15,6 +15,8 @@ module block2_class
    use event_class,        only: event
    use monitor_class,      only: monitor
    use lpt_class,          only: lpt
+   use film_class,         only: film
+   use transfermodel_class,only: transfermodels
    implicit none
    private
 
@@ -29,17 +31,24 @@ module block2_class
       type(vfs)              :: vf                     !< VF solve
       type(timetracker)      :: time                   !< Time tracker
       type(lpt)              :: lp                     !< Particle tracking
+      type(film)             :: fm                     !< Film model
+      type(transfermodels)   :: tm                     !< Transfermodl
       type(surfmesh)         :: smesh                  !< Surfmesh        
       type(partmesh)         :: pmesh                  !< Mesh for particles          
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
-      type(monitor)          :: mfile,cflfile          !< Monitor files
-      type(event)            :: ppevt                  !< Event for post-processing
+      !> Monitoring files
+      type(monitor) :: mfile    !< General monitor files
+      type(monitor) :: cflfile  !< CFL monitor files
+      type(monitor) :: dropfile !< Droplet statistics monitoring
+      type(monitor) :: filmfile !< Film monitoring
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
+      !> For film bursting
+      integer  :: burst
    contains
       procedure :: init                   !< Initialize block
       procedure :: step                   !< Advance block
@@ -294,6 +303,14 @@ contains
       end block create_lpt
 
 
+      ! Create a film model and transfer model object
+      create_transfermodel: block
+         call b%fm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs)
+         call b%tm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs,lp=b%lp)
+         b%burst=merge(1,0,b%tm%burst)
+      end block create_transfermodel
+
+
       ! Initialize our velocity field 
       initialize_velocity: block
          ! Zero initial field in the domain
@@ -381,8 +398,10 @@ contains
          call b%ens_out%add_vector('velocity',b%Ui,b%Vi,b%Wi)
          call b%ens_out%add_scalar('VOF',b%vf%VF)
          call b%ens_out%add_scalar('Pressure',b%fs%P)
+         call b%ens_out%add_scalar('thin_sensor',b%vf%thin_sensor)
          call b%ens_out%add_scalar('curvature',b%vf%curv)
          call b%ens_out%add_surface('vofplic',b%smesh)
+         call b%ens_out%add_particle('spray',b%pmesh)
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
 
@@ -441,6 +460,24 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
+         ! Create a droplet mean/median monitor
+         b%dropfile=monitor(amroot=b%lp%cfg%amRoot,name='dropstats')
+         call b%dropfile%add_column(b%time%n,'Timestep number')
+         call b%dropfile%add_column(b%time%t,'Time')
+         call b%dropfile%add_column(b%time%dt,'Timestep size')
+         call b%dropfile%add_column(b%lp%np,'Droplet number')
+         call b%dropfile%add_column(b%lp%dmean,'d10')
+         call b%dropfile%write()
+         ! Create film thickness monitor
+         b%filmfile=monitor(amroot=b%fs%cfg%amRoot,name='film')
+         call b%filmfile%add_column(b%time%n,'Timestep number')
+         call b%filmfile%add_column(b%time%t,'Time')
+         call b%filmfile%add_column(b%tm%min_thickness,'Min thickness')
+         call b%filmfile%add_column(b%tm%film_volume,'Largest Film volume')
+         call b%filmfile%add_column(b%tm%film_ratio,'Vb/V0')
+         call b%filmfile%add_column(b%tm%converted_volume,'VOF-LPT Converted volume')
+         call b%filmfile%add_column(b%burst,'Burst indicator')
+         call b%filmfile%write()
       end block create_monitor
 
       
@@ -533,15 +570,22 @@ contains
          call b%fs%apply_bcond(b%time%t,b%time%dt)
             
          ! Solve Poisson equation
-         call b%fs%update_laplacian()
-         call b%fs%correct_mfr()
-         call b%fs%get_div()
-         call b%fs%add_surface_tension_jump(dt=b%time%dt,div=b%fs%div,vf=b%vf)
-         ! call b%fs%add_surface_tension_jump_thin(dt=b%time%dt,div=b%fs%div,vf=b%vf)
-         b%fs%psolv%rhs=-b%fs%cfg%vol*b%fs%div/b%time%dt
-         b%fs%psolv%sol=0.0_WP
-         call b%fs%psolv%solve()
-         call b%fs%shift_p(b%fs%psolv%sol)
+         solve_poisson: block
+            use vfs_class, only: lvira,r2p
+            call b%fs%update_laplacian()
+            call b%fs%correct_mfr()
+            call b%fs%get_div()
+            select case (b%vf%reconstruction_method)
+            case (r2p)
+               call b%fs%add_surface_tension_jump_thin(dt=b%time%dt,div=b%fs%div,vf=b%vf)
+            case (lvira)
+               call b%fs%add_surface_tension_jump(dt=b%time%dt,div=b%fs%div,vf=b%vf)
+            end select
+            b%fs%psolv%rhs=-b%fs%cfg%vol*b%fs%div/b%time%dt
+            b%fs%psolv%sol=0.0_WP
+            call b%fs%psolv%solve()
+            call b%fs%shift_p(b%fs%psolv%sol)
+         end block solve_poisson
             
          ! Correct velocity
          call b%fs%get_pgrad(b%fs%psolv%sol,b%resU,b%resV,b%resW)
@@ -560,6 +604,10 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
+      ! Perform volume-fraction-to-droplet transfer
+      call b%tm%transfer_vf_to_drops()
+      b%burst=merge(1,0,b%tm%burst)
+
       ! Remove VOF at edge of domain
       remove_vof: block
          integer :: n
@@ -568,6 +616,9 @@ contains
          end do
       end block remove_vof
 
+      ! Calculate spray statistics
+      call b%tm%spray_statistics()
+      
       ! Output to ensight
       if (b%ens_evt%occurs()) then 
          ! Update surfmesh object 
@@ -635,8 +686,11 @@ contains
       ! Perform and output monitoring
       call b%fs%get_max()
       call b%vf%get_max()
+      call b%lp%get_max()
       call b%mfile%write()
       call b%cflfile%write()
+      call b%dropfile%write()
+      call b%filmfile%write()
 
       
    end subroutine step

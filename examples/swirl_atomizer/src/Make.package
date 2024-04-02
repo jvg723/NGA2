@@ -1,2 +1,3 @@
 # List here the extra files here
-f90EXE_sources += geometry.f90 block1_class.f90 block2_class.f90 simulation.f90 
+f90EXE_sources += geometry.f90 block1_class.f90 block2_class.f90 simulation.f90 film_class.f90 transfermodel_class.f90 ccl_class.f90 c_interface.f90
+cEXE_sources += mkdir.c

@@ -6,17 +6,18 @@
 1 Outer Pipe diameter : 1.2
 1 Inner Pipe diameter : 0.8
 1 Pipe length         : 4
-1 nx                  : 64
-1 ny                  : 32
-1 nz                  : 32
+1 nx                  : 252
+1 ny                  : 216
+1 nz                  : 216
 
 # Swirl atomizer domain definition
-2 Lx : 10
-2 Ly : 12
-2 Lz : 12
-2 nx : 64
-2 ny : 128
-2 nz : 128
+2 Lx : 12
+2 Ly : 14
+2 Lz : 14
+2 nx : 216
+2 ny : 252
+2 nz : 252
+
 
 # Pipe properties
 Bulk axial velocity : 1
@@ -36,7 +37,7 @@ Surface tension coefficient : 0.001
 1 Max timestep size : 0.01
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
-Max time            : 100
+Max time            : 200
 Transistion         : 100
 
 # Pressure solver
@@ -48,9 +49,5 @@ Implicit tolerance : 1e-5
 Implicit iteration : 100
 
 # Ensight output
-Ensight output period : 1e-2
+Ensight output period : 0.1
 
-# Post processing
-Postproc output period : 1e-2
-! Binning time period : 1e-1 ! Time to collect information about liquid structures in analysis region
-Analysis plane      : 0.9  ! Location along x-axis to collect structure data
