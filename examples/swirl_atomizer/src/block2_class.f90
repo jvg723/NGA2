@@ -40,7 +40,6 @@ module block2_class
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
-      real(WP) :: vof_removed              !< Integral of VOF removed
    contains
       procedure :: init                   !< Initialize block
       procedure :: step                   !< Advance block
@@ -49,7 +48,6 @@ module block2_class
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
-
 
 contains
    
@@ -140,14 +138,10 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.ge.pg%imax-nlayer.or.&
-      &   j.le.pg%jmin+nlayer.or.&
-      &   j.ge.pg%jmax-nlayer.or.&
-      &   k.le.pg%kmin+nlayer.or.&
-      &   k.ge.pg%kmax-nlayer) isIn=.true.
+      if (i.ge.pg%imax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
-   
-   
+
+
    !> Initialization of problem solver
    subroutine init(b)
       use param, only: param_read
@@ -243,10 +237,10 @@ contains
          call b%vf%reset_volume_moments()
       end block create_and_initialize_vof
 
+
       ! Create an iterator for removing VOF at edges
       create_iterator: block
          b%vof_removal_layer=iterator(b%cfg,'VOF removal',vof_removal_layer_locator)
-         b%vof_removed=0.0_WP
       end block create_iterator
       
 
@@ -568,19 +562,10 @@ contains
 
       ! Remove VOF at edge of domain
       remove_vof: block
-         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
-         use parallel, only: MPI_REAL_WP
-         integer :: n,i,j,k,ierr
-         real(WP) :: my_vof_removed
-         my_vof_removed=0.0_WP
+         integer :: n
          do n=1,b%vof_removal_layer%no_
-            i=b%vof_removal_layer%map(1,n)
-            j=b%vof_removal_layer%map(2,n)
-            k=b%vof_removal_layer%map(3,n)
-            my_vof_removed=my_vof_removed+b%cfg%vol(i,j,k)*b%vf%VF(i,j,k)
-            b%vf%VF(i,j,k)=0.0_WP
+            b%vf%VF(b%vof_removal_layer%map(1,n),b%vof_removal_layer%map(2,n),b%vof_removal_layer%map(3,n))=0.0_WP
          end do
-         call MPI_ALLREDUCE(my_vof_removed,b%vof_removed,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
       end block remove_vof
 
       ! Output to ensight
