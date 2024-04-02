@@ -4,10 +4,8 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg1,group1,isInGrp1
    use geometry,          only: cfg2,group2,isInGrp2
-   use geometry,          only: cfg3,group3,isInGrp3
    use block1_class,      only: block1
    use block2_class,      only: block2
-   use block3_class,      only: block3
    use coupler_class,     only: coupler
    use timetracker_class, only: timetracker
    implicit none
@@ -18,18 +16,15 @@ module simulation
    !> Block 1 and 2 objects
    type(block1) :: b1
    type(block2) :: b2
-   type(block3) :: b3
 
    !> Couplers between blocks
    type(coupler) :: cpl12x,cpl12y,cpl12z
-   type(coupler) :: cpl23x,cpl23y,cpl23z
 
    !> Time when annular pipe is turbulent
    real(WP) :: transition_time
 
    !> Storage for coupled fields
    real(WP), dimension(:,:,:), allocatable :: U1on2,V1on2,W1on2
-   real(WP), dimension(:,:,:), allocatable :: U2on3,V2on3,W2on3
 
    
 contains
@@ -51,15 +46,11 @@ contains
          b2%cfg=>cfg2
          call b2%init()
       end if
-      if (isInGrp3) then 
-         b3%cfg=>cfg3
-         call b3%init()
-      end if
 
       ! Initialize the couplers
       coupler_prep: block
          use parallel, only: group
-         ! Both groups prepare the coupler
+         ! Both groups prepare the coupler (couple pipe to swirl)
          if (isInGrp1.or.isInGrp2) then
             ! Block 1 to block 2
             cpl12x=coupler(src_grp=group1,dst_grp=group2,name='pipe_to_swirl_x') 
@@ -88,15 +79,6 @@ contains
             end if
          end if
       end block coupler_prep
-
-      ! Setup nudging region in block 3
-      b3%nudge_trans=20.0_WP*b3%cfg%min_meshsize
-      b3%nudge_xmin =b2%cfg%x(b2%cfg%imin)
-      b3%nudge_xmax =b2%cfg%x(b2%cfg%imax+1)
-      b3%nudge_ymin =b2%cfg%y(b2%cfg%jmin)
-      b3%nudge_ymax =b2%cfg%y(b2%cfg%jmax+1)
-      b3%nudge_zmin =b2%cfg%z(b2%cfg%kmin)
-      b3%nudge_zmax =b2%cfg%z(b2%cfg%kmax+1)
 
    end subroutine simulation_init
    
