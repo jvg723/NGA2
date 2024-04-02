@@ -298,66 +298,64 @@ contains
       end block initialize_velocity
 
 
-      ! ! Create surfmesh object for interface polygon output (for R2P)
-      ! create_smesh: block
-      !    use irl_fortran_interface
-      !    integer :: i,j,k,nplane,np
-      !    ! Include an extra variable for number of planes
-      !    b%smesh=surfmesh(nvar=5,name='plic')
-      !    b%smesh%varname(1)='nplane'
-      !    b%smesh%varname(2)='curv'
-      !    b%smesh%varname(3)='edge_sensor'
-      !    b%smesh%varname(4)='thin_sensor'
-      !    b%smesh%varname(5)='thickness'
-      !    ! Transfer polygons to smesh
-      !    call b%vf%update_surfmesh(b%smesh)
-      !    ! Also populate nplane variable
-      !    b%smesh%var(1,:)=1.0_WP
-      !    np=0
-      !    do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-      !       do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-      !          do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-      !             do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
-      !                if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-      !                   np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-      !                   b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
-      !                   b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
-      !                   b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
-      !                   b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
-      !                end if
-      !             end do
-      !          end do
-      !       end do
-      !    end do
-      ! end block create_smesh
-
-
-      ! Create surfmesh object for interface polygon output (for LVIRA)
+      ! Create surfmesh object for interface polygon output 
       create_smesh: block
          use irl_fortran_interface
+         use vfs_class, only: lvira,r2p
          integer :: i,j,k,nplane,np
-         ! Include an extra variable for number of planes
-         b%smesh=surfmesh(nvar=1,name='plic')
-         b%smesh%varname(1)='nplane'
-         ! Transfer polygons to smesh
-         call b%vf%update_surfmesh(b%smesh)
-         ! Also populate nplane variable
-         b%smesh%var(1,:)=1.0_WP
-         np=0
-         do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-            do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-               do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-                  do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
-                     if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-                     end if
+         select case (b%vf%reconstruction_method)
+         case (r2p)
+            ! Include an extra variable for number of planes
+            b%smesh=surfmesh(nvar=5,name='plic')
+            b%smesh%varname(1)='nplane'
+            b%smesh%varname(2)='curv'
+            b%smesh%varname(3)='edge_sensor'
+            b%smesh%varname(4)='thin_sensor'
+            b%smesh%varname(5)='thickness'
+            ! Transfer polygons to smesh
+            call b%vf%update_surfmesh(b%smesh)
+            ! Also populate nplane variable
+            b%smesh%var(1,:)=1.0_WP
+            np=0
+            do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+               do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+                  do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
+                           b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
+                           b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
+                           b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
+                           b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                        end if
+                     end do
                   end do
                end do
             end do
-         end do
+         case (lvira)
+            ! Include an extra variable for number of planes
+            b%smesh=surfmesh(nvar=1,name='plic')
+            b%smesh%varname(1)='nplane'
+            ! Transfer polygons to smesh
+            call b%vf%update_surfmesh(b%smesh)
+            ! Also populate nplane variable
+            b%smesh%var(1,:)=1.0_WP
+            np=0
+            do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+               do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+                  do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end select
       end block create_smesh
 
-      
+
       ! Add Ensight output
       create_ensight: block
          integer :: nsc
@@ -547,51 +545,51 @@ contains
 
       ! Output to ensight
       if (b%ens_evt%occurs()) then 
-         ! ! Update surfmesh object (for R2P)
-         ! update_smesh: block
-         !    use irl_fortran_interface
-         !    integer :: nplane,np,i,j,k
-         !    ! Transfer polygons to smesh
-         !    call b%vf%update_surfmesh(b%smesh)
-         !    ! Also populate nplane variable
-         !    b%smesh%var(1,:)=1.0_WP
-         !    np=0
-         !    do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-         !       do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-         !          do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-         !             do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
-         !                if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-         !                   np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-         !                   b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
-         !                   b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
-         !                   b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
-         !                   b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
-         !                end if
-         !             end do
-         !          end do
-         !       end do
-         !    end do
-         ! end block update_smesh
-         ! Update surfmesh object (for LVIRA)
+         ! Update surfmesh object 
          update_smesh: block
             use irl_fortran_interface
+            use vfs_class, only: lvira,r2p
             integer :: nplane,np,i,j,k
-            ! Transfer polygons to smesh
-            call b%vf%update_surfmesh(b%smesh)
-            ! Also populate nplane variable
-            b%smesh%var(1,:)=1.0_WP
-            np=0
-            do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-               do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-                  do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-                     do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
-                        if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                           np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
-                        end if
+            select case (b%vf%reconstruction_method)
+            case (r2p)
+               ! Transfer polygons to smesh
+               call b%vf%update_surfmesh(b%smesh)
+               ! Also populate nplane variable
+               b%smesh%var(1,:)=1.0_WP
+               np=0
+               do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+                  do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+                     do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
+                              b%smesh%var(2,np)=b%vf%curv2p(nplane,i,j,k)
+                              b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
+                              b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
+                              b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                           end if
+                        end do
                      end do
                   end do
                end do
-            end do
+            case (lvira)
+               ! Transfer polygons to smesh
+               call b%vf%update_surfmesh(b%smesh)
+               ! Also populate nplane variable
+               b%smesh%var(1,:)=1.0_WP
+               np=0
+               do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+                  do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+                     do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(b%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; b%smesh%var(1,np)=real(getNumberOfPlanes(b%vf%liquid_gas_interface(i,j,k)),WP)
+                           end if
+                        end do
+                     end do
+                  end do
+               end do
+            end select
          end block update_smesh
          ! Perform ensight output 
          call b%ens_out%write_data(b%time%t)
