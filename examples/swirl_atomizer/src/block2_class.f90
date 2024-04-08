@@ -11,12 +11,8 @@ module block2_class
    use timetracker_class,  only: timetracker
    use ensight_class,      only: ensight
    use surfmesh_class,     only: surfmesh
-   use partmesh_class,     only: partmesh
    use event_class,        only: event
    use monitor_class,      only: monitor
-   use lpt_class,          only: lpt
-   use film_class,         only: film
-   use transfermodel_class,only: transfermodels
    implicit none
    private
 
@@ -30,25 +26,17 @@ module block2_class
       type(tpns)             :: fs                     !< Two phase incompressible flow solver
       type(vfs)              :: vf                     !< VF solve
       type(timetracker)      :: time                   !< Time tracker
-      type(lpt)              :: lp                     !< Particle tracking
-      type(film)             :: fm                     !< Film model
-      type(transfermodels)   :: tm                     !< Transfermodl
-      type(surfmesh)         :: smesh                  !< Surfmesh        
-      type(partmesh)         :: pmesh                  !< Mesh for particles          
+      type(surfmesh)         :: smesh                  !< Surfmesh              
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
       !> Monitoring files
       type(monitor) :: mfile    !< General monitor files
       type(monitor) :: cflfile  !< CFL monitor files
-      type(monitor) :: dropfile !< Droplet statistics monitoring
-      type(monitor) :: filmfile !< Film monitoring
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
-      !> For film bursting
-      integer  :: burst
    contains
       procedure :: init                   !< Initialize block
       procedure :: step                   !< Advance block
@@ -292,28 +280,6 @@ contains
 			call b%fs%setup(pressure_solver=b%ps,implicit_solver=b%vs)
       end block create_and_initialize_flow_solver
       
-      
-      ! Create a Lagrangian spray tracker
-      create_lpt: block
-         use param, only: param_read
-         ! Create the solver
-         b%lp=lpt(cfg=b%cfg,name='spray')
-         ! Get particle density from the flow solver
-         b%lp%rho=b%fs%rho_l    
-         ! Initialize with zero particles
-         call b%lp%resize(0)
-         ! Get initial particle volume fraction
-         call b%lp%update_VF()               
-      end block create_lpt
-
-
-      ! Create a film model and transfer model object
-      create_transfermodel: block
-         call b%fm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs)
-         call b%tm%initialize(cfg=b%cfg,vf=b%vf,fs=b%fs,lp=b%lp)
-         b%burst=merge(1,0,b%tm%burst)
-      end block create_transfermodel
-
 
       ! Initialize our velocity field 
       initialize_velocity: block
@@ -405,25 +371,8 @@ contains
          call b%ens_out%add_scalar('thin_sensor',b%vf%thin_sensor)
          call b%ens_out%add_scalar('curvature',b%vf%curv)
          call b%ens_out%add_surface('vofplic',b%smesh)
-         call b%ens_out%add_particle('spray',b%pmesh)
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
-
-      ! Create partmesh object for Lagrangian particle output
-      create_pmesh: block
-         integer :: i
-         ! Include an extra variable for droplet diameter
-         b%pmesh=partmesh(nvar=1,nvec=1,name='lpt')
-         b%pmesh%varname(1)='diameter'
-         b%pmesh%vecname(1)='velocity'
-         ! Transfer particles to pmesh
-         call b%lp%update_partmesh(b%pmesh)
-         ! Also populate diameter variable
-         do i=1,b%lp%np_
-            b%pmesh%var(1,i)=b%lp%p(i)%d
-            b%pmesh%vec(:,1,i)=b%lp%p(i)%vel
-         end do
-      end block create_pmesh
 
 
       ! Create a monitor file
@@ -443,7 +392,6 @@ contains
          call b%mfile%add_column(b%fs%Vmax,'Vmax')
          call b%mfile%add_column(b%fs%Wmax,'Wmax')
          call b%mfile%add_column(b%fs%Pmax,'Pmax')
-         call b%mfile%add_column(b%lp%np,'Particle number')
          call b%mfile%add_column(b%vf%VFmax,'VOF maximum')
          call b%mfile%add_column(b%vf%VFmin,'VOF minimum')
          call b%mfile%add_column(b%vf%VFint,'VOF integral')
@@ -464,24 +412,6 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
-         ! Create a droplet mean/median monitor
-         b%dropfile=monitor(amroot=b%lp%cfg%amRoot,name='dropstats')
-         call b%dropfile%add_column(b%time%n,'Timestep number')
-         call b%dropfile%add_column(b%time%t,'Time')
-         call b%dropfile%add_column(b%time%dt,'Timestep size')
-         call b%dropfile%add_column(b%lp%np,'Droplet number')
-         call b%dropfile%add_column(b%lp%dmean,'d10')
-         call b%dropfile%write()
-         ! Create film thickness monitor
-         b%filmfile=monitor(amroot=b%fs%cfg%amRoot,name='film')
-         call b%filmfile%add_column(b%time%n,'Timestep number')
-         call b%filmfile%add_column(b%time%t,'Time')
-         call b%filmfile%add_column(b%tm%min_thickness,'Min thickness')
-         call b%filmfile%add_column(b%tm%film_volume,'Largest Film volume')
-         call b%filmfile%add_column(b%tm%film_ratio,'Vb/V0')
-         call b%filmfile%add_column(b%tm%converted_volume,'VOF-LPT Converted volume')
-         call b%filmfile%add_column(b%burst,'Burst indicator')
-         call b%filmfile%write()
       end block create_monitor
 
       
@@ -502,9 +432,6 @@ contains
       call b%time%adjust_dt()
       call b%time%increment()
 
-      ! Advance our spray
-      b%resU=b%fs%rho_g; b%resV=b%fs%visc_g
-      call b%lp%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W,rho=b%resU,visc=b%resV)   
 
       ! Apply time-varying Dirichlet conditions
       reapply_dirichlet: block
@@ -608,9 +535,6 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
-      ! Perform volume-fraction-to-droplet transfer
-      call b%tm%transfer_vf_to_drops()
-      b%burst=merge(1,0,b%tm%burst)
 
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -620,8 +544,6 @@ contains
          end do
       end block remove_vof
 
-      ! Calculate spray statistics
-      call b%tm%spray_statistics()
       
       ! Output to ensight
       if (b%ens_evt%occurs()) then 
@@ -671,17 +593,6 @@ contains
                end do
             end select
          end block update_smesh
-         ! Update partmesh object
-         update_pmesh: block
-            integer :: i
-            ! Transfer particles to pmesh
-            call b%lp%update_partmesh(b%pmesh)
-            ! Also populate diameter variable
-            do i=1,b%lp%np_
-               b%pmesh%var(1,i)=b%lp%p(i)%d
-               b%pmesh%vec(:,1,i)=b%lp%p(i)%vel
-            end do
-         end block update_pmesh
    
          ! Perform ensight output 
          call b%ens_out%write_data(b%time%t)
@@ -690,11 +601,9 @@ contains
       ! Perform and output monitoring
       call b%fs%get_max()
       call b%vf%get_max()
-      call b%lp%get_max()
       call b%mfile%write()
       call b%cflfile%write()
-      call b%dropfile%write()
-      call b%filmfile%write()
+
 
       
    end subroutine step
