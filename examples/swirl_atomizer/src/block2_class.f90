@@ -32,8 +32,11 @@ module block2_class
       type(event)            :: ens_evt                !< Ensight event
       type(cclabel)          :: ccl                    !< Label object
       !> Monitoring files
-      type(monitor) :: mfile    !< General monitor files
-      type(monitor) :: cflfile  !< CFL monitor files
+      type(monitor) :: mfile     !< General monitor files
+      type(monitor) :: cflfile   !< CFL monitor files
+      type(monitor) :: timerfile !< File for timers
+      real(WP) :: cclabel_timer
+      real(WP) :: cclabel_core_hours
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
@@ -447,9 +450,17 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
+         ! Create object time tracker monitor
+         b%timerfile=monitor(b%fs%cfg%amRoot,'swirl_atomizer_timers')
+         call b%timerfile%add_column(b%time%n,'Timestep number')
+         call b%timerfile%add_column(b%time%t,'Simulation Time')
+         call b%timerfile%add_column(b%cclabel_timer,'cclabel time')
+         call b%timerfile%add_column(b%cfg%nproc, 'Num of Proc')
+         call b%timerfile%add_column(b%cclabel_core_hours, 'cclabel core-hours')
+         call b%timerfile%write()
       end block create_monitor
 
-
+      
    end subroutine init
    
    
@@ -572,9 +583,25 @@ contains
 
       ! Label thin film regions
       label_thin: block
+         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+         use parallel, only: MPI_REAL_WP
+         real(WP) :: starttime,endtime,my_time
+         integer :: ierr
+         ! Copy over thin sensor for label functions
          tmp_thin_sensor=0.0_WP
          tmp_thin_sensor=b%vf%thin_sensor
+         my_time=0.0_WP
+         ! Label regions and track time
+         b%cclabel_timer=0.0_WP
+         starttime=MPI_WTIME()
          call b%ccl%build(make_label,same_label)
+         endtime=MPI_WTIME()
+         my_time=endtime-starttime
+         ! Reduce time to get total for timestep
+         call MPI_ALLREDUCE(my_time,b%cclabel_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+         ! Calculate core hours
+         b%cclabel_core_hours=0.0_WP
+         b%cclabel_core_hours=b%cclabel_timer*(1.00_WP/60.00_WP)*(1.00_WP/60.00_WP)*b%cfg%nproc
       end block label_thin
       
       
@@ -646,6 +673,7 @@ contains
       call b%vf%get_max()
       call b%mfile%write()
       call b%cflfile%write()
+      call b%timerfile%write()
 
       
    end subroutine step
