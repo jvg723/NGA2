@@ -12,6 +12,7 @@ module block2_class
    use ensight_class,      only: ensight
    use surfmesh_class,     only: surfmesh
    use event_class,        only: event
+   use cclabel_class,      only: cclabel
    use monitor_class,      only: monitor
    implicit none
    private
@@ -29,6 +30,7 @@ module block2_class
       type(surfmesh)         :: smesh                  !< Surfmesh              
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
+      type(cclabel)          :: ccl                    !< Label object
       !> Monitoring files
       type(monitor) :: mfile    !< General monitor files
       type(monitor) :: cflfile  !< CFL monitor files
@@ -45,6 +47,9 @@ module block2_class
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
+
+   !> A temp array for film thickness sensor
+   real(WP), dimension(:,:,:), allocatable :: tmp_thin_sensor
 
 contains
    
@@ -142,6 +147,28 @@ contains
       &   k.ge.pg%kmax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
+   !> Function that identifies cells that need a label
+   logical function make_label(i,j,k)
+      implicit none
+      integer, intent(in) :: i,j,k
+      if (tmp_thin_sensor(i,j,k).eq.1.0_WP) then
+         make_label=.true.
+      else
+         make_label=.false.
+      end if
+   end function make_label
+
+   !> Function that identifies if cell pairs have same label
+   logical function same_label(i1,j1,k1,i2,j2,k2)
+      implicit none
+      integer, intent(in) :: i1,j1,k1,i2,j2,k2
+      if (tmp_thin_sensor(i1,j1,k1).eq.tmp_thin_sensor(i2,j2,k2)) then
+         same_label=.true.
+      else
+         same_label=.false.
+      end if
+   end function same_label
+
 
    !> Initialization of problem solver
    subroutine init(b)
@@ -158,6 +185,7 @@ contains
          allocate(b%Ui   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%Vi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%Wi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         allocate(tmp_thin_sensor(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -182,7 +210,7 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call b%vf%initialize(cfg=b%cfg,reconstruction_method=lvira,name='VOF')
+         call b%vf%initialize(cfg=b%cfg,reconstruction_method=r2p,name='VOF')
          ! Set full domain to gas
          do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
             do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
@@ -297,6 +325,11 @@ contains
          call b%fs%get_div()
       end block initialize_velocity
 
+      ! Create cclabel object
+      film_label: block
+         call b%ccl%initialize(pg=b%cfg%pgrid,name='film_label')
+      end block film_label
+
 
       ! Create surfmesh object for interface polygon output 
       create_smesh: block
@@ -306,12 +339,13 @@ contains
          select case (b%vf%reconstruction_method)
          case (r2p)
             ! Include an extra variable for number of planes
-            b%smesh=surfmesh(nvar=5,name='plic')
+            b%smesh=surfmesh(nvar=6,name='plic')
             b%smesh%varname(1)='nplane'
             b%smesh%varname(2)='curv'
             b%smesh%varname(3)='edge_sensor'
             b%smesh%varname(4)='thin_sensor'
             b%smesh%varname(5)='thickness'
+            b%smesh%varname(6)='id'
             ! Transfer polygons to smesh
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
@@ -327,6 +361,7 @@ contains
                            b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
                            b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                           b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
                         end if
                      end do
                   end do
@@ -414,7 +449,7 @@ contains
          call b%cflfile%write()
       end block create_monitor
 
-      
+
    end subroutine init
    
    
@@ -535,7 +570,14 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
-
+      ! Label thin film regions
+      label_thin: block
+         tmp_thin_sensor=0.0_WP
+         tmp_thin_sensor=b%vf%thin_sensor
+         call b%ccl%build(make_label,same_label)
+      end block label_thin
+      
+      
       ! Remove VOF at edge of domain
       remove_vof: block
          integer :: n
@@ -569,6 +611,7 @@ contains
                               b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
                               b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                               b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
+                              b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
                            end if
                         end do
                      end do
@@ -604,7 +647,6 @@ contains
       call b%mfile%write()
       call b%cflfile%write()
 
-
       
    end subroutine step
    
@@ -621,6 +663,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi)
+      deallocate(tmp_thin_sensor)
       
    end subroutine final
    
