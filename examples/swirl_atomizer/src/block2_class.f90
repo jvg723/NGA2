@@ -147,7 +147,11 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.ge.pg%imax-nlayer) isIn=.true.
+      if (i.ge.pg%imax-nlayer.or.&
+      &   j.le.pg%jmin+nlayer.or.&
+      &   j.ge.pg%jmax-nlayer.or.&
+      &   k.le.pg%kmin+nlayer.or.&
+      &   k.ge.pg%kmax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
 
