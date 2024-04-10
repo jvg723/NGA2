@@ -30,7 +30,8 @@ module block2_class
       type(surfmesh)         :: smesh                  !< Surfmesh              
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
-      type(cclabel)          :: ccl                    !< Label object
+      type(cclabel)          :: ccl                    !< Label object for thin regions
+      type(cclabel)          :: ccl_2                  !< Label regions below min film thickenss
       !> Monitoring files
       type(monitor) :: mfile     !< General monitor files
       type(monitor) :: cflfile   !< CFL monitor files
@@ -52,11 +53,17 @@ module block2_class
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
 
-   !> A temp array for film thickness sensor
+   !> A temp array for thin region sensor
    real(WP), dimension(:,:,:), allocatable :: tmp_thin_sensor
 
+   !> A temp array for film thickness
+   real(WP), dimension(:,:,:), allocatable :: tmp_thickness
+
    !> Min film thickness for puncture
-   real(WP), parameter :: min_filmthickness=1.0e-4_WP
+   real(WP), parameter :: min_filmthickness=6.0e-3_WP
+
+   !> Min film thickness for labeling
+   real(WP), parameter :: min_filmthickness_label=6.0e-2_WP
 
 contains
    
@@ -176,6 +183,28 @@ contains
       end if
    end function same_label
 
+   !> Function that identifies if cell pairs have same label
+   logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
+      implicit none
+      integer, intent(in) :: i1,j1,k1,i2,j2,k2
+      if (tmp_thickness(i1,j1,k1).eq.tmp_thickness(i2,j2,k2)) then
+         same_label_thickness=.true.
+      else
+         same_label_thickness=.false.
+      end if
+   end function same_label_thickness
+
+   !> Function that identifies cells that need a label to min thickness region 
+   logical function make_label_thickness(i,j,k)
+      implicit none
+      integer, intent(in) :: i,j,k
+      if (tmp_thickness(i,j,k).le.min_filmthickness_label) then
+         make_label_thickness=.true.
+      else
+         make_label_thickness=.false.
+      end if
+   end function make_label_thickness
+
 
    !> Initialization of problem solver
    subroutine init(b)
@@ -193,6 +222,7 @@ contains
          allocate(b%Vi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%Wi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(tmp_thin_sensor(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         allocate(tmp_thickness  (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -334,7 +364,8 @@ contains
 
       ! Create cclabel object
       film_label: block
-         call b%ccl%initialize(pg=b%cfg%pgrid,name='film_label')
+         call b%ccl%initialize(pg=b%cfg%pgrid,name='thin_region_label')
+         call b%ccl_2%initialize(pg=b%cfg%pgrid,name='min_thickness_label')
       end block film_label
 
 
@@ -616,6 +647,14 @@ contains
          ! Find average wall time
          b%cclabel_timer=b%cclabel_timer/b%cfg%nproc
       end block label_thin
+
+      ! Label min thickness regions
+      label_min_thickness: block
+         ! Copy over thickness for label functions
+         tmp_thickness=0.0_WP
+         tmp_thickness=b%vf%thickness
+         call b%ccl_2%build(make_label_thickness,same_label_thickness)
+      end block label_min_thickness
 
       ! Puncture a hole in low film thickness regions
       puncture_film: block
