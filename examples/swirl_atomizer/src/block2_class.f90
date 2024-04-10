@@ -36,7 +36,8 @@ module block2_class
       type(monitor) :: cflfile   !< CFL monitor files
       type(monitor) :: timerfile !< File for timers
       real(WP) :: cclabel_timer
-      real(WP) :: cclabel_core_hours
+      real(WP) :: step_timer
+      real(WP) :: cclabel_percent
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
@@ -459,9 +460,10 @@ contains
          b%timerfile=monitor(b%fs%cfg%amRoot,'swirl_atomizer_timers')
          call b%timerfile%add_column(b%time%n,'Timestep number')
          call b%timerfile%add_column(b%time%t,'Simulation Time')
-         call b%timerfile%add_column(b%cclabel_timer,'cclabel time')
          call b%timerfile%add_column(b%cfg%nproc, 'Num of Proc')
-         call b%timerfile%add_column(b%cclabel_core_hours, 'cclabel core-hours')
+         call b%timerfile%add_column(b%cclabel_timer,'cclabel time')
+         call b%timerfile%add_column(b%step_timer, 'step time')
+         call b%timerfile%add_column(b%cclabel_percent, 'cclabel percent')
          call b%timerfile%write()
       end block create_monitor
 
@@ -472,12 +474,19 @@ contains
    !> Take a time step with block 2
    subroutine step(b,Uinflow,Vinflow,Winflow)
       use tpns_class, only: arithmetic_visc
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+      use parallel, only: MPI_REAL_WP
       implicit none
       class(block2), intent(inout) :: b
+      real(WP) :: starttime_step,endtime_step,my_time_step
+      integer :: ierr
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Uinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Vinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Winflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
          
+      ! Start time step timer
+      starttime_step=mpi_wtime()
+
       ! Increment time
       call b%fs%get_cfl(b%time%dt,b%time%cfl)
       call b%time%adjust_dt()
@@ -602,11 +611,10 @@ contains
          call b%ccl%build(make_label,same_label)
          endtime=MPI_WTIME()
          my_time=endtime-starttime
-         ! Reduce time to get total for timestep
+         ! Reduce time to get total sum time across all processors
          call MPI_ALLREDUCE(my_time,b%cclabel_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-         ! Calculate core hours
-         b%cclabel_core_hours=0.0_WP
-         b%cclabel_core_hours=b%cclabel_timer*(1.00_WP/60.00_WP)*(1.00_WP/60.00_WP)*b%cfg%nproc
+         ! Find average wall time
+         b%cclabel_timer=b%cclabel_timer/b%cfg%nproc
       end block label_thin
 
       ! Puncture a hole in low film thickness regions
@@ -701,7 +709,17 @@ contains
       call b%cflfile%write()
       call b%timerfile%write()
 
-      
+      ! End time steo timer
+      endtime_step=mpi_wtime()
+      my_time_step=endtime_step-starttime_step
+
+      ! Reduce time to get total sum time across all processors
+      call MPI_ALLREDUCE(my_time_step,b%step_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+      ! Find average wall time in time step
+      b%step_timer=b%step_timer/b%cfg%nproc
+      ! Percent of time spent in cclabel
+      b%cclabel_percent=b%cclabel_timer/b%step_timer
+
    end subroutine step
    
    !> Finalize b2 simulation
