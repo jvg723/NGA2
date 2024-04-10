@@ -54,6 +54,9 @@ module block2_class
    !> A temp array for film thickness sensor
    real(WP), dimension(:,:,:), allocatable :: tmp_thin_sensor
 
+   !> Min film thickness for puncture
+   real(WP), parameter :: min_filmthickness=1.0e-4_WP
+
 contains
    
    
@@ -342,13 +345,14 @@ contains
          select case (b%vf%reconstruction_method)
          case (r2p)
             ! Include an extra variable for number of planes
-            b%smesh=surfmesh(nvar=6,name='plic')
+            b%smesh=surfmesh(nvar=7,name='plic')
             b%smesh%varname(1)='nplane'
             b%smesh%varname(2)='curv'
             b%smesh%varname(3)='edge_sensor'
             b%smesh%varname(4)='thin_sensor'
             b%smesh%varname(5)='thickness'
             b%smesh%varname(6)='id'
+            b%smesh%varname(7)='edge_sensor'
             ! Transfer polygons to smesh
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
@@ -365,6 +369,7 @@ contains
                            b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                            b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
+                           b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
                         end if
                      end do
                   end do
@@ -603,6 +608,26 @@ contains
          b%cclabel_core_hours=0.0_WP
          b%cclabel_core_hours=b%cclabel_timer*(1.00_WP/60.00_WP)*(1.00_WP/60.00_WP)*b%cfg%nproc
       end block label_thin
+
+      ! Puncture a hole in low film thickness regions
+      puncture_film: block
+         integer :: i,j,k,l,n,nn
+         do n=1,b%ccl%nstruct
+            do nn=1,b%ccl%struct(n)%n_
+               i=b%ccl%struct(n)%map(1,nn)
+               j=b%ccl%struct(n)%map(2,nn)
+               k=b%ccl%struct(n)%map(3,nn)
+               ! Skip cells where VF=0 
+               if (b%vf%VF(i,j,k).eq.0.0_WP) cycle
+               ! Skip cells that are still thick enough
+               if (b%vf%thickness(i,j,k).gt.min_filmthickness) cycle
+               ! Zero out VOF in region of cell i,j,k for puncture
+               b%vf%VF(i-2,j,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i+2,j,k)=0.0_WP
+               b%vf%VF(i,j-2,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j+2,k)=0.0_WP
+               b%vf%VF(i,j,k-2)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j,k+2)=0.0_WP
+            end do
+         end do
+      end block puncture_film
       
       
       ! Remove VOF at edge of domain
@@ -639,6 +664,7 @@ contains
                               b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                               b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                               b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
+                              b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
                            end if
                         end do
                      end do
@@ -694,6 +720,6 @@ contains
       deallocate(tmp_thin_sensor)
       
    end subroutine final
-   
+
    
 end module block2_class
