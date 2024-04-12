@@ -377,14 +377,15 @@ contains
          select case (b%vf%reconstruction_method)
          case (r2p)
             ! Include an extra variable for number of planes
-            b%smesh=surfmesh(nvar=7,name='plic')
+            b%smesh=surfmesh(nvar=8,name='plic')
             b%smesh%varname(1)='nplane'
             b%smesh%varname(2)='curv'
             b%smesh%varname(3)='edge_sensor'
             b%smesh%varname(4)='thin_sensor'
             b%smesh%varname(5)='thickness'
-            b%smesh%varname(6)='id'
-            b%smesh%varname(7)='edge_sensor'
+            b%smesh%varname(6)='id_thin_sensor'
+            b%smesh%varname(7)='id_thickenss'
+            b%smesh%varname(8)='edge_sensor'
             ! Transfer polygons to smesh
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
@@ -401,7 +402,8 @@ contains
                            b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                            b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
-                           b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
+                           b%smesh%var(7,np)=real(b%ccl_2%id(i,j,k),WP)
+                           b%smesh%var(8,np)=b%vf%edge_sensor(i,j,k)
                         end if
                      end do
                   end do
@@ -711,7 +713,8 @@ contains
                               b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                               b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                               b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
-                              b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
+                              b%smesh%var(7,np)=real(b%ccl_2%id(i,j,k),WP)
+                              b%smesh%var(8,np)=b%vf%edge_sensor(i,j,k)
                            end if
                         end do
                      end do
