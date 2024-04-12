@@ -36,9 +36,11 @@ module block2_class
       type(monitor) :: mfile     !< General monitor files
       type(monitor) :: cflfile   !< CFL monitor files
       type(monitor) :: timerfile !< File for timers
-      real(WP) :: cclabel_timer
+      real(WP) :: cclabel_thin_timer
+      real(WP) :: cclabel_thin_percent
+      real(WP) :: cclabel_thick_timer
+      real(WP) :: cclabel_thick_percent
       real(WP) :: step_timer
-      real(WP) :: cclabel_percent
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
@@ -494,9 +496,11 @@ contains
          call b%timerfile%add_column(b%time%n,'Timestep number')
          call b%timerfile%add_column(b%time%t,'Simulation Time')
          call b%timerfile%add_column(b%cfg%nproc, 'Num of Proc')
-         call b%timerfile%add_column(b%cclabel_timer,'cclabel time')
+         call b%timerfile%add_column(b%cclabel_thin_timer,'cclabel thin time')
+         call b%timerfile%add_column(b%cclabel_thick_timer,'cclabel thick time')
          call b%timerfile%add_column(b%step_timer, 'step time')
-         call b%timerfile%add_column(b%cclabel_percent, 'cclabel percent')
+         call b%timerfile%add_column(b%cclabel_thin_percent, 'cclabel thin percent')
+         call b%timerfile%add_column(b%cclabel_thick_percent, 'cclabel thick percent')
          call b%timerfile%write()
       end block create_monitor
 
@@ -639,23 +643,36 @@ contains
          tmp_thin_sensor=b%vf%thin_sensor
          my_time=0.0_WP
          ! Label regions and track time
-         b%cclabel_timer=0.0_WP
+         b%cclabel_thin_timer=0.0_WP
          starttime=MPI_WTIME()
          call b%ccl%build(make_label,same_label)
          endtime=MPI_WTIME()
          my_time=endtime-starttime
          ! Reduce time to get total sum time across all processors
-         call MPI_ALLREDUCE(my_time,b%cclabel_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+         call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
          ! Find average wall time
-         b%cclabel_timer=b%cclabel_timer/b%cfg%nproc
+         b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
       end block label_thin
 
       ! Label min thickness regions
       label_min_thickness: block
+         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+         use parallel, only: MPI_REAL_WP
+         real(WP) :: starttime,endtime,my_time
+         integer :: ierr
          ! Copy over thickness for label functions
          tmp_thickness=0.0_WP
          tmp_thickness=b%vf%thickness
+         my_time=0.0_WP
+         b%cclabel_thick_timer=0.0_WP
+         starttime=MPI_WTIME()
          call b%ccl_2%build(make_label_thickness,same_label_thickness)
+         endtime=MPI_WTIME()
+         my_time=endtime-starttime
+         ! Reduce time to get total sum time across all processors
+         call MPI_ALLREDUCE(my_time,b%cclabel_thick_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+         ! Find average wall time
+         b%cclabel_thick_timer=b%cclabel_thick_timer/b%cfg%nproc
       end block label_min_thickness
 
       ! ! Puncture a hole in low film thickness regions (based upon ID given from thin_sensor)
@@ -779,8 +796,10 @@ contains
       call MPI_ALLREDUCE(my_time_step,b%step_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
       ! Find average wall time in time step
       b%step_timer=b%step_timer/b%cfg%nproc
-      ! Percent of time spent in cclabel
-      b%cclabel_percent=b%cclabel_timer/b%step_timer
+      ! Percent of time spent in cclabel for thin sensor
+      b%cclabel_thin_percent=b%cclabel_thin_timer/b%step_timer
+      ! Percent of time spent in cclabel for thick sensor
+      b%cclabel_thick_percent=b%cclabel_thick_timer/b%step_timer
 
    end subroutine step
    
