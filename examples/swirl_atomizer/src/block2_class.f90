@@ -65,7 +65,7 @@ module block2_class
    real(WP), parameter :: min_filmthickness=9.0e-3_WP
 
    !> Min film thickness for labeling thin areas
-   real(WP), parameter :: min_filmthickness_label=1.5e-2_WP
+   real(WP), parameter :: min_filmthickness_label=1.1e-2_WP
 
 contains
    
@@ -185,17 +185,6 @@ contains
       end if
    end function same_label
 
-   !> Function that identifies if cell pairs have same label
-   logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
-      implicit none
-      integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      if (tmp_thickness(i1,j1,k1).eq.tmp_thickness(i2,j2,k2)) then
-         same_label_thickness=.true.
-      else
-         same_label_thickness=.false.
-      end if
-   end function same_label_thickness
-
    !> Function that identifies cells that need a label to min thickness region 
    logical function make_label_thickness(i,j,k)
       implicit none
@@ -206,6 +195,17 @@ contains
          make_label_thickness=.false.
       end if
    end function make_label_thickness
+
+   !> Function that identifies if cell pairs have same label
+   logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
+      implicit none
+      integer, intent(in) :: i1,j1,k1,i2,j2,k2
+      if (tmp_thickness(i1,j1,k1).eq.tmp_thickness(i2,j2,k2)) then
+         same_label_thickness=.true.
+      else
+         same_label_thickness=.false.
+      end if
+   end function same_label_thickness
 
 
    !> Initialization of problem solver
@@ -695,25 +695,25 @@ contains
       !    end do
       ! end block puncture_film_thin_sensor
 
-      ! Puncture a hole in low film thickness regions (based upon ID given from thickness threshold)
-      puncture_film_thickness: block
-         integer :: i,j,k,m,n
-         do m=1,b%ccl_2%nstruct
-            do n=1,b%ccl_2%struct(m)%n_
-               i=b%ccl_2%struct(m)%map(1,n)
-               j=b%ccl_2%struct(m)%map(2,n)
-               k=b%ccl_2%struct(m)%map(3,n)
-               ! Skip cells where VF=0 
-               if (b%vf%VF(i,j,k).eq.0.0_WP) cycle
-               ! Skip cells that are still thick enough
-               if (b%vf%thickness(i,j,k).gt.min_filmthickness) cycle
-               ! Zero out VOF in region of cell i,j,k for rough puncture
-               b%vf%VF(i-2,j,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i+2,j,k)=0.0_WP
-               b%vf%VF(i,j-2,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j+2,k)=0.0_WP
-               b%vf%VF(i,j,k-2)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j,k+2)=0.0_WP
-            end do
-         end do
-      end block puncture_film_thickness
+      ! ! Puncture a hole in low film thickness regions (based upon ID given from thickness threshold)
+      ! puncture_film_thickness: block
+      !    integer :: i,j,k,m,n
+      !    do m=1,b%ccl_2%nstruct
+      !       do n=1,b%ccl_2%struct(m)%n_
+      !          i=b%ccl_2%struct(m)%map(1,n)
+      !          j=b%ccl_2%struct(m)%map(2,n)
+      !          k=b%ccl_2%struct(m)%map(3,n)
+      !          ! Skip cells where VF=0 
+      !          if (b%vf%VF(i,j,k).eq.0.0_WP) cycle
+      !          ! Skip cells that are still thick enough
+      !          if (b%vf%thickness(i,j,k).gt.min_filmthickness) cycle
+      !          ! Zero out VOF in region of cell i,j,k for rough puncture
+      !          b%vf%VF(i-2,j,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i+2,j,k)=0.0_WP
+      !          b%vf%VF(i,j-2,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j+2,k)=0.0_WP
+      !          b%vf%VF(i,j,k-2)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j,k+2)=0.0_WP
+      !       end do
+      !    end do
+      ! end block puncture_film_thickness
       
       
       ! Remove VOF at edge of domain
