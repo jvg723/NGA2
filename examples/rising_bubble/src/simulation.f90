@@ -345,8 +345,12 @@ contains
          call param_read('Gravity',gravity); fs%gravity=gravity
          ! Dirichlet inflow at the top and clipped Neumann outflow at the bottom
          if (moving_domain) then
-            call fs%add_bcond(name='inflow' ,type=dirichlet      ,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
-            call fs%add_bcond(name='outflow',type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
+            call fs%add_bcond(name='inflow'     ,type=dirichlet      ,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+            call fs%add_bcond(name='outflow'    ,type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
+            call fs%add_bcond(name='xp_velocity',type=clipped_neumann,face='x',dir=1, canCorrect=.true., locator=xp_locator)
+            call fs%add_bcond(name='xm_velocity',type=clipped_neumann,face='x',dir=-1,canCorrect=.true., locator=xm_locator)
+            call fs%add_bcond(name='zp_velocity',type=clipped_neumann,face='z',dir=1, canCorrect=.true., locator=zp_locator)
+            call fs%add_bcond(name='zm_velocity',type=clipped_neumann,face='z',dir=-1,canCorrect=.true., locator=zm_locator)
          end if
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
@@ -369,12 +373,12 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
-         use tpviscoelastic_class, only: eptt,oldroydb,fenecr,fenep,lptt
+         use tpviscoelastic_class, only: eptt
          use tpscalar_class,       only: bcond,neumann
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=lptt,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -389,6 +393,10 @@ contains
          if (moving_domain) then
             call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
             call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator_sc,dir='ym')
+            call ve%add_bcond(name='xp_sc',type=neumann,locator=xp_locator_sc,dir='xp')
+            call ve%add_bcond(name='xm_sc',type=neumann,locator=xm_locator_sc,dir='xm')
+            call ve%add_bcond(name='zp_sc',type=neumann,locator=zp_locator_sc,dir='zp')
+            call ve%add_bcond(name='zm_sc',type=neumann,locator=zm_locator_sc,dir='zm')
          end if
          ! Setup without an implicit solver
          call ve%setup()
