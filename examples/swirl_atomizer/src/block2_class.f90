@@ -200,7 +200,7 @@ contains
    logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
       implicit none
       integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      if (tmp_thickness(i1,j1,k1).eq.tmp_thickness(i2,j2,k2)) then
+      if (tmp_thickness(i1,j1,k1).le.min_filmthickness_label.and.tmp_thickness(i2,j2,k2).le.min_filmthickness_label) then
          same_label_thickness=.true.
       else
          same_label_thickness=.false.
