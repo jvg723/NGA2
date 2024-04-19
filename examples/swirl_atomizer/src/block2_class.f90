@@ -632,48 +632,60 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
-      ! Label thin film regions
-      label_thin: block
-         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-         use parallel, only: MPI_REAL_WP
-         real(WP) :: starttime,endtime,my_time
-         integer :: ierr
-         ! Copy over thin sensor for label functions
-         tmp_thin_sensor=0.0_WP
-         tmp_thin_sensor=b%vf%thin_sensor
-         my_time=0.0_WP
-         ! Label regions and track time
-         b%cclabel_thin_timer=0.0_WP
-         starttime=MPI_WTIME()
-         call b%ccl%build(make_label,same_label)
-         endtime=MPI_WTIME()
-         my_time=endtime-starttime
-         ! Reduce time to get total sum time across all processors
-         call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-         ! Find average wall time
-         b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
-      end block label_thin
+      ! Remove VF in thickness lemin_filmthickness_label
+      puncture: block
+         integer :: i,j,k
+         do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+            do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+               do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+                  if (b%vf%thickness(i,j,k).le.min_filmthickness_label) b%vf%VF(i,j,k)=0.0_WP
+               end do
+            end do
+         end do
+      end block puncture
 
-      ! Label min thickness regions
-      label_min_thickness: block
-         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-         use parallel, only: MPI_REAL_WP
-         real(WP) :: starttime,endtime,my_time
-         integer :: ierr
-         ! Copy over thickness for label functions
-         tmp_thickness=0.0_WP
-         tmp_thickness=b%vf%thickness
-         my_time=0.0_WP
-         b%cclabel_thick_timer=0.0_WP
-         starttime=MPI_WTIME()
-         call b%ccl_2%build(make_label_thickness,same_label_thickness)
-         endtime=MPI_WTIME()
-         my_time=endtime-starttime
-         ! Reduce time to get total sum time across all processors
-         call MPI_ALLREDUCE(my_time,b%cclabel_thick_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-         ! Find average wall time
-         b%cclabel_thick_timer=b%cclabel_thick_timer/b%cfg%nproc
-      end block label_min_thickness
+      ! ! Label thin film regions
+      ! label_thin: block
+      !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+      !    use parallel, only: MPI_REAL_WP
+      !    real(WP) :: starttime,endtime,my_time
+      !    integer :: ierr
+      !    ! Copy over thin sensor for label functions
+      !    tmp_thin_sensor=0.0_WP
+      !    tmp_thin_sensor=b%vf%thin_sensor
+      !    my_time=0.0_WP
+      !    ! Label regions and track time
+      !    b%cclabel_thin_timer=0.0_WP
+      !    starttime=MPI_WTIME()
+      !    call b%ccl%build(make_label,same_label)
+      !    endtime=MPI_WTIME()
+      !    my_time=endtime-starttime
+      !    ! Reduce time to get total sum time across all processors
+      !    call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+      !    ! Find average wall time
+      !    b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
+      ! end block label_thin
+
+      ! ! Label min thickness regions
+      ! label_min_thickness: block
+      !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+      !    use parallel, only: MPI_REAL_WP
+      !    real(WP) :: starttime,endtime,my_time
+      !    integer :: ierr
+      !    ! Copy over thickness for label functions
+      !    tmp_thickness=0.0_WP
+      !    tmp_thickness=b%vf%thickness
+      !    my_time=0.0_WP
+      !    b%cclabel_thick_timer=0.0_WP
+      !    starttime=MPI_WTIME()
+      !    call b%ccl_2%build(make_label_thickness,same_label_thickness)
+      !    endtime=MPI_WTIME()
+      !    my_time=endtime-starttime
+      !    ! Reduce time to get total sum time across all processors
+      !    call MPI_ALLREDUCE(my_time,b%cclabel_thick_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+      !    ! Find average wall time
+      !    b%cclabel_thick_timer=b%cclabel_thick_timer/b%cfg%nproc
+      ! end block label_min_thickness
 
       ! ! Puncture a hole in low film thickness regions (based upon ID given from thin_sensor)
       ! puncture_film_thin_sensor: block
