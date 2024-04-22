@@ -11,6 +11,7 @@ module simulation
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
    use event_class,       only: event
+   use cclabel_class,     only: cclabel
    use monitor_class,     only: monitor
    implicit none
    private
@@ -20,6 +21,7 @@ module simulation
    type(ddadi),       public :: vs                     !< DDAI implicit solver
    type(tpns),        public :: fs
    type(vfs),         public :: vf
+   type(cclabel),     public :: ccl                    !< Label object
    type(timetracker), public :: time
    type(surfmesh),    public :: smesh                                              
    
@@ -46,6 +48,9 @@ module simulation
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
+
+   !> Min film thickness 
+   real(WP), parameter :: min_filmthickness=1.0e-3_WP
    
 contains
    
@@ -142,6 +147,28 @@ contains
       &   k.le.pg%kmin+nlayer.or.&
       &   k.ge.pg%kmax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
+
+   !> Function that identifies cells that need a label to min thickness region 
+   logical function make_label(i,j,k)
+      implicit none
+      integer, intent(in) :: i,j,k
+      if (vf%thickness(i,j,k).le.min_filmthickness) then
+         make_label=.true.
+      else
+         make_label=.false.
+      end if
+   end function make_label
+
+   !> Function that identifies if cell pairs have same label
+   logical function same_label(i1,j1,k1,i2,j2,k2)
+      implicit none
+      integer, intent(in) :: i1,j1,k1,i2,j2,k2
+      if (vf%thickness(i1,j1,k1).le.min_filmthickness.and.vf%thickness(i2,j2,k2).le.min_filmthickness) then
+         same_label=.true.
+      else
+         same_label=.false.
+      end if
+   end function same_label
    
    
    !> Initialization of problem solver
@@ -321,6 +348,11 @@ contains
          ! Compute divergence
          call fs%get_div()
       end block initialize_velocity
+
+      ! Create cclabel object
+      film_label: block
+         call ccl%initialize(pg=cfg%pgrid,name='thin_region_label')
+      end block film_label
       
 
       ! Create surfmesh object for interface polygon output
@@ -328,12 +360,13 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         smesh=surfmesh(nvar=5,name='plic')
+         smesh=surfmesh(nvar=6,name='plic')
          smesh%varname(1)='nplane'
          smesh%varname(2)='curv'
          smesh%varname(3)='edge_sensor'
          smesh%varname(4)='thin_sensor'
          smesh%varname(5)='thickness'
+         smesh%varname(6)='id_thickenss'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate nplane variable
@@ -349,6 +382,7 @@ contains
                         smesh%var(3,np)=vf%edge_sensor(i,j,k)
                         smesh%var(4,np)=vf%thin_sensor(i,j,k)
                         smesh%var(5,np)=vf%thickness  (i,j,k)
+                        smesh%var(6,np)=real(ccl%id(i,j,k),WP)
                      end if
                   end do
                end do
@@ -506,22 +540,28 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
 
-      ! Remove VOF at edge of domain
-      remove_vof: block
-         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
-         use parallel, only: MPI_REAL_WP
-         integer :: n,i,j,k,ierr
-         real(WP) :: my_vof_removed
-         my_vof_removed=0.0_WP
-         do n=1,vof_removal_layer%no_
-            i=vof_removal_layer%map(1,n)
-            j=vof_removal_layer%map(2,n)
-            k=vof_removal_layer%map(3,n)
-            my_vof_removed=my_vof_removed+cfg%vol(i,j,k)*vf%VF(i,j,k)
-            vf%VF(i,j,k)=0.0_WP
-         end do
-         call MPI_ALLREDUCE(my_vof_removed,vof_removed,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
-      end block remove_vof
+         ! Label thin film regions
+         label_thin: block
+            ! Label regions and track time
+            call ccl%build(make_label,same_label)
+         end block label_thin
+
+         ! Remove VOF at edge of domain
+         remove_vof: block
+            use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+            use parallel, only: MPI_REAL_WP
+            integer :: n,i,j,k,ierr
+            real(WP) :: my_vof_removed
+            my_vof_removed=0.0_WP
+            do n=1,vof_removal_layer%no_
+               i=vof_removal_layer%map(1,n)
+               j=vof_removal_layer%map(2,n)
+               k=vof_removal_layer%map(3,n)
+               my_vof_removed=my_vof_removed+cfg%vol(i,j,k)*vf%VF(i,j,k)
+               vf%VF(i,j,k)=0.0_WP
+            end do
+            call MPI_ALLREDUCE(my_vof_removed,vof_removed,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+         end block remove_vof
 
          ! Output to ensight
          if (ens_evt%occurs()) then 
@@ -544,6 +584,7 @@ contains
                               smesh%var(3,np)=vf%edge_sensor(i,j,k)
                               smesh%var(4,np)=vf%thin_sensor(i,j,k)
                               smesh%var(5,np)=vf%thickness  (i,j,k)
+                              smesh%var(6,np)=real(ccl%id(i,j,k),WP)
                            end if
                         end do
                      end do
