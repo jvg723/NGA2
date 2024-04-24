@@ -50,7 +50,7 @@ module simulation
    integer, parameter :: nlayer=4
 
    !> Min film thickness 
-   real(WP), parameter :: min_filmthickness=1.0e-3_WP
+   real(WP), parameter :: min_filmthickness=4e-2_WP
    
 contains
    
