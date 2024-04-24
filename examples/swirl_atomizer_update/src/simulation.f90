@@ -152,7 +152,7 @@ contains
    logical function make_label(i,j,k)
       implicit none
       integer, intent(in) :: i,j,k
-      if (vf%thickness(i,j,k).le.min_filmthickness) then
+      if (vf%thickness(i,j,k).le.min_filmthickness.and.vf%thickness(i,j,k).gt.0.0_WP) then
          make_label=.true.
       else
          make_label=.false.
@@ -163,11 +163,7 @@ contains
    logical function same_label(i1,j1,k1,i2,j2,k2)
       implicit none
       integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      if (vf%thickness(i1,j1,k1).le.min_filmthickness.and.vf%thickness(i2,j2,k2).le.min_filmthickness) then
-         same_label=.true.
-      else
-         same_label=.false.
-      end if
+      same_label=.true.
    end function same_label
    
    
