@@ -400,6 +400,7 @@ contains
          call ens_out%add_scalar('Pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_surface('vofplic',smesh)
+         call ens_out%add_vector('edge_normal',resU,resV,resW)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -542,6 +543,17 @@ contains
             call ccl%build(make_label,same_label)
          end block label_thin
 
+         ! Puncture a hole in the film based upon the thin region label
+         puncture_film: block
+            integer :: i,j,k,nn,n
+            do n=1,ccl%nstruct
+               do nn=1,ccl%struct(n)%n_
+                  i=ccl%struct(n)%map(1,nn); j=ccl%struct(n)%map(2,nn); k=ccl%struct(n)%map(3,nn)
+                  vf%VF(i,j,k)=0.0_WP
+               end do
+            end do
+         end block puncture_film
+
          ! Remove VOF at edge of domain
          remove_vof: block
             use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
@@ -587,6 +599,10 @@ contains
                   end do
                end do
             end block update_smesh
+            ! Transfer edge normal data
+            resU=vf%edge_normal(1,:,:,:)
+            resV=vf%edge_normal(2,:,:,:)
+            resW=vf%edge_normal(3,:,:,:)
             ! Perform ensight output 
             call ens_out%write_data(time%t)
          end if
