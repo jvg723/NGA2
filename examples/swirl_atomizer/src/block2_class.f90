@@ -62,7 +62,7 @@ module block2_class
    real(WP), dimension(:,:,:), allocatable :: tmp_thickness
 
    !> Min film thickness for puncture
-   real(WP), parameter :: min_filmthickness=9.0e-3_WP
+   real(WP), parameter :: min_filmthickness=1.1e-2_WP
 
    !> Min film thickness for labeling thin areas
    real(WP), parameter :: min_filmthickness_label=1.1e-2_WP
@@ -163,11 +163,33 @@ contains
       &   k.ge.pg%kmax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
-   !> Function that identifies cells that need a label
+   ! !> Function that identifies cells that need a label
+   ! logical function make_label(i,j,k)
+   !    implicit none
+   !    integer, intent(in) :: i,j,k
+   !    if (tmp_thin_sensor(i,j,k).eq.1.0_WP) then
+   !       make_label=.true.
+   !    else
+   !       make_label=.false.
+   !    end if
+   ! end function make_label
+
+   ! !> Function that identifies if cell pairs have same label
+   ! logical function same_label(i1,j1,k1,i2,j2,k2)
+   !    implicit none
+   !    integer, intent(in) :: i1,j1,k1,i2,j2,k2
+   !    if (tmp_thin_sensor(i1,j1,k1).eq.tmp_thin_sensor(i2,j2,k2)) then
+   !       same_label=.true.
+   !    else
+   !       same_label=.false.
+   !    end if
+   ! end function same_label
+
+   !> Function that identifies cells that need a label to min thickness region 
    logical function make_label(i,j,k)
       implicit none
       integer, intent(in) :: i,j,k
-      if (tmp_thin_sensor(i,j,k).eq.1.0_WP) then
+      if (tmp_thickness(i,j,k).le.min_filmthickness.and.tmp_thickness(i,j,k).gt.0.0_WP) then
          make_label=.true.
       else
          make_label=.false.
@@ -178,34 +200,30 @@ contains
    logical function same_label(i1,j1,k1,i2,j2,k2)
       implicit none
       integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      if (tmp_thin_sensor(i1,j1,k1).eq.tmp_thin_sensor(i2,j2,k2)) then
-         same_label=.true.
-      else
-         same_label=.false.
-      end if
+      same_label=.true.
    end function same_label
 
-   !> Function that identifies cells that need a label to min thickness region 
-   logical function make_label_thickness(i,j,k)
-      implicit none
-      integer, intent(in) :: i,j,k
-      if (tmp_thickness(i,j,k).le.min_filmthickness_label) then
-         make_label_thickness=.true.
-      else
-         make_label_thickness=.false.
-      end if
-   end function make_label_thickness
+   ! !> Function that identifies cells that need a label to min thickness region 
+   ! logical function make_label_thickness(i,j,k)
+   !    implicit none
+   !    integer, intent(in) :: i,j,k
+   !    if (tmp_thickness(i,j,k).le.min_filmthickness_label) then
+   !       make_label_thickness=.true.
+   !    else
+   !       make_label_thickness=.false.
+   !    end if
+   ! end function make_label_thickness
 
-   !> Function that identifies if cell pairs have same label
-   logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
-      implicit none
-      integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      if (tmp_thickness(i1,j1,k1).le.min_filmthickness_label.and.tmp_thickness(i2,j2,k2).le.min_filmthickness_label) then
-         same_label_thickness=.true.
-      else
-         same_label_thickness=.false.
-      end if
-   end function same_label_thickness
+   ! !> Function that identifies if cell pairs have same label
+   ! logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
+   !    implicit none
+   !    integer, intent(in) :: i1,j1,k1,i2,j2,k2
+   !    if (tmp_thickness(i1,j1,k1).le.min_filmthickness_label.and.tmp_thickness(i2,j2,k2).le.min_filmthickness_label) then
+   !       same_label_thickness=.true.
+   !    else
+   !       same_label_thickness=.false.
+   !    end if
+   ! end function same_label_thickness
 
 
    !> Initialization of problem solver
@@ -366,8 +384,8 @@ contains
 
       ! Create cclabel object
       film_label: block
-         call b%ccl%initialize(pg=b%cfg%pgrid,name='thin_region_label')
-         call b%ccl_2%initialize(pg=b%cfg%pgrid,name='min_thickness_label')
+         call b%ccl%initialize(pg=b%cfg%pgrid,name='film_thickness')
+         ! call b%ccl_2%initialize(pg=b%cfg%pgrid,name='min_thickness_label')
       end block film_label
 
 
@@ -632,39 +650,50 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
-      ! Remove VF in thickness lemin_filmthickness_label
-      puncture: block
-         integer :: i,j,k
-         do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-            do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-               do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-                  if (b%vf%thickness(i,j,k).le.min_filmthickness_label) b%vf%VF(i,j,k)=0.0_WP
-               end do
+      ! ! Remove VF in thickness lemin_filmthickness_label
+      ! puncture: block
+      !    integer :: i,j,k
+      !    do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+      !       do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+      !          do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+      !             if (b%vf%thickness(i,j,k).le.min_filmthickness_label) b%vf%VF(i,j,k)=0.0_WP
+      !          end do
+      !       end do
+      !    end do
+      ! end block puncture
+
+      ! Label thin film based upon min_filmthickness
+      label_thin: block
+         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+         use parallel, only: MPI_REAL_WP
+         real(WP) :: starttime,endtime,my_time
+         integer :: ierr
+         ! Copy over thin sensor for label functions
+         tmp_thickness=0.0_WP
+         tmp_thickness=b%vf%thickness
+         my_time=0.0_WP
+         ! Label regions and track time
+         b%cclabel_thin_timer=0.0_WP
+         starttime=MPI_WTIME()
+         call b%ccl%build(make_label,same_label)
+         endtime=MPI_WTIME()
+         my_time=endtime-starttime
+         ! Reduce time to get total sum time across all processors
+         call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+         ! Find average wall time
+         b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
+      end block label_thin
+
+      ! Puncture a hole in the film based upon the thin region label
+      puncture_film: block
+      integer :: i,j,k,nn,n
+         do n=1,b%ccl%nstruct
+            do nn=1,b%ccl%struct(n)%n_
+               i=b%ccl%struct(n)%map(1,nn); j=b%ccl%struct(n)%map(2,nn); k=b%ccl%struct(n)%map(3,nn)
+               b%vf%VF(i,j,k)=0.0_WP
             end do
          end do
-      end block puncture
-
-      ! ! Label thin film regions
-      ! label_thin: block
-      !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-      !    use parallel, only: MPI_REAL_WP
-      !    real(WP) :: starttime,endtime,my_time
-      !    integer :: ierr
-      !    ! Copy over thin sensor for label functions
-      !    tmp_thin_sensor=0.0_WP
-      !    tmp_thin_sensor=b%vf%thin_sensor
-      !    my_time=0.0_WP
-      !    ! Label regions and track time
-      !    b%cclabel_thin_timer=0.0_WP
-      !    starttime=MPI_WTIME()
-      !    call b%ccl%build(make_label,same_label)
-      !    endtime=MPI_WTIME()
-      !    my_time=endtime-starttime
-      !    ! Reduce time to get total sum time across all processors
-      !    call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-      !    ! Find average wall time
-      !    b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
-      ! end block label_thin
+      end block puncture_film
 
       ! ! Label min thickness regions
       ! label_min_thickness: block
