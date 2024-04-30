@@ -31,7 +31,6 @@ module block2_class
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
       type(cclabel)          :: ccl                    !< Label object for thin regions
-      type(cclabel)          :: ccl_2                  !< Label regions below min film thickenss
       !> Monitoring files
       type(monitor) :: mfile     !< General monitor files
       type(monitor) :: cflfile   !< CFL monitor files
@@ -385,7 +384,6 @@ contains
       ! Create cclabel object
       film_label: block
          call b%ccl%initialize(pg=b%cfg%pgrid,name='film_thickness')
-         ! call b%ccl_2%initialize(pg=b%cfg%pgrid,name='min_thickness_label')
       end block film_label
 
 
@@ -397,15 +395,14 @@ contains
          select case (b%vf%reconstruction_method)
          case (r2p)
             ! Include an extra variable for number of planes
-            b%smesh=surfmesh(nvar=8,name='plic')
+            b%smesh=surfmesh(nvar=7,name='plic')
             b%smesh%varname(1)='nplane'
             b%smesh%varname(2)='curv'
             b%smesh%varname(3)='edge_sensor'
             b%smesh%varname(4)='thin_sensor'
             b%smesh%varname(5)='thickness'
-            b%smesh%varname(6)='id_thin_sensor'
-            b%smesh%varname(7)='id_thickenss'
-            b%smesh%varname(8)='edge_sensor'
+            b%smesh%varname(6)='id_thickness'
+            b%smesh%varname(7)='edge_sensor'
             ! Transfer polygons to smesh
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
@@ -422,8 +419,7 @@ contains
                            b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                            b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
-                           b%smesh%var(7,np)=real(b%ccl_2%id(i,j,k),WP)
-                           b%smesh%var(8,np)=b%vf%edge_sensor(i,j,k)
+                           b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
                         end if
                      end do
                   end do
@@ -650,17 +646,6 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
-      ! ! Remove VF in thickness lemin_filmthickness_label
-      ! puncture: block
-      !    integer :: i,j,k
-      !    do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-      !       do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-      !          do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-      !             if (b%vf%thickness(i,j,k).le.min_filmthickness_label) b%vf%VF(i,j,k)=0.0_WP
-      !          end do
-      !       end do
-      !    end do
-      ! end block puncture
 
       ! Label thin film based upon min_filmthickness
       label_thin: block
@@ -684,6 +669,7 @@ contains
          b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
       end block label_thin
 
+      
       ! Puncture a hole in the film based upon the thin region label
       puncture_film: block
       integer :: i,j,k,nn,n
@@ -694,67 +680,6 @@ contains
             end do
          end do
       end block puncture_film
-
-      ! ! Label min thickness regions
-      ! label_min_thickness: block
-      !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-      !    use parallel, only: MPI_REAL_WP
-      !    real(WP) :: starttime,endtime,my_time
-      !    integer :: ierr
-      !    ! Copy over thickness for label functions
-      !    tmp_thickness=0.0_WP
-      !    tmp_thickness=b%vf%thickness
-      !    my_time=0.0_WP
-      !    b%cclabel_thick_timer=0.0_WP
-      !    starttime=MPI_WTIME()
-      !    call b%ccl_2%build(make_label_thickness,same_label_thickness)
-      !    endtime=MPI_WTIME()
-      !    my_time=endtime-starttime
-      !    ! Reduce time to get total sum time across all processors
-      !    call MPI_ALLREDUCE(my_time,b%cclabel_thick_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-      !    ! Find average wall time
-      !    b%cclabel_thick_timer=b%cclabel_thick_timer/b%cfg%nproc
-      ! end block label_min_thickness
-
-      ! ! Puncture a hole in low film thickness regions (based upon ID given from thin_sensor)
-      ! puncture_film_thin_sensor: block
-      !    integer :: i,j,k,l,n,nn
-      !    do n=1,b%ccl%nstruct
-      !       do nn=1,b%ccl%struct(n)%n_
-      !          i=b%ccl%struct(n)%map(1,nn)
-      !          j=b%ccl%struct(n)%map(2,nn)
-      !          k=b%ccl%struct(n)%map(3,nn)
-      !          ! Skip cells where VF=0 
-      !          if (b%vf%VF(i,j,k).eq.0.0_WP) cycle
-      !          ! Skip cells that are still thick enough
-      !          if (b%vf%thickness(i,j,k).gt.min_filmthickness) cycle
-      !          ! Zero out VOF in region of cell i,j,k for puncture
-      !          b%vf%VF(i-2,j,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i+2,j,k)=0.0_WP
-      !          b%vf%VF(i,j-2,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j+2,k)=0.0_WP
-      !          b%vf%VF(i,j,k-2)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j,k+2)=0.0_WP
-      !       end do
-      !    end do
-      ! end block puncture_film_thin_sensor
-
-      ! ! Puncture a hole in low film thickness regions (based upon ID given from thickness threshold)
-      ! puncture_film_thickness: block
-      !    integer :: i,j,k,m,n
-      !    do m=1,b%ccl_2%nstruct
-      !       do n=1,b%ccl_2%struct(m)%n_
-      !          i=b%ccl_2%struct(m)%map(1,n)
-      !          j=b%ccl_2%struct(m)%map(2,n)
-      !          k=b%ccl_2%struct(m)%map(3,n)
-      !          ! Skip cells where VF=0 
-      !          if (b%vf%VF(i,j,k).eq.0.0_WP) cycle
-      !          ! Skip cells that are still thick enough
-      !          if (b%vf%thickness(i,j,k).gt.min_filmthickness) cycle
-      !          ! Zero out VOF in region of cell i,j,k for rough puncture
-      !          b%vf%VF(i-2,j,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i+2,j,k)=0.0_WP
-      !          b%vf%VF(i,j-2,k)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j+2,k)=0.0_WP
-      !          b%vf%VF(i,j,k-2)=0.0_WP; b%vf%VF(i,j,k)=0.0_WP; b%vf%VF(i,j,k+2)=0.0_WP
-      !       end do
-      !    end do
-      ! end block puncture_film_thickness
       
       
       ! Remove VOF at edge of domain
@@ -791,8 +716,7 @@ contains
                               b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                               b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                               b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
-                              b%smesh%var(7,np)=real(b%ccl_2%id(i,j,k),WP)
-                              b%smesh%var(8,np)=b%vf%edge_sensor(i,j,k)
+                              b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
                            end if
                         end do
                      end do
