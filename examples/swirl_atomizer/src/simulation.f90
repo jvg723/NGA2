@@ -61,7 +61,7 @@ contains
                call cpl12x%set_src(cfg1,'x')  
                call cpl12y%set_src(cfg1,'y')  
                call cpl12z%set_src(cfg1,'z')
-            end if  
+            end if
             if (isInGrp2) then 
                call cpl12x%set_dst(cfg2,'x')
                call cpl12y%set_dst(cfg2,'y')
@@ -79,6 +79,7 @@ contains
             end if
          end if
       end block coupler_prep
+
 
    end subroutine simulation_init
    

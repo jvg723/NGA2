@@ -5,18 +5,18 @@
 # Annular pipe domain definition
 1 Outer Pipe diameter : 1.2
 1 Inner Pipe diameter : 0.8
-1 Pipe length         : 4
-1 nx                  : 252
-1 ny                  : 216
-1 nz                  : 216
+1 Pipe length         : 1
+1 nx                  : 80
+1 ny                  : 80
+1 nz                  : 80
 
 # Swirl atomizer domain definition
-2 Lx : 12
-2 Ly : 14
-2 Lz : 14
-2 nx : 216
-2 ny : 252
-2 nz : 252
+2 Lx : 5
+2 Ly : 5
+2 Lz : 5
+2 nx : 80
+2 ny : 80
+2 nz : 80
 
 
 # Pipe properties
@@ -38,11 +38,11 @@ Surface tension coefficient : 0.001
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
 Max time            : 200
-Transistion         : 100
+Transistion         : 1
 
 # Pressure solver
 Pressure tolerance : 1e-5
-Pressure iteration : 100
+Pressure iteration : 1
 
 # Implicit velocity solver
 Implicit tolerance : 1e-5
