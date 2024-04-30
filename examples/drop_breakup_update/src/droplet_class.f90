@@ -448,18 +448,18 @@ contains
             do nsc=1,this%ve%nscalar
                call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SCrec(:,:,:,nsc))
             end do
-            call this%ens_out%add_scalar('eigval1',this%ve%eigenval(1,:,:,:))
-            call this%ens_out%add_scalar('eigval2',this%ve%eigenval(2,:,:,:))
-            call this%ens_out%add_scalar('eigval3',this%ve%eigenval(3,:,:,:))
-            call this%ens_out%add_scalar('eigvec11',this%ve%eigenvec(1,1,:,:,:))
-            call this%ens_out%add_scalar('eigvec12',this%ve%eigenvec(1,2,:,:,:))
-            call this%ens_out%add_scalar('eigvec13',this%ve%eigenvec(1,3,:,:,:))
-            call this%ens_out%add_scalar('eigvec21',this%ve%eigenvec(2,1,:,:,:))
-            call this%ens_out%add_scalar('eigvec22',this%ve%eigenvec(2,2,:,:,:))
-            call this%ens_out%add_scalar('eigvec23',this%ve%eigenvec(2,3,:,:,:))
-            call this%ens_out%add_scalar('eigvec31',this%ve%eigenvec(3,1,:,:,:))
-            call this%ens_out%add_scalar('eigvec32',this%ve%eigenvec(3,2,:,:,:))
-            call this%ens_out%add_scalar('eigvec33',this%ve%eigenvec(3,3,:,:,:))
+            ! call this%ens_out%add_scalar('eigval1',this%ve%eigenval(1,:,:,:))
+            ! call this%ens_out%add_scalar('eigval2',this%ve%eigenval(2,:,:,:))
+            ! call this%ens_out%add_scalar('eigval3',this%ve%eigenval(3,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec11',this%ve%eigenvec(1,1,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec12',this%ve%eigenvec(1,2,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec13',this%ve%eigenvec(1,3,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec21',this%ve%eigenvec(2,1,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec22',this%ve%eigenvec(2,2,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec23',this%ve%eigenvec(2,3,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec31',this%ve%eigenvec(3,1,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec32',this%ve%eigenvec(3,2,:,:,:))
+            ! call this%ens_out%add_scalar('eigvec33',this%ve%eigenvec(3,3,:,:,:))
          else
             do nsc=1,this%ve%nscalar
                call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SC(:,:,:,nsc))
@@ -690,12 +690,12 @@ contains
                   do k=this%cfg%kmino_,this%cfg%kmaxo_
                      do j=this%cfg%jmino_,this%cfg%jmaxo_
                         do i=this%cfg%imino_,this%cfg%imaxo_
-                           stress(i,j,k,1)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                           stress(i,j,k,2)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                           stress(i,j,k,3)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                           stress(i,j,k,4)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                           stress(i,j,k,5)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                           stress(i,j,k,6)=this%vf%VF(i,j,k)*coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                           stress(i,j,k,1)=coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                           stress(i,j,k,2)=coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                           stress(i,j,k,3)=coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                           stress(i,j,k,4)=coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                           stress(i,j,k,5)=coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                           stress(i,j,k,6)=coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
                         end do
                      end do
                   end do
