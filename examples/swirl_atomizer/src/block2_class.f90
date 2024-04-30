@@ -857,7 +857,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi)
-      deallocate(tmp_thin_sensor)
+      deallocate(tmp_thin_sensor,tmp_thickness)
       
    end subroutine final
 
