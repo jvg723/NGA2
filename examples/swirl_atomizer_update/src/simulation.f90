@@ -37,6 +37,7 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:),   allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),   allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:),   allocatable :: Uslip,Vslip,Wslip
 
    !> Iterator for VOF removal
    type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -181,6 +182,9 @@ contains
          allocate(Ui   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Vi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Uslip(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); Uslip=0.0_WP
+         allocate(Vslip(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); Vslip=0.0_WP
+         allocate(Wslip(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); Wslip=0.0_WP
       end block allocate_work_arrays
       
       
@@ -356,13 +360,16 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         smesh=surfmesh(nvar=6,name='plic')
+         smesh=surfmesh(nvar=9,name='plic')
          smesh%varname(1)='nplane'
          smesh%varname(2)='curv'
          smesh%varname(3)='edge_sensor'
          smesh%varname(4)='thin_sensor'
          smesh%varname(5)='thickness'
          smesh%varname(6)='id_thickenss'
+         smesh%varname(7)='Uslip'
+         smesh%varname(8)='Vslip'
+         smesh%varname(9)='Wslip'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate nplane variable
@@ -379,6 +386,9 @@ contains
                         smesh%var(4,np)=vf%thin_sensor(i,j,k)
                         smesh%var(5,np)=vf%thickness  (i,j,k)
                         smesh%var(6,np)=real(ccl%id(i,j,k),WP)
+                        smesh%var(7,np)=Uslip(i,j,k)
+                        smesh%var(8,np)=Vslip(i,j,k)
+                        smesh%var(9,np)=Wslip(i,j,k)
                      end if
                   end do
                end do
@@ -471,8 +481,35 @@ contains
          
          ! Prepare old staggered density (at n)
          call fs%get_olddensity(vf=vf)
+
+         ! Add in slip velocity at hole edges
+         slip_velocity: block
+            integer :: i,j,k
+            ! Store current velocity field 
+            Uslip=fs%U
+            Vslip=fs%V
+            Wslip=fs%W
+            ! Add in retraction velocities
+            do k=vf%cfg%kmin_,vf%cfg%kmax_
+               do j=vf%cfg%jmin_,vf%cfg%jmax_
+                  do i=vf%cfg%imin_,vf%cfg%imax_
+                     if (vf%edge_sensor(i,j,k).ge.0.10_WP) then
+                     ! if (vf%edge_sensor(i,j,k).ge.0.10_WP) then Local threshold
+                        Uslip(i  ,j,k)=Uslip(i  ,j,k)+0.5_WP*vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
+                        Uslip(i+1,j,k)=Uslip(i+1,j,k)+0.5_WP*vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
+                        Vslip(i,j  ,k)=Vslip(i,j  ,k)+0.5_WP*vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
+                        Vslip(i,j+1,k)=Vslip(i,j+1,k)+0.5_WP*vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
+                        Wslip(i,j,k  )=Wslip(i,j,k  )+0.5_WP*vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
+                        Wslip(i,j,k+1)=Wslip(i,j,k+1)+0.5_WP*vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
+                     end if
+                  end do 
+               end do 
+            end do
+         end block slip_velocity
+
          
          ! VOF solver step
+         ! call vf%advance(dt=time%dt,U=Uslip,V=Vslip,W=Wslip)
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
          
          ! Prepare new staggered viscosity (at n+1)
@@ -593,6 +630,9 @@ contains
                               smesh%var(4,np)=vf%thin_sensor(i,j,k)
                               smesh%var(5,np)=vf%thickness  (i,j,k)
                               smesh%var(6,np)=real(ccl%id(i,j,k),WP)
+                              smesh%var(7,np)=Uslip(i,j,k)
+                              smesh%var(8,np)=Vslip(i,j,k)
+                              smesh%var(9,np)=Wslip(i,j,k)
                            end if
                         end do
                      end do
@@ -631,6 +671,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
+      deallocate(Uslip,Vslip,Wslip)
       
    end subroutine simulation_final
    
