@@ -43,6 +43,7 @@ module block2_class
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+      real(WP), dimension(:,:,:),     allocatable :: Uslip,Vslip,Wslip
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
    contains
@@ -61,7 +62,7 @@ module block2_class
    real(WP), dimension(:,:,:), allocatable :: tmp_thickness
 
    !> Min film thickness for puncture
-   real(WP), parameter :: min_filmthickness=1.1e-2_WP
+   real(WP), parameter :: min_filmthickness=6.5e-3_WP
 
    !> Min film thickness for labeling thin areas
    real(WP), parameter :: min_filmthickness_label=1.1e-2_WP
@@ -242,6 +243,9 @@ contains
          allocate(b%Wi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(tmp_thin_sensor(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(tmp_thickness  (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
+         allocate(b%Uslip(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_)); b%Uslip=0.0_WP
+         allocate(b%Vslip(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_)); b%Vslip=0.0_WP
+         allocate(b%Wslip(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_)); b%Wslip=0.0_WP
       end block allocate_work_arrays
       
       
@@ -395,7 +399,7 @@ contains
          select case (b%vf%reconstruction_method)
          case (r2p)
             ! Include an extra variable for number of planes
-            b%smesh=surfmesh(nvar=7,name='plic')
+            b%smesh=surfmesh(nvar=10,name='plic')
             b%smesh%varname(1)='nplane'
             b%smesh%varname(2)='curv'
             b%smesh%varname(3)='edge_sensor'
@@ -403,6 +407,9 @@ contains
             b%smesh%varname(5)='thickness'
             b%smesh%varname(6)='id_thickness'
             b%smesh%varname(7)='edge_sensor'
+            b%smesh%varname(8)='Uslip'
+            b%smesh%varname(9)='Vslip'
+            b%smesh%varname(10)='Wslip'
             ! Transfer polygons to smesh
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
@@ -420,6 +427,9 @@ contains
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                            b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
                            b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
+                           b%smesh%var(7,np)=b%Uslip(i,j,k)
+                           b%smesh%var(8,np)=b%Vslip(i,j,k)
+                           b%smesh%var(9,np)=b%Wslip(i,j,k)
                         end if
                      end do
                   end do
@@ -569,9 +579,36 @@ contains
          
       ! Prepare old staggered density (at n)
       call b%fs%get_olddensity(vf=b%vf)
+      
+      ! Add in slip velocity at hole edges
+      slip_velocity: block
+         integer :: i,j,k
+         ! Store current velocity field 
+         b%Uslip=b%fs%U
+         b%Vslip=b%fs%V
+         b%Wslip=b%fs%W
+         ! Add in retraction velocities
+         do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+            do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+               do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+                  if (b%vf%edge_sensor(i,j,k).ge.0.2_WP) then
+                     b%Uslip(i  ,j,k)=b%Uslip(i  ,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+                     b%Uslip(i+1,j,k)=b%Uslip(i+1,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+                     b%Vslip(i,j  ,k)=b%Vslip(i,j  ,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+                     b%Vslip(i,j+1,k)=b%Vslip(i,j+1,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+                     b%Wslip(i,j,k  )=b%Wslip(i,j,k  )+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+                     b%Wslip(i,j,k+1)=b%Wslip(i,j,k+1)+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+                  end if
+               end do 
+            end do 
+         end do
+      end block slip_velocity
+
          
       ! VOF solver step
-      call b%vf%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+      ! call b%vf%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+      call b%vf%advance(dt=b%time%dt,U=b%Uslip,V=b%Vslip,W=b%Wslip)
+      
          
       ! Prepare new staggered viscosity (at n+1)
       call b%fs%get_viscosity(vf=b%vf,strat=arithmetic_visc)
@@ -717,6 +754,9 @@ contains
                               b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
                               b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
                               b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
+                              b%smesh%var(7,np)=b%Uslip(i,j,k)
+                              b%smesh%var(8,np)=b%Vslip(i,j,k)
+                              b%smesh%var(9,np)=b%Wslip(i,j,k)
                            end if
                         end do
                      end do
@@ -780,7 +820,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi)
+      deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi,b%Uslip,b%Vslip,b%Wslip)
       deallocate(tmp_thin_sensor,tmp_thickness)
       
    end subroutine final
