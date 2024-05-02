@@ -509,8 +509,8 @@ contains
 
          
          ! VOF solver step
-         ! call vf%advance(dt=time%dt,U=Uslip,V=Vslip,W=Wslip)
-         call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+         call vf%advance(dt=time%dt,U=Uslip,V=Vslip,W=Wslip)
+         ! call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
