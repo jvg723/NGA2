@@ -14,7 +14,7 @@ ny : 128
 nz : 128
 
 # Flow conditions
-Reynolds number :      3723
+Reynolds number :      3500
 Weber number :         12.5
 Solvent viscosity :    0.0033
 Liquid density :       860.12
