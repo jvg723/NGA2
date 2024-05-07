@@ -216,7 +216,7 @@ contains
       
       ! Initialize our VOF solver
       create_vof: block
-         use vfs_class,only: r2p,elvira,VFhi,VFlo,Cflux_storage
+         use vfs_class,only: r2p,elvira,VFhi,VFlo,flux_storage
          use mpi_f08,  only: MPI_WTIME
          use string,   only: str_medium,lowercase
          integer :: i,j,k,n,si,sj,sk,curvature_method,stencil_size,hf_backup_method
@@ -227,7 +227,7 @@ contains
          integer, parameter :: amr_ref_lvl=5
          real(WP) :: start, finish
          ! Create a VOF solver with r2p reconstruction
-         call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=Cflux_storage,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF')
          ! Initialize droplet parameters
          call param_read('Droplet diameter',radius); radius=0.5_WP*radius
          call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
@@ -338,47 +338,46 @@ contains
          ! Create viscoelastic model solver
          call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
-         call param_read('Polymer relaxation time',ve%trelax)
+         call param_read('Weissenberg Number',ve%trelax);    ve%trelax=ve%trelax*taueta_tgt
          ! Polymer viscosity
-         call param_read('Polymer viscosity ratio',ve%visc_p); ve%visc_p=fs%visc_l*((1.00_WP-ve%visc_p)/ve%visc_p)
+         call param_read('Polymer Concentration',ve%visc_p); ve%visc_p=fs%visc_l*((1.00_WP-ve%visc_p)/ve%visc_p)
          ! Setup without an implicit solver
          call ve%setup()
          ! Check first if we use stabilization
          call param_read('Stabilization',stabilization,default=.false.)
-         ! ! Initialize C scalar fields
-         ! if (stabilization) then 
-         !    ! Get eigenvalues and eigenvectors
-         !    call ve%get_eigensystem()
-         !    ! Reconstruct conformation tensor
-         !    call ve%reconstruct_conformation()
-         !    do k=cfg%kmino_,cfg%kmaxo_
-         !       do j=cfg%jmino_,cfg%jmaxo_
-         !          do i=cfg%imino_,cfg%imaxo_
-         !             if (vf%VF(i,j,k).gt.0.0_WP) then
-         !                ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-         !                print *, 'SC1=',ve%SCrec(i,j,k,1)
-         !                ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-         !                ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         !    ! Get eigenvalues and eigenvectors
-         !    call ve%get_eigensystem()
-         ! else
-         !    do k=cfg%kmino_,cfg%kmaxo_
-         !       do j=cfg%jmino_,cfg%jmaxo_
-         !          do i=cfg%imino_,cfg%imaxo_
-         !             if (vf%VF(i,j,k).gt.0.0_WP) then
-         !                ve%SC(i,j,k,1)=1.0_WP  !< Cxx
-         !                print *, 'SC1=',ve%SC(i,j,k,1)
-         !                ve%SC(i,j,k,4)=1.0_WP  !< Cyy
-         !                ve%SC(i,j,k,6)=1.0_WP  !< Czz
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         ! end if
+         ! Initialize C scalar fields
+         if (stabilization) then 
+            !> Allocate storage fo eigenvalues and vectors
+            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+            !> Allocate storage for reconstructured C and Cold
+            allocate(ve%SCrec(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+         else
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SC(i,j,k,1)=1.0_WP  !< Cxx
+                        ve%SC(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SC(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+         end if
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -613,11 +612,7 @@ contains
                init_conformation: block
                   integer :: i,j,k
                   if (stabilization) then 
-                     print *, 'about to init recSC1'
-                     ! Get eigenvalues and eigenvectors
-                     call ve%get_eigensystem()
-                     ! Reconstruct conformation tensor
-                     call ve%reconstruct_conformation()
+                     ! print *, 'about to init recSC1'
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_
                            do i=cfg%imino_,cfg%imaxo_
@@ -630,7 +625,7 @@ contains
                         end do
                      end do
                      ! Get eigenvalues and eigenvectors
-                     call ve%get_eigensystem()
+                     call ve%get_eigensystem(vf%VF)
                   else
                      print *, 'about to init SC1'
                      do k=cfg%kmino_,cfg%kmaxo_
@@ -649,55 +644,6 @@ contains
             end if
          end if
 
-         ! Calculate grad(U)
-         call fs%get_gradU(gradU)
-
-         ! Remember old reconstructed conformation tensor
-         if (stabilization) then 
-            ve%SCrecold=ve%SCrec
-         end if
-
-         ! if (droplet_inserted) then
-            ! Transport our liquid conformation tensor using log conformation
-            advance_scalar: block
-               integer :: i,j,k,nsc
-               ! Add source terms for constitutive model
-               if (stabilization) then 
-                  ! Update eigenvalues and eigenvectors
-                  call ve%get_eigensystem()
-                  call ve%get_CgradU_log(gradU,SCtmp); resSC=SCtmp
-                  ! call ve%get_relax_log(SCtmp);        resSC=resSC+SCtmp
-               else
-                  call ve%get_CgradU(gradU,SCtmp);    resSC=SCtmp
-                  call ve%get_relax(SCtmp,time%dt);   resSC=resSC+SCtmp
-               end if
-               ve%SCold=ve%SC
-               ! Explicit calculation of dSC/dt from scalar equation
-               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
-               ! Update our scalars
-               do nsc=1,ve%nscalar
-                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
-                  where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
-               end do
-               ! Apply boundary conditions
-               call ve%apply_bcond(time%t,time%dt)
-            end block advance_scalar
-         ! end if
-
-         ! if (stabilization.and.droplet_inserted) then
-         if (stabilization) then  
-            ! Update eigenvalues and eigenvectors
-            call ve%get_eigensystem()
-            ! Reconstruct conformation tensor
-            call ve%reconstruct_conformation()
-            ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt)
-            ! Reconstruct lnC for next time step
-            !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec()
-            !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation()
-         end if
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -715,6 +661,61 @@ contains
          
          ! Prepare new staggered viscosity (at n+1)
 		   call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
+
+          ! Calculate grad(U)
+         call fs%get_gradU(gradU)
+
+         ! ! Remember old reconstructed conformation tensor
+         ! if (stabilization) then 
+         !    ve%SCrecold=ve%SCrec
+         ! end if
+
+         if (droplet_inserted) then
+            ! Transport our liquid conformation tensor using log conformation
+            advance_scalar: block
+               integer :: i,j,k,nsc
+               ! Add source terms for constitutive model
+               if (stabilization) then 
+                  ! Streching 
+                  call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
+                  ! Relxation
+                  ! call ve%get_relax_log(SCtmp,vf%VFold);             resSC=resSC+SCtmp
+               else
+                  ! Streching
+                  call ve%get_CgradU(gradU,SCtmp,vf%VFold);    resSC=SCtmp
+                  ! Relxation
+                  call ve%get_relax(SCtmp,time%dt,vf%VFold);   resSC=resSC+SCtmp
+               end if
+               ve%SC=ve%SC+time%dt*resSC
+               call ve%apply_bcond(time%t,time%dt)
+               ve%SCold=ve%SC
+               ! Explicit calculation of dSC/dt from scalar equation
+               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+               ! Update our scalars
+               do nsc=1,ve%nscalar
+                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+                  where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+               end do
+               ! Apply boundary conditions
+               call ve%apply_bcond(time%t,time%dt)
+            end block advance_scalar
+         end if
+
+         if (stabilization.and.droplet_inserted) then 
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation(vf%VF)
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt,vf%VF)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec(vf%VF)
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation(vf%VF)
+            ! Take exp(eigenvalues) to use in next time-step
+            ve%eigenval=exp(ve%eigenval)
+         end if
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -730,7 +731,7 @@ contains
             ! Explicit calculation of drho*u/dt from NS
             call fs%get_dmomdt(resU,resV,resW)
 
-            ! if (droplet_inserted) then
+            if (droplet_inserted) then
                ! Add polymer stress term
                polymer_stress: block
                   use tpviscoelastic_class, only: oldroydb
@@ -752,26 +753,26 @@ contains
                            do k=cfg%kmino_,cfg%kmaxo_
                               do j=cfg%jmino_,cfg%jmaxo_
                                  do i=cfg%imino_,cfg%imaxo_
-                                    stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                                    stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                                    stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                                    stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                                    stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                                    stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                                    stress(i,j,k,1)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                                    stress(i,j,k,2)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                                    stress(i,j,k,3)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                                    stress(i,j,k,4)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                                    stress(i,j,k,5)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                                    stress(i,j,k,6)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
                                  end do
                               end do
                            end do
                         end select 
                      else
-                        select case (ve%model)
-                        case (oldroydb)
-                           ! Calculate the polymer stress
-                           call ve%get_relax(stress,time%dt)
-                           ! Build liquid stress tensor
-                           do nsc=1,6
-                              stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
-                           end do
-                        end select
+                        ! select case (ve%model)
+                        ! case (oldroydb)
+                        !    ! Calculate the polymer stress
+                        !    call ve%get_relax(stress,time%dt)
+                        !    ! Build liquid stress tensor
+                        !    do nsc=1,6
+                        !       stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
+                        !    end do
+                        ! end select
                      end if
                   ! Interpolate tensor components to cell edges
                   do k=cfg%kmin_,cfg%kmax_+1
@@ -802,7 +803,7 @@ contains
                   ! Clean up
                   deallocate(stress,Txy,Tyz,Tzx)
                end block polymer_stress
-            ! end if
+            end if
             
             ! Assemble explicit residual
             resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
