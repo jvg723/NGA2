@@ -63,23 +63,23 @@ module simulation
 
 contains
    
-   !> Function that identifies cells that need a label
-   logical function make_label(i,j,k)
+   !> Function that identifies liquid cells
+   logical function label_liquid(i,j,k)
       implicit none
       integer, intent(in) :: i,j,k
       if (vf%VF(i,j,k).gt.0.0_WP) then
-         make_label=.true.
+         label_liquid=.true.
       else
-         make_label=.false.
+         label_liquid=.false.
       end if
-   end function make_label
+   end function label_liquid
 
    !> Function that identifies if cell pairs have same label
-   logical function same_label(i1,j1,k1,i2,j2,k2)
-      implicit none
-      integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      same_label=.true.
-   end function same_label
+   !logical function same_label(i1,j1,k1,i2,j2,k2)
+   !   implicit none
+   !   integer, intent(in) :: i1,j1,k1,i2,j2,k2
+   !   same_label=.true.
+   !end function same_label
    
    !> Function that defines a level set function for a sphere
    function levelset_sphere(xyz,t) result(G)
@@ -87,7 +87,9 @@ contains
       real(WP), dimension(3),intent(in) :: xyz
       real(WP), intent(in) :: t
       real(WP) :: G
-      G=radius-sqrt(sum((xyz-center)**2))
+      !G=radius-sqrt(sum((xyz-center)**2))
+      G=      radius-sqrt(sum((xyz-center+[-0.5_WP,-0.4_WP,0.0_WP])**2))
+      G=max(G,radius-sqrt(sum((xyz-center+[+0.5_WP,+0.4_WP,0.0_WP])**2)))
    end function levelset_sphere
 
    !> Compute turbulence stats
@@ -216,35 +218,10 @@ contains
       
       ! Initialize our VOF solver
       create_vof: block
-         use vfs_class,only: r2p,elvira,VFhi,VFlo,flux_storage
-         use mpi_f08,  only: MPI_WTIME
-         use string,   only: str_medium,lowercase
-         integer :: i,j,k,n,si,sj,sk,curvature_method,stencil_size,hf_backup_method
-         character(len=str_medium) :: read_curvature_method
-         real(WP), dimension(3,8) :: cube_vertex
-         real(WP), dimension(3) :: v_cent,a_cent
-         real(WP) :: vol,area
-         integer, parameter :: amr_ref_lvl=5
-         real(WP) :: start, finish
-         ! Create a VOF solver with r2p reconstruction
-         call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF')
-         ! Initialize droplet parameters
-         call param_read('Droplet diameter',radius); radius=0.5_WP*radius
-         call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
-         ! Update the band
-         call vf%update_band()
-         ! Perform interface reconstruction from VOF field
-         call vf%build_interface()
-         ! Create discontinuous polygon mesh from IRL interface
-         call vf%polygonalize_interface()
-         ! Calculate distance from polygons
-         call vf%distance_from_polygon()
-         ! Calculate subcell phasic volumes
-         call vf%subcell_vol()
-         ! Calculate curvature
-         call vf%get_curvature()
-         ! Reset moments to guarantee compatibility with interface reconstruction
-         call vf%reset_volume_moments()
+         use vfs_class, only: elvira,remap_storage
+         ! Create a VOF solver with stored full-cell Lagrangian remap
+         call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=remap_storage,name='VOF')
+         call insert_drop(vf=vf)
       end block create_vof
       
       ! Create a single-phase flow solver without bconds
@@ -293,13 +270,19 @@ contains
             write(message,'("[Drop setup] => sigma             =",es12.5)')   fs%sigma; call log(message)
          end if
          ! Gaussian initial field
-         ! call random_init(.true., .true.)
          do k=fs%cfg%kmin_,fs%cfg%kmax_
             do j=fs%cfg%jmin_,fs%cfg%jmax_
                do i=fs%cfg%imin_,fs%cfg%imax_
-                  fs%U(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
-                  fs%V(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
-                  fs%W(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) then
+                     if (fs%cfg%xm(i).gt.0.5_WP*fs%cfg%xL) then
+                        fs%U(i,j,k)=-1.0_WP
+                     else
+                        fs%U(i,j,k)=+1.0_WP
+                     end if
+                  end if
+                  !fs%U(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  !fs%V(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  !fs%W(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
                end do
             end do
          end do
@@ -384,7 +367,7 @@ contains
       
       ! ! Create structure tracker
       ! create_strack: block
-      !    call strack%init(vf=vf,phase=0,name='stracker_test')
+      !    call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
       ! end block create_strack
       
       ! Create surfmesh object for interface polygon output
@@ -470,7 +453,9 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
-         ! call ens_out%add_scalar('id',strack%id)
+         call ens_out%add_scalar('id',strack%id)
+         call ens_out%add_scalar('id_old',strack%id_old)
+         call ens_out%add_scalar('id_rmp',strack%id_rmp)
          call ens_out%add_surface('vofplic',smesh)
          if (stabilization) then 
             do nsc=1,ve%nscalar
@@ -588,26 +573,26 @@ contains
          call time%increment()
          
          ! Insert droplet
-         if (.not.droplet_inserted) then
-            if (inj_evt%occurs()) then
-               ! Insert droplet
-               droplet_injection: block
-                  integer :: i,j,k
-                  call insert_drop(vf=vf)
-                  droplet_inserted=.true.
-                  do k=fs%cfg%kmin_,fs%cfg%kmax_
-                     do j=fs%cfg%jmin_,fs%cfg%jmax_
-                        do i=fs%cfg%imin_,fs%cfg%imax_
-                           if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
-                           if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
-                           if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
-                        end do
-                     end do
-                  end do
-                  call fs%cfg%sync(fs%U)
-                  call fs%cfg%sync(fs%V)
-                  call fs%cfg%sync(fs%W)
-               end block droplet_injection
+         !if (.not.droplet_inserted) then
+         !   if (inj_evt%occurs()) then
+         !      ! Insert droplet
+         !      droplet_injection: block
+         !         integer :: i,j,k
+         !         call insert_drop(vf=vf)
+         !         droplet_inserted=.true.
+         !         do k=fs%cfg%kmin_,fs%cfg%kmax_
+         !            do j=fs%cfg%jmin_,fs%cfg%jmax_
+         !               do i=fs%cfg%imin_,fs%cfg%imax_
+         !                  if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
+         !                  if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
+         !                  if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
+         !               end do
+         !            end do
+         !         end do
+         !         call fs%cfg%sync(fs%U)
+         !         call fs%cfg%sync(fs%V)
+         !         call fs%cfg%sync(fs%W)
+         !      end block droplet_injection
                ! Init confomration tensor
                init_conformation: block
                   integer :: i,j,k
@@ -641,8 +626,8 @@ contains
                      end do
                   end if
                end block init_conformation
-            end if
-         end if
+         !   end if
+         !end if
 
          
          ! Remember old VOF
@@ -658,6 +643,9 @@ contains
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+
+         ! Advance stracker
+         call strack%advance(make_label=label_liquid)
          
          ! Prepare new staggered viscosity (at n+1)
 		   call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
@@ -812,36 +800,36 @@ contains
             
             ! Add linear forcing term based on Bassenne et al. (2016)
             !if (.not.droplet_inserted) then
-               linear_forcing: block
-                  use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
-                  use parallel, only: MPI_REAL_WP
-                  real(WP) :: myTKE,A,myEPSp,EPSp
-                  integer :: i,j,k,ierr
-                  ! Calculate mean velocity
-                  call fs%cfg%integrate(A=fs%U,integral=meanU); meanU=meanU/fs%cfg%vol_total
-                  call fs%cfg%integrate(A=fs%V,integral=meanV); meanV=meanV/fs%cfg%vol_total
-                  call fs%cfg%integrate(A=fs%W,integral=meanW); meanW=meanW/fs%cfg%vol_total
-                  ! Calculate TKE and pseudo-EPS
-                  call fs%interp_vel(Ui,Vi,Wi)
-                  call fs%get_gradu(gradu=gradU)
-                  myTKE=0.0_WP; myEPSp=0.0_WP
-                  do k=fs%cfg%kmin_,fs%cfg%kmax_
-                     do j=fs%cfg%jmin_,fs%cfg%jmax_
-                        do i=fs%cfg%imin_,fs%cfg%imax_
-                           myTKE =myTKE +0.5_WP*((Ui(i,j,k)-meanU)**2+(Vi(i,j,k)-meanV)**2+(Wi(i,j,k)-meanW)**2)*fs%cfg%vol(i,j,k)
-                           myEPSp=myEPSp+fs%cfg%vol(i,j,k)*visc*(gradU(1,1,i,j,k)**2+gradU(1,2,i,j,k)**2+gradU(1,3,i,j,k)**2+&
-                           &                                     gradU(2,1,i,j,k)**2+gradU(2,2,i,j,k)**2+gradU(2,3,i,j,k)**2+&
-                           &                                     gradU(3,1,i,j,k)**2+gradU(3,2,i,j,k)**2+gradU(3,3,i,j,k)**2)
-                        end do
-                     end do
-                  end do
-                  call MPI_ALLREDUCE(myTKE ,TKE ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); TKE =TKE /fs%cfg%vol_total
-                  call MPI_ALLREDUCE(myEPSp,EPSp,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); EPSp=EPSp/fs%cfg%vol_total/rho
-                  A=(EPSp-Gdtau*(TKE-TKE0))/(2.0_WP*TKE)
-                  resU=resU+time%dt*(fs%U-meanU)*A*fs%rho_U
-                  resV=resV+time%dt*(fs%V-meanV)*A*fs%rho_V
-                  resW=resW+time%dt*(fs%W-meanW)*A*fs%rho_W
-               end block linear_forcing
+               !linear_forcing: block
+               !   use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+               !   use parallel, only: MPI_REAL_WP
+               !   real(WP) :: myTKE,A,myEPSp,EPSp
+               !   integer :: i,j,k,ierr
+               !   ! Calculate mean velocity
+               !   call fs%cfg%integrate(A=fs%U,integral=meanU); meanU=meanU/fs%cfg%vol_total
+               !   call fs%cfg%integrate(A=fs%V,integral=meanV); meanV=meanV/fs%cfg%vol_total
+               !   call fs%cfg%integrate(A=fs%W,integral=meanW); meanW=meanW/fs%cfg%vol_total
+               !   ! Calculate TKE and pseudo-EPS
+               !   call fs%interp_vel(Ui,Vi,Wi)
+               !   call fs%get_gradu(gradu=gradU)
+               !   myTKE=0.0_WP; myEPSp=0.0_WP
+               !   do k=fs%cfg%kmin_,fs%cfg%kmax_
+               !      do j=fs%cfg%jmin_,fs%cfg%jmax_
+               !         do i=fs%cfg%imin_,fs%cfg%imax_
+               !            myTKE =myTKE +0.5_WP*((Ui(i,j,k)-meanU)**2+(Vi(i,j,k)-meanV)**2+(Wi(i,j,k)-meanW)**2)*fs%cfg%vol(i,j,k)
+               !            myEPSp=myEPSp+fs%cfg%vol(i,j,k)*visc*(gradU(1,1,i,j,k)**2+gradU(1,2,i,j,k)**2+gradU(1,3,i,j,k)**2+&
+               !            &                                     gradU(2,1,i,j,k)**2+gradU(2,2,i,j,k)**2+gradU(2,3,i,j,k)**2+&
+               !            &                                     gradU(3,1,i,j,k)**2+gradU(3,2,i,j,k)**2+gradU(3,3,i,j,k)**2)
+               !         end do
+               !      end do
+               !   end do
+               !   call MPI_ALLREDUCE(myTKE ,TKE ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); TKE =TKE /fs%cfg%vol_total
+               !   call MPI_ALLREDUCE(myEPSp,EPSp,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); EPSp=EPSp/fs%cfg%vol_total/rho
+               !   A=(EPSp-Gdtau*(TKE-TKE0))/(2.0_WP*TKE)
+               !   resU=resU+time%dt*(fs%U-meanU)*A*fs%rho_U
+               !   resV=resV+time%dt*(fs%V-meanV)*A*fs%rho_V
+               !   resW=resW+time%dt*(fs%W-meanW)*A*fs%rho_W
+               !end block linear_forcing
             !end if
             
             ! Apply these residuals
@@ -876,9 +864,6 @@ contains
          ! Recompute interpolated velocity and divergence
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
-         
-         ! ! Perform strack
-         ! call strack%build(make_label,same_label)
          
          ! Output to ensight
          if (ens_evt%occurs()) then
@@ -963,18 +948,18 @@ contains
    ! Initialize our VOF field
    subroutine insert_drop(vf)
       use mms_geom, only: cube_refine_vol
-      use vfs_class,only: r2p,lvira,VFhi,VFlo
-      use mpi_f08,  only: MPI_WTIME
-      use string,   only: str_medium,lowercase
+      use vfs_class,only: VFhi,VFlo
+      use param,    only: param_read
       implicit none
       class(vfs), intent(inout) :: vf
-      integer :: i,j,k,n,si,sj,sk,curvature_method,stencil_size,hf_backup_method
-      character(len=str_medium) :: read_curvature_method
+      integer :: i,j,k,n,si,sj,sk
       real(WP), dimension(3,8) :: cube_vertex
       real(WP), dimension(3) :: v_cent,a_cent
       real(WP) :: vol,area
       integer, parameter :: amr_ref_lvl=5
-      real(WP) :: start,finish
+      ! Initialize droplet parameters
+      call param_read('Droplet diameter',radius); radius=0.5_WP*radius
+      call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
       ! Initialize droplet
       do k=vf%cfg%kmino_,vf%cfg%kmaxo_
          do j=vf%cfg%jmino_,vf%cfg%jmaxo_
