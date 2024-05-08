@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 1 8 
+Partition :	1 1 1 
 
 # Are we using log conformation stabilzation 
 Stabilization : .true.
@@ -10,8 +10,8 @@ nx : 64
 
 # Droplet properties
 Droplet diameter :        0.8
-Droplet injection time :  0                ! is multiplied by eddy turnover-time
-Weber number :            1e3!10
+Droplet injection time :  0.1                ! is multiplied by eddy turnover-time
+Weber number :            10
 Viscosity ratio :         1
 
 # Non-Newtonian modeling                      
@@ -19,9 +19,8 @@ Polymer Concentration : 0.5
 Weissenberg Number    : 1.0 
 
 # Time integration
-Max timestep size : 2e-2!5e-3
+Max timestep size : 5e-2
 Max cfl number :    0.9
-Max time :          5.0
 
 # Ensight output
-Ensight output period : 1e-2
+Ensight output period : 1e-1

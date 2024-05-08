@@ -20,6 +20,7 @@ module simulation
    type(tpns),           public :: fs
    type(timetracker),    public :: time
    type(vfs),            public :: vf
+   type(vfs),            public :: vf_flux
    type(tpviscoelastic), public :: ve
 
    !> Include structure tracker
@@ -165,7 +166,6 @@ contains
          time=timetracker(amRoot=cfg%amRoot)
          call param_read('Max timestep size',time%dtmax)
          call param_read('Max cfl number',time%cflmax)
-         call param_read('Max time',time%tmax)
          time%dt=time%dtmax
          time%itmax=2
       end block initialize_timetracker
@@ -218,10 +218,11 @@ contains
       
       ! Initialize our VOF solver
       create_vof: block
-         use vfs_class, only: elvira,remap_storage
+         use vfs_class, only: elvira,remap_storage,flux_storage
          ! Create a VOF solver with stored full-cell Lagrangian remap
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=remap_storage,name='VOF')
-         call insert_drop(vf=vf)
+         ! Create a VOF solver with detailed face flux stroage
+         call vf_flux%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF_flux')
       end block create_vof
       
       ! Create a single-phase flow solver without bconds
@@ -273,16 +274,9 @@ contains
          do k=fs%cfg%kmin_,fs%cfg%kmax_
             do j=fs%cfg%jmin_,fs%cfg%jmax_
                do i=fs%cfg%imin_,fs%cfg%imax_
-                  if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) then
-                     if (fs%cfg%xm(i).gt.0.5_WP*fs%cfg%xL) then
-                        fs%U(i,j,k)=-1.0_WP
-                     else
-                        fs%U(i,j,k)=+1.0_WP
-                     end if
-                  end if
-                  !fs%U(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
-                  !fs%V(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
-                  !fs%W(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  fs%U(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  fs%V(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  fs%W(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
                end do
             end do
          end do
@@ -638,6 +632,7 @@ contains
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+         call vf_flux%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
          ! Advance stracker
          call strack%advance(make_label=label_liquid)
@@ -655,24 +650,24 @@ contains
                ! Add source terms for constitutive model
                if (stabilization) then 
                   ! Streching 
-                  call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
+                  call ve%get_CgradU_log(gradU,SCtmp,vf_flux%VFold); resSC=SCtmp
                   ! Relxation
                   ! call ve%get_relax_log(SCtmp,vf%VFold);             resSC=resSC+SCtmp
                else
                   ! Streching
-                  call ve%get_CgradU(gradU,SCtmp,vf%VFold);    resSC=SCtmp
+                  call ve%get_CgradU(gradU,SCtmp,vf_flux%VFold);    resSC=SCtmp
                   ! Relxation
-                  call ve%get_relax(SCtmp,time%dt,vf%VFold);   resSC=resSC+SCtmp
+                  call ve%get_relax(SCtmp,time%dt,vf_flux%VFold);   resSC=resSC+SCtmp
                end if
                ve%SC=ve%SC+time%dt*resSC
                call ve%apply_bcond(time%t,time%dt)
                ve%SCold=ve%SC
                ! Explicit calculation of dSC/dt from scalar equation
-               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf_flux%VFold,VF=vf_flux%VF,detailed_face_flux=vf_flux%detailed_face_flux,dt=time%dt)
                ! Update our scalars
                do nsc=1,ve%nscalar
-                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
-                  where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf_flux%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf_flux%VF
+                  where (vf_flux%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
                end do
                ! Apply boundary conditions
                call ve%apply_bcond(time%t,time%dt)
@@ -681,16 +676,16 @@ contains
 
          if (stabilization.and.droplet_inserted) then 
             ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem(vf%VF)
+            call ve%get_eigensystem(vf_flux%VF)
             ! Reconstruct conformation tensor
-            call ve%reconstruct_conformation(vf%VF)
+            call ve%reconstruct_conformation(vf_flux%VF)
             ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt,vf%VF)
+            call ve%get_relax_analytical(time%dt,vf_flux%VF)
             ! Reconstruct lnC for next time step
             !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec(vf%VF)
+            call ve%get_eigensystem_SCrec(vf_flux%VF)
             !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation(vf%VF)
+            call ve%reconstruct_log_conformation(vf_flux%VF)
             ! Take exp(eigenvalues) to use in next time-step
             ve%eigenval=exp(ve%eigenval)
          end if
@@ -731,12 +726,14 @@ contains
                            do k=cfg%kmino_,cfg%kmaxo_
                               do j=cfg%jmino_,cfg%jmaxo_
                                  do i=cfg%imino_,cfg%imaxo_
-                                    stress(i,j,k,1)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                                    stress(i,j,k,2)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                                    stress(i,j,k,3)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                                    stress(i,j,k,4)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                                    stress(i,j,k,5)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                                    stress(i,j,k,6)=vf%VF(i,j,k)*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                                    if (ve%mask(i,j,k).ne.0) cycle
+                                    if (vf_flux%VF(i,j,k).eq.0.0_WP) cycle
+                                    stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                                    stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                                    stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                                    stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                                    stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                                    stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
                                  end do
                               end do
                            end do
@@ -920,9 +917,9 @@ contains
          call compute_stats()
          call fs%get_max()
          if (stabilization) then
-            call ve%get_max_reconstructed(vf%VF)
+            call ve%get_max_reconstructed(vf_flux%VF)
          else
-            call ve%get_max(vf%VF)
+            call ve%get_max(vf_flux%VF)
          end if
          call mfile%write()
          call cflfile%write()
