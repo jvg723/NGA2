@@ -9,7 +9,7 @@ module simulation
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
-   ! use stracker_class,    only: stracker
+   use stracker_class,    only: stracker
    use event_class,       only: event
    use monitor_class,     only: monitor
    implicit none
@@ -22,8 +22,8 @@ module simulation
    type(vfs),            public :: vf
    type(tpviscoelastic), public :: ve
 
-   ! !> Include structure tracker
-   ! type(stracker) :: strack
+   !> Include structure tracker
+   type(stracker) :: strack
  
    !> Ensight postprocessing
    type(ensight)  :: ens_out
@@ -365,29 +365,28 @@ contains
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
       
-      ! ! Create structure tracker
-      ! create_strack: block
-      !    call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
-      ! end block create_strack
+      ! Create structure tracker
+      create_strack: block
+         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
+      end block create_strack
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         smesh=surfmesh(nvar=7,name='plic')
-         ! smesh%varname(1)='id'
-         smesh%varname(1)='trC'
-         smesh%varname(2)='Cxx'
-         smesh%varname(3)='Cxy'
-         smesh%varname(4)='Cxz'
-         smesh%varname(5)='Cyy'
-         smesh%varname(6)='Cyz'
-         smesh%varname(7)='Czz'
+         smesh=surfmesh(nvar=8,name='plic')
+         smesh%varname(1)='id'
+         smesh%varname(2)='trC'
+         smesh%varname(3)='Cxx'
+         smesh%varname(4)='Cxy'
+         smesh%varname(5)='Cxz'
+         smesh%varname(6)='Cyy'
+         smesh%varname(7)='Cyz'
+         smesh%varname(8)='Czz'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
-         ! smesh%var(1,:)=0.0_WP
          smesh%var(1,:)=0.0_WP
          smesh%var(2,:)=0.0_WP
          smesh%var(3,:)=0.0_WP
@@ -395,6 +394,7 @@ contains
          smesh%var(5,:)=0.0_WP
          smesh%var(6,:)=0.0_WP
          smesh%var(7,:)=0.0_WP
+         smesh%var(8,:)=0.0_WP
          np=0
          if (stabilization) then
             do k=vf%cfg%kmin_,vf%cfg%kmax_
@@ -402,15 +402,14 @@ contains
                   do i=vf%cfg%imin_,vf%cfg%imax_
                      do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                         if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                           np=np+1; 
-                           !smesh%var(1,np)=0.0_WP; !smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                           smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
-                           smesh%var(2,np)=ve%SCrec(i,j,k,1)
-                           smesh%var(3,np)=ve%SCrec(i,j,k,2)
-                           smesh%var(4,np)=ve%SCrec(i,j,k,3)
-                           smesh%var(5,np)=ve%SCrec(i,j,k,4)
-                           smesh%var(6,np)=ve%SCrec(i,j,k,5)
-                           smesh%var(7,np)=ve%SCrec(i,j,k,6)
+                           np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                           smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                           smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                           smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                           smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                           smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                           smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                           smesh%var(8,np)=ve%SCrec(i,j,k,6)
                         end if
                      end do
                   end do
@@ -422,15 +421,14 @@ contains
                   do i=vf%cfg%imin_,vf%cfg%imax_
                      do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                         if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                           np=np+1; 
-                           !smesh%var(1,np)=0.0_WP; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                           smesh%var(1,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
-                           smesh%var(2,np)=ve%SC(i,j,k,1)
-                           smesh%var(3,np)=ve%SC(i,j,k,2)
-                           smesh%var(4,np)=ve%SC(i,j,k,3)
-                           smesh%var(5,np)=ve%SC(i,j,k,4)
-                           smesh%var(6,np)=ve%SC(i,j,k,5)
-                           smesh%var(7,np)=ve%SC(i,j,k,6)
+                           np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                           smesh%var(2,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
+                           smesh%var(3,np)=ve%SC(i,j,k,1)
+                           smesh%var(4,np)=ve%SC(i,j,k,2)
+                           smesh%var(5,np)=ve%SC(i,j,k,3)
+                           smesh%var(6,np)=ve%SC(i,j,k,4)
+                           smesh%var(7,np)=ve%SC(i,j,k,5)
+                           smesh%var(8,np)=ve%SC(i,j,k,6)
                         end if
                      end do
                   end do
@@ -454,8 +452,6 @@ contains
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('id',strack%id)
-         call ens_out%add_scalar('id_old',strack%id_old)
-         call ens_out%add_scalar('id_rmp',strack%id_rmp)
          call ens_out%add_surface('vofplic',smesh)
          if (stabilization) then 
             do nsc=1,ve%nscalar
@@ -573,26 +569,26 @@ contains
          call time%increment()
          
          ! Insert droplet
-         !if (.not.droplet_inserted) then
-         !   if (inj_evt%occurs()) then
-         !      ! Insert droplet
-         !      droplet_injection: block
-         !         integer :: i,j,k
-         !         call insert_drop(vf=vf)
-         !         droplet_inserted=.true.
-         !         do k=fs%cfg%kmin_,fs%cfg%kmax_
-         !            do j=fs%cfg%jmin_,fs%cfg%jmax_
-         !               do i=fs%cfg%imin_,fs%cfg%imax_
-         !                  if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
-         !                  if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
-         !                  if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
-         !               end do
-         !            end do
-         !         end do
-         !         call fs%cfg%sync(fs%U)
-         !         call fs%cfg%sync(fs%V)
-         !         call fs%cfg%sync(fs%W)
-         !      end block droplet_injection
+         if (.not.droplet_inserted) then
+           if (inj_evt%occurs()) then
+              ! Insert droplet
+              droplet_injection: block
+                 integer :: i,j,k
+                 call insert_drop(vf=vf)
+                 droplet_inserted=.true.
+                 do k=fs%cfg%kmin_,fs%cfg%kmax_
+                    do j=fs%cfg%jmin_,fs%cfg%jmax_
+                       do i=fs%cfg%imin_,fs%cfg%imax_
+                          if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
+                          if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
+                          if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
+                       end do
+                    end do
+                 end do
+                 call fs%cfg%sync(fs%U)
+                 call fs%cfg%sync(fs%V)
+                 call fs%cfg%sync(fs%W)
+              end block droplet_injection
                ! Init confomration tensor
                init_conformation: block
                   integer :: i,j,k
@@ -612,7 +608,6 @@ contains
                      ! Get eigenvalues and eigenvectors
                      call ve%get_eigensystem(vf%VF)
                   else
-                     print *, 'about to init SC1'
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_
                            do i=cfg%imino_,cfg%imaxo_
@@ -626,8 +621,8 @@ contains
                      end do
                   end if
                end block init_conformation
-         !   end if
-         !end if
+           end if
+         end if
 
          
          ! Remember old VOF
@@ -652,11 +647,6 @@ contains
 
           ! Calculate grad(U)
          call fs%get_gradU(gradU)
-
-         ! ! Remember old reconstructed conformation tensor
-         ! if (stabilization) then 
-         !    ve%SCrecold=ve%SCrec
-         ! end if
 
          if (droplet_inserted) then
             ! Transport our liquid conformation tensor using log conformation
@@ -799,38 +789,38 @@ contains
             resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
             
             ! Add linear forcing term based on Bassenne et al. (2016)
-            !if (.not.droplet_inserted) then
-               !linear_forcing: block
-               !   use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
-               !   use parallel, only: MPI_REAL_WP
-               !   real(WP) :: myTKE,A,myEPSp,EPSp
-               !   integer :: i,j,k,ierr
-               !   ! Calculate mean velocity
-               !   call fs%cfg%integrate(A=fs%U,integral=meanU); meanU=meanU/fs%cfg%vol_total
-               !   call fs%cfg%integrate(A=fs%V,integral=meanV); meanV=meanV/fs%cfg%vol_total
-               !   call fs%cfg%integrate(A=fs%W,integral=meanW); meanW=meanW/fs%cfg%vol_total
-               !   ! Calculate TKE and pseudo-EPS
-               !   call fs%interp_vel(Ui,Vi,Wi)
-               !   call fs%get_gradu(gradu=gradU)
-               !   myTKE=0.0_WP; myEPSp=0.0_WP
-               !   do k=fs%cfg%kmin_,fs%cfg%kmax_
-               !      do j=fs%cfg%jmin_,fs%cfg%jmax_
-               !         do i=fs%cfg%imin_,fs%cfg%imax_
-               !            myTKE =myTKE +0.5_WP*((Ui(i,j,k)-meanU)**2+(Vi(i,j,k)-meanV)**2+(Wi(i,j,k)-meanW)**2)*fs%cfg%vol(i,j,k)
-               !            myEPSp=myEPSp+fs%cfg%vol(i,j,k)*visc*(gradU(1,1,i,j,k)**2+gradU(1,2,i,j,k)**2+gradU(1,3,i,j,k)**2+&
-               !            &                                     gradU(2,1,i,j,k)**2+gradU(2,2,i,j,k)**2+gradU(2,3,i,j,k)**2+&
-               !            &                                     gradU(3,1,i,j,k)**2+gradU(3,2,i,j,k)**2+gradU(3,3,i,j,k)**2)
-               !         end do
-               !      end do
-               !   end do
-               !   call MPI_ALLREDUCE(myTKE ,TKE ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); TKE =TKE /fs%cfg%vol_total
-               !   call MPI_ALLREDUCE(myEPSp,EPSp,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); EPSp=EPSp/fs%cfg%vol_total/rho
-               !   A=(EPSp-Gdtau*(TKE-TKE0))/(2.0_WP*TKE)
-               !   resU=resU+time%dt*(fs%U-meanU)*A*fs%rho_U
-               !   resV=resV+time%dt*(fs%V-meanV)*A*fs%rho_V
-               !   resW=resW+time%dt*(fs%W-meanW)*A*fs%rho_W
-               !end block linear_forcing
-            !end if
+            if (.not.droplet_inserted) then
+               linear_forcing: block
+                 use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+                 use parallel, only: MPI_REAL_WP
+                 real(WP) :: myTKE,A,myEPSp,EPSp
+                 integer :: i,j,k,ierr
+                 ! Calculate mean velocity
+                 call fs%cfg%integrate(A=fs%U,integral=meanU); meanU=meanU/fs%cfg%vol_total
+                 call fs%cfg%integrate(A=fs%V,integral=meanV); meanV=meanV/fs%cfg%vol_total
+                 call fs%cfg%integrate(A=fs%W,integral=meanW); meanW=meanW/fs%cfg%vol_total
+                 ! Calculate TKE and pseudo-EPS
+                 call fs%interp_vel(Ui,Vi,Wi)
+                 call fs%get_gradu(gradu=gradU)
+                 myTKE=0.0_WP; myEPSp=0.0_WP
+                 do k=fs%cfg%kmin_,fs%cfg%kmax_
+                    do j=fs%cfg%jmin_,fs%cfg%jmax_
+                       do i=fs%cfg%imin_,fs%cfg%imax_
+                          myTKE =myTKE +0.5_WP*((Ui(i,j,k)-meanU)**2+(Vi(i,j,k)-meanV)**2+(Wi(i,j,k)-meanW)**2)*fs%cfg%vol(i,j,k)
+                          myEPSp=myEPSp+fs%cfg%vol(i,j,k)*visc*(gradU(1,1,i,j,k)**2+gradU(1,2,i,j,k)**2+gradU(1,3,i,j,k)**2+&
+                          &                                     gradU(2,1,i,j,k)**2+gradU(2,2,i,j,k)**2+gradU(2,3,i,j,k)**2+&
+                          &                                     gradU(3,1,i,j,k)**2+gradU(3,2,i,j,k)**2+gradU(3,3,i,j,k)**2)
+                       end do
+                    end do
+                 end do
+                 call MPI_ALLREDUCE(myTKE ,TKE ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); TKE =TKE /fs%cfg%vol_total
+                 call MPI_ALLREDUCE(myEPSp,EPSp,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); EPSp=EPSp/fs%cfg%vol_total/rho
+                 A=(EPSp-Gdtau*(TKE-TKE0))/(2.0_WP*TKE)
+                 resU=resU+time%dt*(fs%U-meanU)*A*fs%rho_U
+                 resV=resV+time%dt*(fs%V-meanV)*A*fs%rho_V
+                 resW=resW+time%dt*(fs%W-meanW)*A*fs%rho_W
+               end block linear_forcing
+            end if
             
             ! Apply these residuals
             fs%U=2.0_WP*fs%U-fs%Uold+resU!/fs%rho_U
@@ -881,6 +871,7 @@ contains
                smesh%var(5,:)=0.0_WP
                smesh%var(6,:)=0.0_WP
                smesh%var(7,:)=0.0_WP
+               smesh%var(8,:)=0.0_WP
                np=0
                if (stabilization) then
                   do k=vf%cfg%kmin_,vf%cfg%kmax_
@@ -888,15 +879,14 @@ contains
                         do i=vf%cfg%imin_,vf%cfg%imax_
                            do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                               if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                                 np=np+1; 
-                                 !smesh%var(1,np)=0.0_WP; !smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                                 smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
-                                 smesh%var(2,np)=ve%SCrec(i,j,k,1)
-                                 smesh%var(3,np)=ve%SCrec(i,j,k,2)
-                                 smesh%var(4,np)=ve%SCrec(i,j,k,3)
-                                 smesh%var(5,np)=ve%SCrec(i,j,k,4)
-                                 smesh%var(6,np)=ve%SCrec(i,j,k,5)
-                                 smesh%var(7,np)=ve%SCrec(i,j,k,6)
+                                 np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                                 smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                                 smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                                 smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                                 smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                                 smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                                 smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                                 smesh%var(8,np)=ve%SCrec(i,j,k,6)
                               end if
                            end do
                         end do
@@ -908,15 +898,14 @@ contains
                         do i=vf%cfg%imin_,vf%cfg%imax_
                            do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                               if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                                 np=np+1; 
-                                 !smesh%var(1,np)=0.0_WP; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                                 smesh%var(1,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
-                                 smesh%var(2,np)=ve%SC(i,j,k,1)
-                                 smesh%var(3,np)=ve%SC(i,j,k,2)
-                                 smesh%var(4,np)=ve%SC(i,j,k,3)
-                                 smesh%var(5,np)=ve%SC(i,j,k,4)
-                                 smesh%var(6,np)=ve%SC(i,j,k,5)
-                                 smesh%var(7,np)=ve%SC(i,j,k,6)
+                                 np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                                 smesh%var(2,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
+                                 smesh%var(3,np)=ve%SC(i,j,k,1)
+                                 smesh%var(4,np)=ve%SC(i,j,k,2)
+                                 smesh%var(5,np)=ve%SC(i,j,k,3)
+                                 smesh%var(6,np)=ve%SC(i,j,k,4)
+                                 smesh%var(7,np)=ve%SC(i,j,k,5)
+                                 smesh%var(8,np)=ve%SC(i,j,k,6)
                               end if
                            end do
                         end do
