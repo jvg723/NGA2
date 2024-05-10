@@ -1,17 +1,17 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
-   use precision,         only: WP
-   use geometry,          only: cfg,nx,Lx
-   use fft3d_class,       only: fft3d
-   use tpns_class,        only: tpns
-   use vfs_class,         only: vfs
+   use precision,            only: WP
+   use geometry,             only: cfg,nx,Lx
+   use fft3d_class,          only: fft3d
+   use tpns_class,           only: tpns
+   use vfs_class,            only: vfs
    use tpviscoelastic_class, only: tpviscoelastic
-   use timetracker_class, only: timetracker
-   use ensight_class,     only: ensight
-   use surfmesh_class,    only: surfmesh
-   use stracker_class,    only: stracker
-   use event_class,       only: event
-   use monitor_class,     only: monitor
+   use timetracker_class,    only: timetracker
+   use ensight_class,        only: ensight
+   use surfmesh_class,       only: surfmesh
+   use stracker_class,       only: stracker
+   use event_class,          only: event
+   use monitor_class,        only: monitor
    implicit none
    private
    
@@ -34,14 +34,14 @@ module simulation
    !> Simulation monitor file
    type(monitor) :: mfile,cflfile,hitfile,cvgfile,scfile
    
-   public :: simulation_init,simulation_run,simulation_final
+   public :: simulation_init,simulation_run,simulation_final,eigfile
    
    !> Private work arrays
    real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: SR
-   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    
    !> Fluid, forcing, and particle parameters
    real(WP) :: visc,rho,meanU,meanV,meanW
@@ -75,12 +75,6 @@ contains
       end if
    end function label_liquid
 
-   !> Function that identifies if cell pairs have same label
-   !logical function same_label(i1,j1,k1,i2,j2,k2)
-   !   implicit none
-   !   integer, intent(in) :: i1,j1,k1,i2,j2,k2
-   !   same_label=.true.
-   !end function same_label
    
    !> Function that defines a level set function for a sphere
    function levelset_sphere(xyz,t) result(G)
@@ -88,9 +82,7 @@ contains
       real(WP), dimension(3),intent(in) :: xyz
       real(WP), intent(in) :: t
       real(WP) :: G
-      !G=radius-sqrt(sum((xyz-center)**2))
-      G=      radius-sqrt(sum((xyz-center+[-0.5_WP,-0.4_WP,0.0_WP])**2))
-      G=max(G,radius-sqrt(sum((xyz-center+[+0.5_WP,+0.4_WP,0.0_WP])**2)))
+      G=radius-sqrt(sum((xyz-center)**2))
    end function levelset_sphere
 
    !> Compute turbulence stats
@@ -307,6 +299,11 @@ contains
          ! Compute turbulence stats
          call compute_stats()
       end block initialize_velocity
+      
+      ! Create structure tracker
+      create_strack: block
+         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
+      end block create_strack
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
@@ -329,40 +326,35 @@ contains
             allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
             !> Allocate storage for reconstructured C and Cold
             allocate(ve%SCrec(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-                     end if
-                  end do
-               end do
-            end do
-            ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem(vf%VF)
-         else
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        ve%SC(i,j,k,1)=1.0_WP  !< Cxx
-                        ve%SC(i,j,k,4)=1.0_WP  !< Cyy
-                        ve%SC(i,j,k,6)=1.0_WP  !< Czz
-                     end if
-                  end do
-               end do
-            end do
+         !    do k=cfg%kmino_,cfg%kmaxo_
+         !       do j=cfg%jmino_,cfg%jmaxo_
+         !          do i=cfg%imino_,cfg%imaxo_
+         !             if (vf%VF(i,j,k).gt.0.0_WP) then
+         !                ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+         !                ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+         !                ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         !    ! Get eigenvalues and eigenvectors
+         !    call ve%get_eigensystem(vf%VF)
+         ! else
+         !    do k=cfg%kmino_,cfg%kmaxo_
+         !       do j=cfg%jmino_,cfg%jmaxo_
+         !          do i=cfg%imino_,cfg%imaxo_
+         !             if (vf%VF(i,j,k).gt.0.0_WP) then
+         !                ve%SC(i,j,k,1)=1.0_WP  !< Cxx
+         !                ve%SC(i,j,k,4)=1.0_WP  !< Cyy
+         !                ve%SC(i,j,k,6)=1.0_WP  !< Czz
+         !             end if
+         !          end do
+         !       end do
+         !    end do
          end if
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
-      
-      ! Create structure tracker
-      create_strack: block
-         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
-      end block create_strack
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -468,9 +460,11 @@ contains
          call fs%get_max()
          call vf%get_max()
          if (stabilization) then
-            call ve%get_max_reconstructed(vf%VF)
+            call ve%get_max_reconstructed(vf_flux%VF)
+            call ve%get_max(vf_flux%VF)
+            call ve%get_max_eign(vf_flux%VF)
          else
-            call ve%get_max(vf%VF)
+            call ve%get_max(vf_flux%VF)
          end if
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
@@ -543,6 +537,19 @@ contains
             end do
          end if
          call scfile%write()
+         ! Create Eigenvalue monitor
+         if (stabilization) then
+            eigfile=monitor(ve%cfg%amRoot,'eigenvlaue')
+               call eigfile%add_column(time%n,'Timestep number')
+               call eigfile%add_column(time%t,'Time')
+               call eigfile%add_column(ve%Eval1max,'Eval1max')
+               call eigfile%add_column(ve%Eval2max,'Eval2max')
+               call eigfile%add_column(ve%Eval3max,'Eval3max')
+               call eigfile%add_column(ve%Eval1min,'Eval1min')
+               call eigfile%add_column(ve%Eval2min,'Eval2min')
+               call eigfile%add_column(ve%Eval3min,'Eval3min')
+               call eigfile%write()
+            end if
       end block create_monitor
       
    end subroutine simulation_init
@@ -564,63 +571,63 @@ contains
          
          ! Insert droplet
          if (.not.droplet_inserted) then
-           if (inj_evt%occurs()) then
-              ! Insert droplet
-              droplet_injection: block
-                 integer :: i,j,k
-                 call insert_drop(vf=vf)
-                 droplet_inserted=.true.
-                 do k=fs%cfg%kmin_,fs%cfg%kmax_
-                    do j=fs%cfg%jmin_,fs%cfg%jmax_
-                       do i=fs%cfg%imin_,fs%cfg%imax_
-                          if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
-                          if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
-                          if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
-                       end do
-                    end do
-                 end do
-                 call fs%cfg%sync(fs%U)
-                 call fs%cfg%sync(fs%V)
-                 call fs%cfg%sync(fs%W)
-              end block droplet_injection
+            if (inj_evt%occurs()) then
+               ! Insert droplet
+               droplet_injection: block
+                  integer :: i,j,k
+                  call insert_drop(vf=vf)
+                  droplet_inserted=.true.
+                  do k=fs%cfg%kmin_,fs%cfg%kmax_
+                     do j=fs%cfg%jmin_,fs%cfg%jmax_
+                        do i=fs%cfg%imin_,fs%cfg%imax_
+                           if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
+                           if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
+                           if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
+                        end do
+                     end do
+                  end do
+                  call fs%cfg%sync(fs%U)
+                  call fs%cfg%sync(fs%V)
+                  call fs%cfg%sync(fs%W)
+               end block droplet_injection
                ! Init confomration tensor
                init_conformation: block
-                  integer :: i,j,k
+                  integer :: i,j,k,nsc
                   if (stabilization) then 
-                     ! print *, 'about to init recSC1'
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_
                            do i=cfg%imino_,cfg%imaxo_
                               if (vf%VF(i,j,k).gt.0.0_WP) then
                                  ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                                 ! print *, 'in loop', ve%SCrec(i,j,k,1)
                                  ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
                                  ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
                               end if
                            end do
                         end do
                      end do
-                     ! Get eigenvalues and eigenvectors
-                     call ve%get_eigensystem(vf%VF)
-                  else
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              if (vf%VF(i,j,k).gt.0.0_WP) then
-                                 ve%SC(i,j,k,1)=1.0_WP  !< Cxx
-                                 ve%SC(i,j,k,4)=1.0_WP  !< Cyy
-                                 ve%SC(i,j,k,6)=1.0_WP  !< Czz
-                              end if
-                           end do
-                        end do
+                     ! Sync C field
+                     do nsc=1,6
+                        call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
                      end do
+                     ! do k=cfg%kmino_,cfg%kmaxo_
+                     !    do j=cfg%jmino_,cfg%jmaxo_
+                     !       do i=cfg%imino_,cfg%imaxo_
+                     !          if (vf%VF(i,j,k).gt.0.0_WP) then
+                     !             print *, 'post init', ve%SCrec(i,j,k,1)
+                     !          end if
+                     !       end do
+                     !    end do
+                     ! end do 
+                     call ve%get_eigensystem(vf%VF)
                   end if
                end block init_conformation
-           end if
+            end if
          end if
-
          
          ! Remember old VOF
          vf%VFold=vf%VF
+         vf_flux%VFold=vf_flux%VF
          
          ! Remember old velocity
          fs%Uold=fs%U
@@ -640,8 +647,22 @@ contains
          ! Prepare new staggered viscosity (at n+1)
 		   call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
 
-          ! Calculate grad(U)
+         ! Calculate grad(U)
          call fs%get_gradU(gradU)
+
+            ! check_conf_pre_adv: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'pre advance', ve%SCrec(i,j,k,1)
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_pre_adv
+
 
          if (droplet_inserted) then
             ! Transport our liquid conformation tensor using log conformation
@@ -671,24 +692,102 @@ contains
                end do
                ! Apply boundary conditions
                call ve%apply_bcond(time%t,time%dt)
+               ! do k=cfg%kmino_,cfg%kmaxo_
+               !    do j=cfg%jmino_,cfg%jmaxo_
+               !       do i=cfg%imino_,cfg%imaxo_
+               !          if (vf%VF(i,j,k).gt.0.0_WP) then
+               !             print *, 'post C', ve%SCrec(i,j,k,1)
+               !          end if
+               !       end do
+               !    end do
+               ! end do 
             end block advance_scalar
          end if
+
+         ! check_conf_pre: block
+         ! integer :: i,j,k
+         ! do k=cfg%kmino_,cfg%kmaxo_
+         !    do j=cfg%jmino_,cfg%jmaxo_
+         !       do i=cfg%imino_,cfg%imaxo_
+         !          if (vf%VF(i,j,k).gt.0.0_WP) then
+         !             print *, 'pre', ve%SCrec(i,j,k,1)
+         !          end if
+         !       end do
+         !    end do
+         ! end do 
+         ! end block check_conf_pre
+
+            ! check_conf_pre: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'pre add relaxation', ve%SCrec(i,j,k,1), ' timestep', time%n
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_pre
 
          if (stabilization.and.droplet_inserted) then 
             ! Get eigenvalues and eigenvectors
             call ve%get_eigensystem(vf_flux%VF)
             ! Reconstruct conformation tensor
             call ve%reconstruct_conformation(vf_flux%VF)
+
+            ! check_conf_post_rec: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'post reconstruct', ve%SCrec(i,j,k,1), ' timestep', time%n
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_post_rec
+
+
             ! Add in relaxtion source from semi-anlaytical integration
             call ve%get_relax_analytical(time%dt,vf_flux%VF)
+
+            ! check_conf_post: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'post add relaxation', ve%SCrec(i,j,k,1), ' timestep', time%n
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_post
+
             ! Reconstruct lnC for next time step
             !> get eigenvalues and eigenvectors based on reconstructed C
             call ve%get_eigensystem_SCrec(vf_flux%VF)
             !> Reconstruct lnC from eigenvalues and eigenvectors
             call ve%reconstruct_log_conformation(vf_flux%VF)
+            ! print *, 'in semi-analytical', ve%SCrec(1,1,1,1)
             ! Take exp(eigenvalues) to use in next time-step
             ve%eigenval=exp(ve%eigenval)
          end if
+
+         ! check_conf_post: block
+         ! integer :: i,j,k
+         ! do k=cfg%kmino_,cfg%kmaxo_
+         !    do j=cfg%jmino_,cfg%jmaxo_
+         !       do i=cfg%imino_,cfg%imaxo_
+         !          if (vf%VF(i,j,k).gt.0.0_WP) then
+         !             print *, 'post add relaxation', ve%SCrec(i,j,k,1), ' timestep', time%n
+         !          end if
+         !       end do
+         !    end do
+         ! end do 
+         ! end block check_conf_post
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -738,16 +837,6 @@ contains
                               end do
                            end do
                         end select 
-                     else
-                        ! select case (ve%model)
-                        ! case (oldroydb)
-                        !    ! Calculate the polymer stress
-                        !    call ve%get_relax(stress,time%dt)
-                        !    ! Build liquid stress tensor
-                        !    do nsc=1,6
-                        !       stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
-                        !    end do
-                        ! end select
                      end if
                   ! Interpolate tensor components to cell edges
                   do k=cfg%kmin_,cfg%kmax_+1
@@ -788,34 +877,34 @@ contains
             ! Add linear forcing term based on Bassenne et al. (2016)
             if (.not.droplet_inserted) then
                linear_forcing: block
-                 use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
-                 use parallel, only: MPI_REAL_WP
-                 real(WP) :: myTKE,A,myEPSp,EPSp
-                 integer :: i,j,k,ierr
-                 ! Calculate mean velocity
-                 call fs%cfg%integrate(A=fs%U,integral=meanU); meanU=meanU/fs%cfg%vol_total
-                 call fs%cfg%integrate(A=fs%V,integral=meanV); meanV=meanV/fs%cfg%vol_total
-                 call fs%cfg%integrate(A=fs%W,integral=meanW); meanW=meanW/fs%cfg%vol_total
-                 ! Calculate TKE and pseudo-EPS
-                 call fs%interp_vel(Ui,Vi,Wi)
-                 call fs%get_gradu(gradu=gradU)
-                 myTKE=0.0_WP; myEPSp=0.0_WP
-                 do k=fs%cfg%kmin_,fs%cfg%kmax_
-                    do j=fs%cfg%jmin_,fs%cfg%jmax_
-                       do i=fs%cfg%imin_,fs%cfg%imax_
-                          myTKE =myTKE +0.5_WP*((Ui(i,j,k)-meanU)**2+(Vi(i,j,k)-meanV)**2+(Wi(i,j,k)-meanW)**2)*fs%cfg%vol(i,j,k)
-                          myEPSp=myEPSp+fs%cfg%vol(i,j,k)*visc*(gradU(1,1,i,j,k)**2+gradU(1,2,i,j,k)**2+gradU(1,3,i,j,k)**2+&
-                          &                                     gradU(2,1,i,j,k)**2+gradU(2,2,i,j,k)**2+gradU(2,3,i,j,k)**2+&
-                          &                                     gradU(3,1,i,j,k)**2+gradU(3,2,i,j,k)**2+gradU(3,3,i,j,k)**2)
-                       end do
-                    end do
-                 end do
-                 call MPI_ALLREDUCE(myTKE ,TKE ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); TKE =TKE /fs%cfg%vol_total
-                 call MPI_ALLREDUCE(myEPSp,EPSp,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); EPSp=EPSp/fs%cfg%vol_total/rho
-                 A=(EPSp-Gdtau*(TKE-TKE0))/(2.0_WP*TKE)
-                 resU=resU+time%dt*(fs%U-meanU)*A*fs%rho_U
-                 resV=resV+time%dt*(fs%V-meanV)*A*fs%rho_V
-                 resW=resW+time%dt*(fs%W-meanW)*A*fs%rho_W
+                  use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+                  use parallel, only: MPI_REAL_WP
+                  real(WP) :: myTKE,A,myEPSp,EPSp
+                  integer :: i,j,k,ierr
+                  ! Calculate mean velocity
+                  call fs%cfg%integrate(A=fs%U,integral=meanU); meanU=meanU/fs%cfg%vol_total
+                  call fs%cfg%integrate(A=fs%V,integral=meanV); meanV=meanV/fs%cfg%vol_total
+                  call fs%cfg%integrate(A=fs%W,integral=meanW); meanW=meanW/fs%cfg%vol_total
+                  ! Calculate TKE and pseudo-EPS
+                  call fs%interp_vel(Ui,Vi,Wi)
+                  call fs%get_gradu(gradu=gradU)
+                  myTKE=0.0_WP; myEPSp=0.0_WP
+                  do k=fs%cfg%kmin_,fs%cfg%kmax_
+                     do j=fs%cfg%jmin_,fs%cfg%jmax_
+                        do i=fs%cfg%imin_,fs%cfg%imax_
+                           myTKE =myTKE +0.5_WP*((Ui(i,j,k)-meanU)**2+(Vi(i,j,k)-meanV)**2+(Wi(i,j,k)-meanW)**2)*fs%cfg%vol(i,j,k)
+                           myEPSp=myEPSp+fs%cfg%vol(i,j,k)*visc*(gradU(1,1,i,j,k)**2+gradU(1,2,i,j,k)**2+gradU(1,3,i,j,k)**2+&
+                           &                                     gradU(2,1,i,j,k)**2+gradU(2,2,i,j,k)**2+gradU(2,3,i,j,k)**2+&
+                           &                                     gradU(3,1,i,j,k)**2+gradU(3,2,i,j,k)**2+gradU(3,3,i,j,k)**2)
+                        end do
+                     end do
+                  end do
+                  call MPI_ALLREDUCE(myTKE ,TKE ,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); TKE =TKE /fs%cfg%vol_total
+                  call MPI_ALLREDUCE(myEPSp,EPSp,1,MPI_REAL_WP,MPI_SUM,fs%cfg%comm,ierr); EPSp=EPSp/fs%cfg%vol_total/rho
+                  A=(EPSp-Gdtau*(TKE-TKE0))/(2.0_WP*TKE)
+                  resU=resU+time%dt*(fs%U-meanU)*A*fs%rho_U
+                  resV=resV+time%dt*(fs%V-meanV)*A*fs%rho_V
+                  resW=resW+time%dt*(fs%W-meanW)*A*fs%rho_W
                end block linear_forcing
             end if
             
@@ -916,10 +1005,14 @@ contains
          ! Perform and output monitoring
          call compute_stats()
          call fs%get_max()
+         call vf%get_max()
          if (stabilization) then
-            call ve%get_max_reconstructed(vf_flux%VF)
+            call ve%get_max_reconstructed(vf%VF)
+            call ve%get_max(vf%VF)
+            call ve%get_max_eign(vf%VF)
+            call eigfile%write()
          else
-            call ve%get_max(vf_flux%VF)
+            call ve%get_max(vf%VF)
          end if
          call mfile%write()
          call cflfile%write()
