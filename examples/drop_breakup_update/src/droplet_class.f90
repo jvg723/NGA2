@@ -49,6 +49,8 @@ module droplet_class
       type(monitor)  :: scfile      !< Scalar monitoring
       type(monitor)  :: filmfile    !< Film monitoring
       type(monitor)  :: eigfile     !< Eigenvalue monitoring
+      integer        :: burst
+
       
       !> Work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW      !< Residuals
@@ -343,6 +345,7 @@ contains
          use mathtools, only: Pi
          initial_volume=4.0_WP/3.0_WP*Pi*0.5_WP**3
          call this%tm%initialize(cfg=this%cfg,vf=this%vf,fs=this%fs,lp=this%lp)
+         this%burst=merge(1,0,this%tm%burst)
       end block create_filmmodel
       
 
@@ -561,6 +564,7 @@ contains
          call this%filmfile%add_column(this%tm%film_volume,'Largest Film volume')
          call this%filmfile%add_column(this%tm%film_ratio,'Vb/V0')
          call this%filmfile%add_column(this%tm%converted_volume,'VOF-LPT Converted volume')
+         call this%filmfile%add_column(this%burst,'Burst indicator')
          call this%filmfile%add_column(this%tm%xL,'Droplet x-extent')
          call this%filmfile%add_column(this%tm%yL,'Droplet y-extent')
          call this%filmfile%add_column(this%tm%zL,'Droplet z-extent')
@@ -887,6 +891,7 @@ contains
 
       ! Calculate film stats
       call this%tm%transfer_vf_to_drops()
+      this%burst=merge(1,0,this%tm%burst)
       
       ! Perform and output monitoring
       call this%fs%get_max()

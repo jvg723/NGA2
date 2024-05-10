@@ -147,7 +147,8 @@ contains
       
       if (this%vf%reconstruction_method.eq.r2p) then
 
-         if (.not.this%burst) call this%breakup_film_instantaneous()
+         ! if (.not.this%burst) call this%breakup_film_instantaneous()
+         call this%breakup_film_instantaneous()
 
          ! if (this%burst) call this%breakup_ligament()
 
@@ -357,16 +358,16 @@ contains
       np_start=this%lp%np_  ! Remember old number of particles
       has_burst=.false.
 
-      ! do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
+      do m=this%cc%film_sync_offset+1,this%cc%film_sync_offset+this%cc%n_film
       
-      !    ! Skip non-liquid films
-      !    if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
+         ! Skip non-liquid films
+         if (this%cc%film_list(this%cc%film_map_(m))%phase.ne.1) cycle
       
-      !    ! Skip films that are still thick enough
-      !    if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.this%min_filmthickness) cycle
+         ! Skip films that are still thick enough
+         if (this%cc%film_list(this%cc%film_map_(m))%min_thickness.gt.this%min_filmthickness) cycle
 
-      !    ! We are still here: transfer the film to drops
-      !    has_burst=.true.
+         ! We are still here: transfer the film to drops
+         has_burst=.true.
       !    i=this%cc%film_list(this%cc%film_map_(m))%node(1,1)
       !    j=this%cc%film_list(this%cc%film_map_(m))%node(2,1)
       !    k=this%cc%film_list(this%cc%film_map_(m))%node(3,1)
@@ -469,14 +470,14 @@ contains
       !       end do
       !    end if
 
-      ! end do ! local films
+      end do ! local films
       
       ! ! Sync VF and clean up IRL and band
       ! call this%vf%cfg%sync(this%vf%VF)
       ! call this%vf%clean_irl_and_band()                  
 
-      ! ! Mark as burst if a film has burst
-      ! call MPI_ALLREDUCE(has_burst,this%burst,1,MPI_LOGICAL,MPI_LOR,this%cfg%comm,ierr)
+      ! Mark as burst if a film has burst
+      call MPI_ALLREDUCE(has_burst,this%burst,1,MPI_LOGICAL,MPI_LOR,this%cfg%comm,ierr)
 
       ! Clean up CCL
       call this%cc%deallocate_lists()
