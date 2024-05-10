@@ -1,15 +1,22 @@
 # Parallelization
 Partition :	1 1 8 
 
+# Are we using log conformation stabilzation 
+Stabilization : .true.
+
 # Mesh definition
 Lx : 5
 nx : 64
 
 # Droplet properties
 Droplet diameter :        0.8
-Droplet injection time :  2                ! is multiplied by eddy turnover-time
+Droplet injection time :  0.1                ! is multiplied by eddy turnover-time
 Weber number :            10
 Viscosity ratio :         1
+
+# Non-Newtonian modeling                      
+Polymer Concentration : 0.5  
+Weissenberg Number    : 1.0 
 
 # Time integration
 Max timestep size : 5e-3

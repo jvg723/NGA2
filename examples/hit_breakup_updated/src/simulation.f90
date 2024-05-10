@@ -1,24 +1,27 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
-   use precision,         only: WP
-   use geometry,          only: cfg,nx,Lx
-   use fft3d_class,       only: fft3d
-   use tpns_class,        only: tpns
-   use vfs_class,         only: vfs
-   use timetracker_class, only: timetracker
-   use ensight_class,     only: ensight
-   use surfmesh_class,    only: surfmesh
-   use stracker_class,    only: stracker
-   use event_class,       only: event
-   use monitor_class,     only: monitor
+   use precision,            only: WP
+   use geometry,             only: cfg,nx,Lx
+   use fft3d_class,          only: fft3d
+   use tpns_class,           only: tpns
+   use vfs_class,            only: vfs
+   use tpviscoelastic_class, only: tpviscoelastic
+   use timetracker_class,    only: timetracker
+   use ensight_class,        only: ensight
+   use surfmesh_class,       only: surfmesh
+   use stracker_class,       only: stracker
+   use event_class,          only: event
+   use monitor_class,        only: monitor
    implicit none
    private
    
    !> Single-phase incompressible flow solver, pressure and implicit solvers, and a time tracker
-   type(fft3d),       public :: ps
-   type(tpns),        public :: fs
-   type(timetracker), public :: time
-   type(vfs),         public :: vf
+   type(fft3d),          public :: ps
+   type(tpns),           public :: fs
+   type(timetracker),    public :: time
+   type(vfs),            public :: vf
+   type(vfs),            public :: vf_flux
+   type(tpviscoelastic), public :: ve
 
    !> Include structure tracker
    type(stracker) :: strack
@@ -29,15 +32,16 @@ module simulation
    type(surfmesh) :: smesh
   
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,hitfile,cvgfile
+   type(monitor) :: mfile,cflfile,hitfile,cvgfile,scfile
    
-   public :: simulation_init,simulation_run,simulation_final
+   public :: simulation_init,simulation_run,simulation_final,eigfile
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: SR
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    
    !> Fluid, forcing, and particle parameters
    real(WP) :: visc,rho,meanU,meanV,meanW
@@ -53,6 +57,9 @@ module simulation
    real(WP) :: Re_L,Re_lambda
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
+
+   !> Check for stabilization 
+   logical :: stabilization 
    
 
 contains
@@ -141,6 +148,8 @@ contains
          allocate(Vi           (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi           (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(SR       (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resSC    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SCtmp    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
@@ -201,9 +210,11 @@ contains
       
       ! Initialize our VOF solver
       create_vof: block
-         use vfs_class, only: elvira,remap_storage
+         use vfs_class, only: elvira,remap_storage,flux_storage
          ! Create a VOF solver with stored full-cell Lagrangian remap
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=remap_storage,name='VOF')
+         ! Create a VOF solver with detailed face flux stroage
+         call vf_flux%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF_flux')
       end block create_vof
       
       ! Create a single-phase flow solver without bconds
@@ -293,34 +304,128 @@ contains
       create_strack: block
          call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
       end block create_strack
+
+      ! Create a viscoleastic model with log conformation stablization method
+      create_viscoelastic: block
+         use tpviscoelastic_class, only: oldroydb
+         integer :: i,j,k
+         ! Create viscoelastic model solver
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         ! Relaxation time for polymer
+         call param_read('Weissenberg Number',ve%trelax);    ve%trelax=ve%trelax*taueta_tgt
+         ! Polymer viscosity
+         call param_read('Polymer Concentration',ve%visc_p); ve%visc_p=fs%visc_l*((1.00_WP-ve%visc_p)/ve%visc_p)
+         ! Setup without an implicit solver
+         call ve%setup()
+         ! Check first if we use stabilization
+         call param_read('Stabilization',stabilization,default=.false.)
+         ! Initialize C scalar fields
+         if (stabilization) then 
+            !> Allocate storage fo eigenvalues and vectors
+            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+            !> Allocate storage for reconstructured C and Cold
+            allocate(ve%SCrec(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
+         !    do k=cfg%kmino_,cfg%kmaxo_
+         !       do j=cfg%jmino_,cfg%jmaxo_
+         !          do i=cfg%imino_,cfg%imaxo_
+         !             if (vf%VF(i,j,k).gt.0.0_WP) then
+         !                ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+         !                ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+         !                ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         !    ! Get eigenvalues and eigenvectors
+         !    call ve%get_eigensystem(vf%VF)
+         ! else
+         !    do k=cfg%kmino_,cfg%kmaxo_
+         !       do j=cfg%jmino_,cfg%jmaxo_
+         !          do i=cfg%imino_,cfg%imaxo_
+         !             if (vf%VF(i,j,k).gt.0.0_WP) then
+         !                ve%SC(i,j,k,1)=1.0_WP  !< Cxx
+         !                ve%SC(i,j,k,4)=1.0_WP  !< Cyy
+         !                ve%SC(i,j,k,6)=1.0_WP  !< Czz
+         !             end if
+         !          end do
+         !       end do
+         !    end do
+         end if
+         ! Apply boundary conditions
+         call ve%apply_bcond(time%t,time%dt)
+      end block create_viscoelastic
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
-         ! Include an extra variable for structure id
-         smesh=surfmesh(nvar=1,name='plic')
+         ! Include an extra variable for number of planes
+         smesh=surfmesh(nvar=8,name='plic')
          smesh%varname(1)='id'
+         smesh%varname(2)='trC'
+         smesh%varname(3)='Cxx'
+         smesh%varname(4)='Cxy'
+         smesh%varname(5)='Cxz'
+         smesh%varname(6)='Cyy'
+         smesh%varname(7)='Cyz'
+         smesh%varname(8)='Czz'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
          smesh%var(1,:)=0.0_WP
+         smesh%var(2,:)=0.0_WP
+         smesh%var(3,:)=0.0_WP
+         smesh%var(4,:)=0.0_WP
+         smesh%var(5,:)=0.0_WP
+         smesh%var(6,:)=0.0_WP
+         smesh%var(7,:)=0.0_WP
+         smesh%var(8,:)=0.0_WP
          np=0
-         do k=vf%cfg%kmin_,vf%cfg%kmax_
-            do j=vf%cfg%jmin_,vf%cfg%jmax_
-               do i=vf%cfg%imin_,vf%cfg%imax_
-                  do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
-                     if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                     end if
+         if (stabilization) then
+            do k=vf%cfg%kmin_,vf%cfg%kmax_
+               do j=vf%cfg%jmin_,vf%cfg%jmax_
+                  do i=vf%cfg%imin_,vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                           smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                           smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                           smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                           smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                           smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                           smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                           smesh%var(8,np)=ve%SCrec(i,j,k,6)
+                        end if
+                     end do
                   end do
                end do
             end do
-         end do
+         else
+            do k=vf%cfg%kmin_,vf%cfg%kmax_
+               do j=vf%cfg%jmin_,vf%cfg%jmax_
+                  do i=vf%cfg%imin_,vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                           smesh%var(2,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
+                           smesh%var(3,np)=ve%SC(i,j,k,1)
+                           smesh%var(4,np)=ve%SC(i,j,k,2)
+                           smesh%var(5,np)=ve%SC(i,j,k,3)
+                           smesh%var(6,np)=ve%SC(i,j,k,4)
+                           smesh%var(7,np)=ve%SC(i,j,k,5)
+                           smesh%var(8,np)=ve%SC(i,j,k,6)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end if
       end block create_smesh
       
       ! Add Ensight output
       create_ensight: block
+         integer :: nsc
          ! Create Ensight output from cfg
          ens_out=ensight(cfg=cfg,name='HIT')
          ! Create event for Ensight output
@@ -334,16 +439,33 @@ contains
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('id',strack%id)
          call ens_out%add_surface('vofplic',smesh)
+         if (stabilization) then 
+            do nsc=1,ve%nscalar
+               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+            end do
+         else
+            do nsc=1,ve%nscalar
+               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
+            end do
+         end if
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
       
       ! Create a monitor file
       create_monitor: block
+         integer :: nsc
          ! Prepare some info about fields
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf_flux%VF)
+            call ve%get_max(vf_flux%VF)
+            call ve%get_max_eign(vf_flux%VF)
+         else
+            call ve%get_max(vf_flux%VF)
+         end if
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -399,6 +521,35 @@ contains
          call cvgfile%add_column(dx_eta,'dx/eta')
          call cvgfile%add_column(ell_Lx,'ell/Lx')
          call cvgfile%write()
+         ! Create scalar monitor
+         scfile=monitor(ve%cfg%amRoot,'scalar')
+         call scfile%add_column(time%n,'Timestep number')
+         call scfile%add_column(time%t,'Time')
+         if (stabilization) then
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+            end do
+         else
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_min')
+               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_max')
+            end do
+         end if
+         call scfile%write()
+         ! Create Eigenvalue monitor
+         if (stabilization) then
+            eigfile=monitor(ve%cfg%amRoot,'eigenvlaue')
+               call eigfile%add_column(time%n,'Timestep number')
+               call eigfile%add_column(time%t,'Time')
+               call eigfile%add_column(ve%Eval1max,'Eval1max')
+               call eigfile%add_column(ve%Eval2max,'Eval2max')
+               call eigfile%add_column(ve%Eval3max,'Eval3max')
+               call eigfile%add_column(ve%Eval1min,'Eval1min')
+               call eigfile%add_column(ve%Eval2min,'Eval2min')
+               call eigfile%add_column(ve%Eval3min,'Eval3min')
+               call eigfile%write()
+            end if
       end block create_monitor
       
    end subroutine simulation_init
@@ -439,11 +590,44 @@ contains
                   call fs%cfg%sync(fs%V)
                   call fs%cfg%sync(fs%W)
                end block droplet_injection
+               ! Init confomration tensor
+               init_conformation: block
+                  integer :: i,j,k,nsc
+                  if (stabilization) then 
+                     do k=cfg%kmino_,cfg%kmaxo_
+                        do j=cfg%jmino_,cfg%jmaxo_
+                           do i=cfg%imino_,cfg%imaxo_
+                              if (vf%VF(i,j,k).gt.0.0_WP) then
+                                 ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                                 ! print *, 'in loop', ve%SCrec(i,j,k,1)
+                                 ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                                 ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                              end if
+                           end do
+                        end do
+                     end do
+                     ! Sync C field
+                     do nsc=1,6
+                        call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
+                     end do
+                     ! do k=cfg%kmino_,cfg%kmaxo_
+                     !    do j=cfg%jmino_,cfg%jmaxo_
+                     !       do i=cfg%imino_,cfg%imaxo_
+                     !          if (vf%VF(i,j,k).gt.0.0_WP) then
+                     !             print *, 'post init', ve%SCrec(i,j,k,1)
+                     !          end if
+                     !       end do
+                     !    end do
+                     ! end do 
+                     call ve%get_eigensystem(vf%VF)
+                  end if
+               end block init_conformation
             end if
          end if
          
          ! Remember old VOF
          vf%VFold=vf%VF
+         vf_flux%VFold=vf_flux%VF
          
          ! Remember old velocity
          fs%Uold=fs%U
@@ -455,12 +639,155 @@ contains
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+         call vf_flux%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
          ! Advance stracker
          call strack%advance(make_label=label_liquid)
          
          ! Prepare new staggered viscosity (at n+1)
 		   call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
+
+         ! Calculate grad(U)
+         call fs%get_gradU(gradU)
+
+            ! check_conf_pre_adv: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'pre advance', ve%SCrec(i,j,k,1)
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_pre_adv
+
+
+         if (droplet_inserted) then
+            ! Transport our liquid conformation tensor using log conformation
+            advance_scalar: block
+               integer :: i,j,k,nsc
+               ! Add source terms for constitutive model
+               if (stabilization) then 
+                  ! Streching 
+                  call ve%get_CgradU_log(gradU,SCtmp,vf_flux%VFold); resSC=SCtmp
+                  ! Relxation
+                  ! call ve%get_relax_log(SCtmp,vf%VFold);             resSC=resSC+SCtmp
+               else
+                  ! Streching
+                  call ve%get_CgradU(gradU,SCtmp,vf_flux%VFold);    resSC=SCtmp
+                  ! Relxation
+                  call ve%get_relax(SCtmp,time%dt,vf_flux%VFold);   resSC=resSC+SCtmp
+               end if
+               ve%SC=ve%SC+time%dt*resSC
+               call ve%apply_bcond(time%t,time%dt)
+               ve%SCold=ve%SC
+               ! Explicit calculation of dSC/dt from scalar equation
+               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf_flux%VFold,VF=vf_flux%VF,detailed_face_flux=vf_flux%detailed_face_flux,dt=time%dt)
+               ! Update our scalars
+               do nsc=1,ve%nscalar
+                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf_flux%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf_flux%VF
+                  where (vf_flux%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+               end do
+               ! Apply boundary conditions
+               call ve%apply_bcond(time%t,time%dt)
+               ! do k=cfg%kmino_,cfg%kmaxo_
+               !    do j=cfg%jmino_,cfg%jmaxo_
+               !       do i=cfg%imino_,cfg%imaxo_
+               !          if (vf%VF(i,j,k).gt.0.0_WP) then
+               !             print *, 'post C', ve%SCrec(i,j,k,1)
+               !          end if
+               !       end do
+               !    end do
+               ! end do 
+            end block advance_scalar
+         end if
+
+         ! check_conf_pre: block
+         ! integer :: i,j,k
+         ! do k=cfg%kmino_,cfg%kmaxo_
+         !    do j=cfg%jmino_,cfg%jmaxo_
+         !       do i=cfg%imino_,cfg%imaxo_
+         !          if (vf%VF(i,j,k).gt.0.0_WP) then
+         !             print *, 'pre', ve%SCrec(i,j,k,1)
+         !          end if
+         !       end do
+         !    end do
+         ! end do 
+         ! end block check_conf_pre
+
+            ! check_conf_pre: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'pre add relaxation', ve%SCrec(i,j,k,1), ' timestep', time%n
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_pre
+
+         if (stabilization.and.droplet_inserted) then 
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf_flux%VF)
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation(vf_flux%VF)
+
+            ! check_conf_post_rec: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'post reconstruct', ve%SCrec(i,j,k,1), ' timestep', time%n
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_post_rec
+
+
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt,vf_flux%VF)
+
+            ! check_conf_post: block
+            ! integer :: i,j,k
+            ! do k=cfg%kmino_,cfg%kmaxo_
+            !    do j=cfg%jmino_,cfg%jmaxo_
+            !       do i=cfg%imino_,cfg%imaxo_
+            !          if (vf%VF(i,j,k).gt.0.0_WP) then
+            !             print *, 'post add relaxation', ve%SCrec(i,j,k,1), ' timestep', time%n
+            !          end if
+            !       end do
+            !    end do
+            ! end do 
+            ! end block check_conf_post
+
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec(vf_flux%VF)
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation(vf_flux%VF)
+            ! print *, 'in semi-analytical', ve%SCrec(1,1,1,1)
+            ! Take exp(eigenvalues) to use in next time-step
+            ve%eigenval=exp(ve%eigenval)
+         end if
+
+         ! check_conf_post: block
+         ! integer :: i,j,k
+         ! do k=cfg%kmino_,cfg%kmaxo_
+         !    do j=cfg%jmino_,cfg%jmaxo_
+         !       do i=cfg%imino_,cfg%imaxo_
+         !          if (vf%VF(i,j,k).gt.0.0_WP) then
+         !             print *, 'post add relaxation', ve%SCrec(i,j,k,1), ' timestep', time%n
+         !          end if
+         !       end do
+         !    end do
+         ! end do 
+         ! end block check_conf_post
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -475,6 +802,72 @@ contains
             
             ! Explicit calculation of drho*u/dt from NS
             call fs%get_dmomdt(resU,resV,resW)
+
+            if (droplet_inserted) then
+               ! Add polymer stress term
+               polymer_stress: block
+                  use tpviscoelastic_class, only: oldroydb
+                  integer :: i,j,k,nsc
+                  real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+                  real(WP), dimension(:,:,:,:), allocatable :: stress
+                  real(WP) :: coeff
+                  ! Allocate work arrays
+                  allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+                  allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+                  allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+                  allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+                  ! Calculate polymer stress for a given model
+                  stress=0.0_WP
+                     if (stabilization) then !< Build stress tensor from reconstructed C
+                        select case (ve%model)
+                        case (oldroydb)
+                           coeff=ve%visc_p/ve%trelax
+                           do k=cfg%kmino_,cfg%kmaxo_
+                              do j=cfg%jmino_,cfg%jmaxo_
+                                 do i=cfg%imino_,cfg%imaxo_
+                                    if (ve%mask(i,j,k).ne.0) cycle
+                                    if (vf_flux%VF(i,j,k).eq.0.0_WP) cycle
+                                    stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                                    stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                                    stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                                    stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                                    stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                                    stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                                 end do
+                              end do
+                           end do
+                        end select 
+                     end if
+                  ! Interpolate tensor components to cell edges
+                  do k=cfg%kmin_,cfg%kmax_+1
+                     do j=cfg%jmin_,cfg%jmax_+1
+                        do i=cfg%imin_,cfg%imax_+1
+                           Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+                           Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+                           Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+                        end do
+                     end do
+                  end do
+                  ! Add divergence of stress to residual
+                  do k=fs%cfg%kmin_,fs%cfg%kmax_
+                     do j=fs%cfg%jmin_,fs%cfg%jmax_
+                        do i=fs%cfg%imin_,fs%cfg%imax_
+                           if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                           &                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+                           &                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+                           if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                           &                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+                           &                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+                           if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                           &                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+                           &                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+                        end do
+                     end do
+                  end do
+                  ! Clean up
+                  deallocate(stress,Txy,Tyz,Tzx)
+               end block polymer_stress
+            end if
             
             ! Assemble explicit residual
             resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
@@ -558,18 +951,53 @@ contains
                call vf%update_surfmesh(smesh)
                ! Also populate id variable
                smesh%var(1,:)=0.0_WP
+               smesh%var(2,:)=0.0_WP
+               smesh%var(3,:)=0.0_WP
+               smesh%var(4,:)=0.0_WP
+               smesh%var(5,:)=0.0_WP
+               smesh%var(6,:)=0.0_WP
+               smesh%var(7,:)=0.0_WP
+               smesh%var(8,:)=0.0_WP
                np=0
-               do k=vf%cfg%kmin_,vf%cfg%kmax_
-                  do j=vf%cfg%jmin_,vf%cfg%jmax_
-                     do i=vf%cfg%imin_,vf%cfg%imax_
-                        do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
-                           if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                              np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                           end if
+               if (stabilization) then
+                  do k=vf%cfg%kmin_,vf%cfg%kmax_
+                     do j=vf%cfg%jmin_,vf%cfg%jmax_
+                        do i=vf%cfg%imin_,vf%cfg%imax_
+                           do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                              if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                                 np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                                 smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                                 smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                                 smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                                 smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                                 smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                                 smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                                 smesh%var(8,np)=ve%SCrec(i,j,k,6)
+                              end if
+                           end do
                         end do
                      end do
                   end do
-               end do
+               else
+                  do k=vf%cfg%kmin_,vf%cfg%kmax_
+                     do j=vf%cfg%jmin_,vf%cfg%jmax_
+                        do i=vf%cfg%imin_,vf%cfg%imax_
+                           do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                              if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                                 np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                                 smesh%var(2,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
+                                 smesh%var(3,np)=ve%SC(i,j,k,1)
+                                 smesh%var(4,np)=ve%SC(i,j,k,2)
+                                 smesh%var(5,np)=ve%SC(i,j,k,3)
+                                 smesh%var(6,np)=ve%SC(i,j,k,4)
+                                 smesh%var(7,np)=ve%SC(i,j,k,5)
+                                 smesh%var(8,np)=ve%SC(i,j,k,6)
+                              end if
+                           end do
+                        end do
+                     end do
+                  end do
+               end if
             end block update_smesh
             call ens_out%write_data(time%t)
          end if
@@ -577,8 +1005,18 @@ contains
          ! Perform and output monitoring
          call compute_stats()
          call fs%get_max()
+         call vf%get_max()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+            call ve%get_max(vf%VF)
+            call ve%get_max_eign(vf%VF)
+            call eigfile%write()
+         else
+            call ve%get_max(vf%VF)
+         end if
          call mfile%write()
          call cflfile%write()
+         call scfile%write()
          call hitfile%write()
          call cvgfile%write()
          
@@ -656,6 +1094,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU)
+      deallocate(resSC,SCtmp)
       
    end subroutine simulation_final
    
