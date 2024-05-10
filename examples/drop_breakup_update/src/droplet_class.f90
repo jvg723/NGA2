@@ -674,7 +674,7 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         Add polymer stress term
+         ! Add polymer stress term
          polymer_stress: block
             use tpviscoelastic_class, only: oldroydb,eptt
             integer :: i,j,k,nsc,n
