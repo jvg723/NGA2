@@ -75,12 +75,6 @@ contains
       end if
    end function label_liquid
 
-   !> Function that identifies if cell pairs have same label
-   !logical function same_label(i1,j1,k1,i2,j2,k2)
-   !   implicit none
-   !   integer, intent(in) :: i1,j1,k1,i2,j2,k2
-   !   same_label=.true.
-   !end function same_label
    
    !> Function that defines a level set function for a sphere
    function levelset_sphere(xyz,t) result(G)
@@ -88,9 +82,7 @@ contains
       real(WP), dimension(3),intent(in) :: xyz
       real(WP), intent(in) :: t
       real(WP) :: G
-      !G=radius-sqrt(sum((xyz-center)**2))
-      G=      radius-sqrt(sum((xyz-center+[-0.5_WP,-0.4_WP,0.0_WP])**2))
-      G=max(G,radius-sqrt(sum((xyz-center+[+0.5_WP,+0.4_WP,0.0_WP])**2)))
+      G=radius-sqrt(sum((xyz-center)**2))
    end function levelset_sphere
 
    !> Compute turbulence stats
@@ -274,6 +266,9 @@ contains
          do k=fs%cfg%kmin_,fs%cfg%kmax_
             do j=fs%cfg%jmin_,fs%cfg%jmax_
                do i=fs%cfg%imin_,fs%cfg%imax_
+                  fs%U(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  fs%V(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
+                  fs%W(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
                   fs%U(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
                   fs%V(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
                   fs%W(i,j,k)=random_normal(m=0.0_WP,sd=Urms0)
