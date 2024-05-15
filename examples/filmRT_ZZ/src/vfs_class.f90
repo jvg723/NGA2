@@ -981,7 +981,8 @@ contains
          ! Compute new liquid volume fraction
          lvol=getVolumePtr(my_SepVM,0)
          gvol=getVolumePtr(my_SepVM,1)
-         this%VF(i,j,k)=lvol/(lvol+gvol)
+         ! this%VF(i,j,k)=lvol/(lvol+gvol)
+         this%VF(i,j,k)=lvol/this%cfg%vol(i,j,k)
          
          ! Only work on higher order moments if VF is in [VFlo,VFhi]
          if (this%VF(i,j,k).lt.VFlo) then
@@ -994,7 +995,8 @@ contains
             this%Gbary(:,i,j,k)=getCentroidPtr(my_SepVM,1)/gvol
             ! Project then forward in time
             this%Lbary(:,i,j,k)=this%project(this%Lbary(:,i,j,k),i,j,k,dt,U,V,W)
-            this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
+            ! this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
+            this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))            
          end if
          
       end do

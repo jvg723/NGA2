@@ -176,6 +176,7 @@ module tpns_class
       procedure :: get_olddensity                         !< Calculate old density fields from subcell phasic volume data in a vfs object
       procedure :: solve_implicit                         !< Solve for the velocity residuals implicitly
       
+      procedure :: add_slipvel
       procedure :: addsrc_gravity                         !< Add gravitational body force
       procedure :: add_surface_tension_jump               !< Add surface tension jump
       procedure :: add_surface_tension_jump_thin          !< Add surface tension jump - thin region version
@@ -2038,6 +2039,227 @@ contains
    ! end subroutine add_surface_tension_jump_thin
    
    
+   ! Add slip velocity
+   subroutine add_slipvel(this,vf,Uslip,Vslip,Wslip,Hfilm)
+      use vfs_class, only: vfs
+      use mpi_f08
+      use parallel,   only: MPI_REAL_WP
+      implicit none
+      class(tpns), intent(inout) :: this
+      class(vfs),  intent(inout) :: vf     
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Uslip !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Vslip !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Wslip !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), intent(in) :: Hfilm
+      real(WP), dimension(:,:), allocatable ::  myLoc,Loc,Loc_perd, myEdgeN, EdgeN,EdgeN_perd
+      integer, dimension(:), allocatable :: Nedge_list
+      integer, dimension(:), allocatable :: dispels
+      integer :: i,j,k,n,ierr,myNedge,Nedge,count,index
+      real(WP) :: ratio,force_coeff,dx,c1,c2,r,e,threshold,dx_mult,del_smot,del_mult,scale1,scale2
+      real(WP),dimension(3) ::pos,ftemp,vel_temp
+      Uslip = 0.0_WP; Vslip = 0.0_WP; Wslip = 0.0_WP
+      ratio = 1.0_WP; threshold = 0.131_WP; dx_mult=1.0_WP; del_mult=0.2_WP
+
+      dx = dx_mult*maxval(this%cfg%dx); myNedge = 0; del_smot = del_mult*maxval(this%cfg%dx)
+      force_coeff = 0.5_WP*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio
+      ! First pass to identify the number of edge cell in the current processor
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               if (vf%edge_sensor(i,j,k).gt.threshold) then   
+                  myNedge = myNedge+1
+               end if
+            end do
+         end do
+      end do
+      ! Communicate the total number of edges to all processors
+      allocate(Nedge_list(0:this%cfg%nproc-1))
+      call MPI_AllGATHER(myNedge,1,MPI_INTEGER,Nedge_list,1,MPI_INTEGER,this%cfg%comm,ierr)
+      Nedge = sum(Nedge_list)
+      ! If there is an edge somewhere
+      if (Nedge .gt. 0) then 
+         allocate(myLoc(3,myNedge))
+         allocate(myEdgeN(3,myNedge))
+         myNedge = 0
+         ! Second pass to write down the the barycenters and the edge normal for cells with an edge
+         do k=this%cfg%kmin_,this%cfg%kmax_
+            do j=this%cfg%jmin_,this%cfg%jmax_
+               do i=this%cfg%imin_,this%cfg%imax_
+                  if (vf%edge_sensor(i,j,k).gt.threshold) then   
+                     myNedge = myNedge+1
+                     myLoc(:,myNedge) = vf%Lbary(:,i,j,k)
+                     myEdgeN(:,myNedge) = vf%edge_normal(:,i,j,k)
+                  end if
+               end do
+            end do
+         end do
+
+         allocate(dispels(0:this%cfg%nproc-1))
+         allocate(Loc(3,Nedge))
+         allocate(EdgeN(3,Nedge))
+
+         allocate(Loc_perd(3,Nedge*9))
+         allocate(EdgeN_perd(3,Nedge*9))
+
+         count = 0
+         do i = 0,this%cfg%nproc-1
+            dispels(i)= count
+            count = count+Nedge_list(i)
+         end do
+         ! Communicate source barycenters and edge normals
+         call MPI_ALLGATHERV(myLoc(1,:),myNedge,MPI_REAL_WP,Loc(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+         call MPI_ALLGATHERV(myLoc(2,:),myNedge,MPI_REAL_WP,Loc(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+         call MPI_ALLGATHERV(myLoc(3,:),myNedge,MPI_REAL_WP,Loc(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+         call MPI_ALLGATHERV(myEdgeN(1,:),myNedge,MPI_REAL_WP,EdgeN(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+         call MPI_ALLGATHERV(myEdgeN(2,:),myNedge,MPI_REAL_WP,EdgeN(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+         call MPI_ALLGATHERV(myEdgeN(3,:),myNedge,MPI_REAL_WP,EdgeN(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+
+         ! Copy for periodic boundary conditions
+         ! do i = 1,3 
+         !    do j = 1,3 
+         !       index = (j-1)*3+i
+         !       Loc_perd(:,1+(index-1)*Nedge:index*Nedge) = Loc
+         !       EdgeN_perd(:,1+(index-1)*Nedge:index*Nedge) = EdgeN
+         !       if (i.eq.1) Loc_perd(1:,1+(index-1)*Nedge:index*Nedge)=Loc_perd(1:,1+(index-1)*Nedge:index*Nedge)-this%cfg%xL
+         !       if (i.eq.3) Loc_perd(1:,1+(index-1)*Nedge:index*Nedge)=Loc_perd(1:,1+(index-1)*Nedge:index*Nedge)+this%cfg%xL
+         !       if (j.eq.1) Loc_perd(3:,1+(index-1)*Nedge:index*Nedge)=Loc_perd(3:,1+(index-1)*Nedge:index*Nedge)-this%cfg%zL
+         !       if (j.eq.3) Loc_perd(3:,1+(index-1)*Nedge:index*Nedge)=Loc_perd(3:,1+(index-1)*Nedge:index*Nedge)+this%cfg%zL
+         !    end do
+         ! end do
+
+         ! vel_temp = 0.0_WP
+         ! ftemp = EdgeN_perd(:,5*Nedge+1)
+         ! c1 =(2.0_WP*del_smot**2)/(del_smot**2)**(1.5_WP)
+         ! ftemp = force_coeff*((c1*ftemp))
+         ! vel_temp = vel_temp + ftemp 
+         ! do n =2, Nedge
+         !    pos = (Loc_perd(:,5*Nedge+1)-Loc_perd(:,n))/dx
+         !    ftemp = EdgeN_perd(:,n)
+         !    r = norm2(pos)
+         !    c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+         !    c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+         !    ftemp = force_coeff*((c1*ftemp) + c2*pos)
+         !    vel_temp = vel_temp + ftemp 
+         ! end do
+         ! scale1 = (sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm)))/norm2(vel_temp)
+         
+         ! force_coeff = force_coeff*scale1*ratio
+         ! ! Last pass to apply the sum of stokeslet
+         ! do k=this%cfg%kmin_,this%cfg%kmax_+1 
+         !    do j=this%cfg%jmin_,this%cfg%jmax_+1 
+         !       do i=this%cfg%imin_,this%cfg%imax_+1 
+         !          ! For each of edge, apply a contribution
+         !          do n =1, Nedge*9
+         !             pos = ([this%cfg%x(i),this%cfg%ym(j),this%cfg%zm(k)]-Loc_perd(:,n))/dx
+         !             ftemp = EdgeN_perd(:,n)
+         !             r = norm2(pos)
+         !             c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+         !             c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+         !             ftemp = force_coeff*((c1*ftemp) + c2*pos)
+         !             Uslip(i,j,k)=Uslip(i,j,k)+ftemp(1)
+
+         !             pos = ([this%cfg%xm(i),this%cfg%y(j),this%cfg%zm(k)]-Loc_perd(:,n))/dx
+         !             ftemp = EdgeN_perd(:,n)
+         !             r = norm2(pos)
+         !             c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+         !             c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+         !             ftemp = force_coeff*((c1*ftemp) + c2*pos)
+         !             Vslip(i,j,k)=Vslip(i,j,k)+ftemp(2)
+
+         !             ftemp = EdgeN_perd(:,n)
+         !             pos = ([this%cfg%xm(i),this%cfg%ym(j),this%cfg%z(k)]-Loc_perd(:,n))/dx
+         !             r = norm2(pos)
+         !             c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+         !             c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+         !             ftemp = force_coeff*((c1*ftemp) + c2*pos)
+         !             Wslip(i,j,k)=Wslip(i,j,k)+ftemp(3)
+         !          end do
+         !       end do
+         !    end do
+         ! end do
+         ! deallocate(myLoc,myEdgeN,dispels,Loc,EdgeN)
+         ! deallocate(Loc_perd, EdgeN_perd)
+
+
+         vel_temp = 0.0_WP
+         ftemp = EdgeN(:,1)
+         c1 =(2.0_WP*del_smot**2)/(del_smot**2)**(1.5_WP)
+         ftemp = force_coeff*((c1*ftemp))
+         vel_temp = vel_temp + ftemp 
+         do n =2, Nedge
+            pos = (Loc(:,1)-Loc(:,n))/dx
+            ftemp = EdgeN(:,n)
+            r = norm2(pos)
+            c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+            c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+            ftemp = force_coeff*((c1*ftemp) + c2*pos)
+            vel_temp = vel_temp + ftemp 
+         end do
+         scale1 = (sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm)))/norm2(vel_temp)
+         
+         force_coeff = force_coeff*scale1*ratio
+         ! Last pass to apply the sum of stokeslet
+         do k=this%cfg%kmin_,this%cfg%kmax_+1
+            do j=this%cfg%jmin_,this%cfg%jmax_+1
+               do i=this%cfg%imin_,this%cfg%imax_+1 
+                  ! For each of edge, apply a contribution
+                  do n =1, Nedge
+                     pos = ([this%cfg%x(i),this%cfg%ym(j),this%cfg%zm(k)]-Loc(:,n))/dx
+                     ftemp = EdgeN(:,n)
+                     r = norm2(pos)
+                     c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+                     c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+                     ftemp = force_coeff*((c1*ftemp) + c2*pos)
+                     Uslip(i,j,k)=Uslip(i,j,k)+ftemp(1)
+
+                     pos = ([this%cfg%xm(i),this%cfg%y(j),this%cfg%zm(k)]-Loc(:,n))/dx
+                     ftemp = EdgeN(:,n)
+                     r = norm2(pos)
+                     c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+                     c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+                     ftemp = force_coeff*((c1*ftemp) + c2*pos)
+                     Vslip(i,j,k)=Vslip(i,j,k)+ftemp(2)
+
+                     ftemp = EdgeN(:,n)
+                     pos = ([this%cfg%xm(i),this%cfg%ym(j),this%cfg%z(k)]-Loc(:,n))/dx
+                     r = norm2(pos)
+                     c1 =(r**2+2.0_WP*del_smot**2)/(r**2+del_smot**2)**(1.5_WP)
+                     c2 = dot_product(ftemp,pos)/(r**2+del_smot**2)**(1.5_WP)
+                     ftemp = force_coeff*((c1*ftemp) + c2*pos)
+                     Wslip(i,j,k)=Wslip(i,j,k)+ftemp(3)
+                  end do
+               end do
+            end do
+         end do
+         deallocate(myLoc,myEdgeN,dispels,Loc,EdgeN)
+         deallocate(Loc_perd, EdgeN_perd)
+
+      end if
+      deallocate(Nedge_list)
+      ! Simple interpolation of edge velocities to each face
+      ! do k=this%cfg%kmin_,this%cfg%kmax_
+      !    do j=this%cfg%jmin_,this%cfg%jmax_
+      !       do i=this%cfg%imin_,this%cfg%imax_
+      !          if (vf%edge_sensor(i,j,k).gt.threshold) then
+      !             Uslip(i  ,j,k) = Uslip(i  ,j,k) + 0.5_WP*vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio*2.0_WP
+      !             Uslip(i+1,j,k) = Uslip(i+1,j,k) + 0.5_WP*vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio*2.0_WP
+
+      !             Vslip(i,j  ,k) = Vslip(i,j  ,k) + 0.5_WP*vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio*2.0_WP
+      !             Vslip(i,j+1,k) = Vslip(i,j+1,k) + 0.5_WP*vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio*2.0_WP
+
+      !             Wslip(i,j,k  ) = Wslip(i,j,k  ) + 0.5_WP*vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio*2.0_WP
+      !             Wslip(i,j,k+1) = Wslip(i,j,k+1) + 0.5_WP*vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))*ratio*2.0_WP
+      !          end if
+      !       end do
+      !    end do
+      ! end do
+      call this%cfg%sync(Uslip)
+      call this%cfg%sync(Vslip)
+      call this%cfg%sync(Wslip)
+
+   end subroutine add_slipvel
+
+
    !> Calculate the pressure gradient based on P
    subroutine get_pgrad(this,P,Pgradx,Pgrady,Pgradz)
       implicit none
