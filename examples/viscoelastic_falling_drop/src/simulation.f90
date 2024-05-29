@@ -58,7 +58,7 @@ contains
       real(WP), intent(in) :: t
       real(WP) :: G
       ! Create the bubble
-      G=-radius+sqrt(sum((xyz-center)**2))
+      G=radius-sqrt(sum((xyz-center)**2))
    end function levelset_rising_bubble
    
    
