@@ -30,6 +30,11 @@ module simulation
    
    !> Simulation monitor file
    type(monitor) :: mfile,cflfile,bubblefile,scfile,eigfile
+
+   !> For time trackers
+   real(WP)      :: tpscalar_advance_timer
+   real(WP)      :: step_timer
+   type(monitor) :: timerfile !< File for timers
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -571,6 +576,14 @@ contains
             call eigfile%add_column(ve%Eval3min,'Eval3min')
             call eigfile%write()
          end if
+         ! Create object time tracker monitor
+         timerfile=monitor(fs%cfg%amRoot,'rising_bubble_timers')
+         call timerfile%add_column(time%n,'Timestep number')
+         call timerfile%add_column(time%t,'Simulation Time')
+         call timerfile%add_column(cfg%nproc, 'Num of Proc')
+         call timerfile%add_column(tpscalar_advance_timer,'tpscalar time')
+         call timerfile%add_column(step_timer, 'step time')
+         call timerfile%write()
       end block create_monitor
         
    end subroutine simulation_init
@@ -579,10 +592,17 @@ contains
    !> Perform an NGA2 simulation
    subroutine simulation_run
       use tpns_class, only: harmonic_visc, arithmetic_visc
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+      use parallel, only: MPI_REAL_WP
       implicit none
+      real(WP) :: starttime_step,endtime_step,my_time_step
+      integer  :: ierr
       
       ! Perform time integration
       do while (.not.time%done())
+
+         ! Start time step timer
+         starttime_step=mpi_wtime()
          
          ! Increment time
          call fs%get_cfl(time%dt,time%cfl)
@@ -632,6 +652,10 @@ contains
 
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
+            use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+            use parallel, only: MPI_REAL_WP
+            real(WP) :: starttime,endtime,my_time
+            integer :: ierr
             integer :: i,j,k,nsc
             ! Add source terms for constitutive model
             if (stabilization) then 
@@ -647,6 +671,8 @@ contains
             end if
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
+            tpscalar_advance_timer=0.0_WP
+            starttime=MPI_WTIME()
             ve%SCold=ve%SC
             ! Explicit calculation of dSC/dt from scalar equation
             call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
@@ -655,6 +681,12 @@ contains
                where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
+            endtime=MPI_WTIME()
+            my_time=endtime-starttime
+            ! Reduce time to get total sum time across all processors
+            call MPI_ALLREDUCE(my_time,tpscalar_advance_timer,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+            ! Find average wall time
+            tpscalar_advance_timer=tpscalar_advance_timer/cfg%nproc
             ! Apply boundary conditions
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
@@ -893,6 +925,13 @@ contains
          ! Get rise velocity
          call rise_vel()
 
+         ! End time step timer
+         endtime_step=mpi_wtime()
+         my_time_step=endtime_step-starttime_step
+
+         ! Reduce time to get total sum time across all processors
+         call MPI_ALLREDUCE(my_time_step,step_timer,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
@@ -908,6 +947,7 @@ contains
          call cflfile%write()
          call bubblefile%write()
          call scfile%write()
+         call timerfile%write()
          
       end do
       
