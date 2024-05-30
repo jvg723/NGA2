@@ -269,6 +269,7 @@ contains
          ! Initialize a bubble
          call param_read('Bubble position',center,default=[0.0_WP,0.0_WP,0.0_WP])
          call param_read('Bubble volume',radius); radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)
+         print *, radius
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -345,8 +346,8 @@ contains
          call param_read('Gravity',gravity); fs%gravity=gravity
          ! Dirichlet inflow at the top and clipped Neumann outflow at the bottom
          if (moving_domain) then
-            call fs%add_bcond(name='inflow'     ,type=dirichlet      ,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
-            call fs%add_bcond(name='outflow'    ,type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=ym_locator)
+            call fs%add_bcond(name='inflow'     ,type=dirichlet      ,face='y',dir=+1,canCorrect=.false.,locator=ym_locator)
+            call fs%add_bcond(name='outflow'    ,type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=yp_locator)
          end if
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
@@ -379,8 +380,6 @@ contains
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',ve%visc_p)
-         ! Maximum polymer extensibility
-         call param_read('Maximum polymer extensibility', ve%Lmax)
          ! Extensional viscosity parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%elongvisc)
          ! Affine parameter (ePTT)
@@ -713,62 +712,6 @@ contains
                stress=0.0_WP
                if (stabilization) then !< Build stress tensor from reconstructed C
                   select case (ve%model)
-                  case (oldroydb)
-                     coeff=ve%visc_p/ve%trelax
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do
-                        end do
-                     end do
-                  case (fenecr)
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              !>Trace of reconstructed conformation tensor
-                              trace=ve%eigenval(1,i,j,k)*ve%eigenvec(1,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(1,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(1,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(2,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(2,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(2,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(3,1,i,j,j)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(3,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(3,3,i,j,k)**2
-                              !>Relaxation function coefficent
-                              coeff=1.00_WP/(1.0_WP-trace/ve%Lmax**2)
-                              coeff=coeff/ve%trelax
-                              coeff=ve%visc_p*coeff
-                              ! Build stress tensor
-                              stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do
-                        end do
-                     end do
-                  case (fenep)
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              !>Trace of reconstructed conformation tensor
-                              trace=ve%eigenval(1,i,j,k)*ve%eigenvec(1,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(1,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(1,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(2,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(2,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(2,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(3,1,i,j,j)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(3,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(3,3,i,j,k)**2
-                              !>Relaxation function coefficent
-                              coeff=(ve%Lmax**2-3.00_WP)/(ve%Lmax**2-trace)
-                              ! Build stress tensor
-                              stress(i,j,k,1)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do 
-                        end do
-                     end do
                   case (eptt,lptt)
                      coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
                      do k=cfg%kmino_,cfg%kmaxo_
