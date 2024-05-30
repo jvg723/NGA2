@@ -345,8 +345,8 @@ contains
          call param_read('Gravity',gravity); fs%gravity=gravity
          ! Dirichlet inflow at the top and clipped Neumann outflow at the bottom
          if (moving_domain) then
-            call fs%add_bcond(name='inflow'     ,type=dirichlet      ,face='y',dir=+1,canCorrect=.false.,locator=ym_locator)
-            call fs%add_bcond(name='outflow'    ,type=clipped_neumann,face='y',dir=-1,canCorrect=.true. ,locator=yp_locator)
+            call fs%add_bcond(name='inflow'     ,type=dirichlet      ,face='y',dir=+1,canCorrect=.true.,locator=ym_locator)
+            call fs%add_bcond(name='outflow'    ,type=clipped_neumann,face='y',dir=-1,canCorrect=.false. ,locator=yp_locator)
          end if
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
