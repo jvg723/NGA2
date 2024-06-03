@@ -10,10 +10,10 @@ Stabilization : .true.
 # Mesh definition
 Lx :	0.02949
 Ly :	0.02949
-Lz :	0.0002949
-nx :	128
-ny :	128
-nz :	1
+Lz :	0.02949
+nx :	64
+ny :	64
+nz :	64
 
 # Fluid properties
 Gravity :                     0 -9.81 0
