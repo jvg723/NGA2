@@ -12,6 +12,7 @@ module simulation
    use stracker_class,    only: stracker
    use event_class,       only: event
    use monitor_class,     only: monitor
+   use pardata_class,     only: pardata
    implicit none
    private
    
@@ -28,7 +29,7 @@ module simulation
  
    !> Ensight postprocessing
    type(ensight)  :: ens_out
-   type(event)    :: ens_evt,inj_evt
+   type(event)    :: ens_evt,inj_evt,drop_evt
    type(surfmesh) :: smesh
   
    !> Simulation monitor file
@@ -51,7 +52,13 @@ module simulation
    real(WP) :: tauinf,G,Gdtau,Gdtaui,dx
    real(WP), dimension(3) :: center
    real(WP) :: radius
-
+   logical  :: droplet_injected
+   logical  :: keep_forcing
+   
+   !> Provide a pardata objects for restarts
+   type(pardata) :: df
+   logical :: restarted
+   
    !> For monitoring
    real(WP) :: EPS
    real(WP) :: Re_L,Re_lambda
@@ -133,6 +140,41 @@ contains
       
    end subroutine compute_stats
    
+   !> Perform droplet analysis
+   subroutine analyse_drops()
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
+      use mathtools, only: Pi
+      use string,    only: str_medium
+      use filesys,   only: makedir,isdir
+      character(len=str_medium) :: filename,timestamp
+      real(WP), dimension(:), allocatable :: dvol
+      integer :: iunit,n,m,ierr
+      ! Allocate droplet volume array
+      allocate(dvol(1:strack%nstruct)); dvol=0.0_WP
+      ! Loop over individual structures
+      do n=1,strack%nstruct
+         ! Loop over cells in structure and accumulate volume
+         do m=1,strack%struct(n)%n_
+            dvol(n)=dvol(n)+cfg%vol(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))*&
+            &                 vf%VF(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))
+         end do
+      end do
+      ! Reduce volume data
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,strack%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      ! Only root process outputs to a file
+      if (cfg%amRoot) then
+         if (.not.isdir('diameter')) call makedir('diameter')
+         filename='diameter_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         do n=1,strack%nstruct
+            ! Output list of diameters
+            write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+         end do
+         close(iunit)
+      end if
+   end subroutine analyse_drops
+   
    
    !> Initialization of problem solver
    subroutine simulation_init
@@ -157,7 +199,8 @@ contains
       initialize_timetracker: block
          time=timetracker(amRoot=cfg%amRoot)
          call param_read('Max timestep size',time%dtmax)
-         call param_read('Max cfl number',time%cflmax)
+         call param_read('Max cfl number',time%cflmax,default=time%cflmax)
+         call param_read('Max time',time%tmax)
          time%dt=time%dtmax
          time%itmax=2
       end block initialize_timetracker
@@ -202,10 +245,6 @@ contains
          call param_read('Forcing constant',G,default=max_forcing_estimate)
          Gdtau =G/tauinf
          Gdtaui=1.0_WP/Gdtau
-         ! Read in droplet injection time (in terms of eddy turnover)
-         call param_read('Droplet injection time',inject_time,default=1.0_WP); inject_time=inject_time*tauinf
-         ! Create event for droplet injection
-         inj_evt=event(time=time,name='Droplet injection'); inj_evt%tper=inject_time
       end block initialize_hit
       
       ! Initialize our VOF solver
@@ -244,9 +283,10 @@ contains
          use random,    only: random_normal
          use param,     only: param_exists
          use mathtools, only: Pi
-         use string,    only: str_long
+         use string,    only: str_long,str_medium
          use messager,  only: die,log
          character(str_long) :: message
+         character(len=str_medium) :: filename
          integer :: i,j,k
          ! Print out some expected turbulence properties
          if (fs%cfg%amRoot) then
@@ -539,6 +579,13 @@ contains
          end if
          call scfile%write()
       end block create_monitor
+
+      ! Initialize an event for drop size analysis
+      drop_analysis: block
+         drop_evt=event(time=time,name='Drop analysis')
+         call param_read('Drop analysis period',drop_evt%tper)
+         if (drop_evt%occurs()) call analyse_drops()
+      end block drop_analysis
       
    end subroutine simulation_init
    
@@ -547,7 +594,6 @@ contains
    subroutine simulation_run
       use tpns_class, only: arithmetic_visc
       implicit none
-      logical :: droplet_inserted=.false.
       
       ! Perform time integration
       do while (.not.time%done())
@@ -781,7 +827,7 @@ contains
             resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
             
             ! Add linear forcing term based on Bassenne et al. (2016)
-            if (.not.droplet_inserted) then
+            if (.not.droplet_injected.or.keep_forcing) then
                linear_forcing: block
                  use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
                  use parallel, only: MPI_REAL_WP
@@ -908,6 +954,9 @@ contains
             call ens_out%write_data(time%t)
          end if
          
+         ! Analyse droplets
+         if (drop_evt%occurs()) call analyse_drops()
+         
          ! Perform and output monitoring
          call compute_stats()
          call fs%get_max()
@@ -926,21 +975,36 @@ contains
       
    end subroutine simulation_run
    
-   ! Initialize our VOF field
-   subroutine insert_drop(vf)
+   !> Introduce droplet in domain
+   !! 1- The current flow field is stored
+   !! 2- The droplet is created
+   !! 3- The velocity field in the drop is zeroed out
+   !! 4- The droplet_injected flag is set to true
+   subroutine inject_drop()
       use mms_geom, only: cube_refine_vol
       use vfs_class,only: VFhi,VFlo
       use param,    only: param_read
+      use messager, only: log
       implicit none
-      class(vfs), intent(inout) :: vf
       integer :: i,j,k,n,si,sj,sk
       real(WP), dimension(3,8) :: cube_vertex
       real(WP), dimension(3) :: v_cent,a_cent
       real(WP) :: vol,area
       integer, parameter :: amr_ref_lvl=5
-      ! Initialize droplet parameters
-      call param_read('Droplet diameter',radius); radius=0.5_WP*radius
-      call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
+      
+      ! Output current velocity field to the disk
+      if (.not.restarted) then
+         call df%initialize(pg=cfg,iopartition=[cfg%npx,cfg%npy,cfg%npz],filename='turb.file',nval=2,nvar=4)
+         df%valname=['dt','t ']; df%varname=['U','V','W','P']
+         call df%push(name='t' ,val=time%told)
+         call df%push(name='dt',val=time%dtold)
+         call df%push(name='U' ,var=fs%U)
+         call df%push(name='V' ,var=fs%V)
+         call df%push(name='W' ,var=fs%W)
+         call df%push(name='P' ,var=fs%P)
+         call df%write()
+      end if
+      
       ! Initialize droplet
       do k=vf%cfg%kmino_,vf%cfg%kmaxo_
          do j=vf%cfg%jmino_,vf%cfg%jmaxo_
@@ -982,7 +1046,26 @@ contains
       call vf%get_curvature()
       ! Reset moments to guarantee compatibility with interface reconstruction
       call vf%reset_volume_moments()
-   end subroutine insert_drop
+      
+      ! Zero out the velocity field in the drop
+      do k=fs%cfg%kmin_,fs%cfg%kmax_
+         do j=fs%cfg%jmin_,fs%cfg%jmax_
+            do i=fs%cfg%imin_,fs%cfg%imax_
+               if (maxval(vf%VF(i-1:i,j,k)).gt.0.0_WP) fs%U(i,j,k)=0.0_WP
+               if (maxval(vf%VF(i,j-1:j,k)).gt.0.0_WP) fs%V(i,j,k)=0.0_WP
+               if (maxval(vf%VF(i,j,k-1:k)).gt.0.0_WP) fs%W(i,j,k)=0.0_WP
+            end do
+         end do
+      end do
+      call fs%cfg%sync(fs%U)
+      call fs%cfg%sync(fs%V)
+      call fs%cfg%sync(fs%W)
+      
+      ! Set the drop to injected status
+      droplet_injected=.true.
+      call log('Droplet injected!')
+      
+   end subroutine inject_drop
    
    !> Finalize the NGA2 simulation
    subroutine simulation_final

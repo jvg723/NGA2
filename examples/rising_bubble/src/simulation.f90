@@ -45,9 +45,9 @@ module simulation
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
-   logical :: moving_domain
-   real(WP), dimension(3) :: center,gravity
-   real(WP) :: volume,radius,Ycent,Vrise
+   logical :: moving_domain,second_bubble
+   real(WP), dimension(3) :: center,center2,gravity
+   real(WP) :: volume,radius,radius2,Ycent,Vrise
    real(WP) :: Vin,Vin_old,Vrise_ref,Ycent_ref,G,ti
 
    !> Check for stabilization 
@@ -64,6 +64,7 @@ contains
       real(WP) :: G
       ! Create the bubble
       G=-radius+sqrt(sum((xyz-center)**2))
+      if (second_bubble) G=min(G,-radius2+sqrt(sum((xyz-center2)**2)))
    end function levelset_rising_bubble
    
    
@@ -225,7 +226,7 @@ contains
    
    !> Initialization of problem solver
    subroutine simulation_init
-      use param, only: param_read
+      use param, only: param_read,param_exists
       implicit none
       
 
@@ -271,9 +272,19 @@ contains
          ! Create a VOF solver
          call vf%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF')
          !vf%cons_correct=.false.
+         !vf%thin_thld_max=1.5_WP
+         vf%twoplane_thld2=0.8_WP
          ! Initialize a bubble
          call param_read('Bubble position',center,default=[0.0_WP,0.0_WP,0.0_WP])
          call param_read('Bubble volume',radius); radius=(radius*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)
+         ! Add a second one if needed
+         second_bubble=param_exists('Bubble 2 position')
+         if (second_bubble) then
+            call param_read('Bubble 2 position',center2)
+            call param_read('Bubble 2 volume',radius2,default=4.0_WP/3.0_WP*Pi*radius**3)
+            radius2=(radius2*3.0_WP/(4.0_WP*Pi))**(1.0_WP/3.0_WP)
+         end if
+         ! Generate interface
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
@@ -355,7 +366,7 @@ contains
          end if
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
-         ps%maxlevel=12
+         !ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
@@ -894,7 +905,8 @@ contains
             call fs%update_laplacian()
             call fs%correct_mfr()
             call fs%get_div()
-            call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
+            !call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
+            call fs%add_surface_tension_jump_thin(dt=time%dt,div=fs%div,vf=vf)
             fs%psolv%rhs=-fs%cfg%vol*fs%div/time%dt
             fs%psolv%sol=0.0_WP
             call fs%psolv%solve()
