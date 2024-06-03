@@ -273,11 +273,15 @@ contains
          use tpviscoelastic_class, only: eptt,oldroydb
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call this%ve%init(cfg=this%cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call this%ve%init(cfg=this%cfg,phase=0,model=eptt,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',this%ve%trelax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',this%ve%visc_p);
+         ! Extensional viscosity parameter (ePTT)
+         call param_read('Extensional viscosity parameter',this%ve%elongvisc)
+         ! Affine parameter (ePTT)
+         call param_read('Extensional viscosity parameter',this%ve%affinecoeff)
          ! Setup without an implicit solver
          call this%ve%setup()
          ! Check first if we use stabilization
@@ -699,6 +703,22 @@ contains
                   do k=this%cfg%kmino_,this%cfg%kmaxo_
                      do j=this%cfg%jmino_,this%cfg%jmaxo_
                         do i=this%cfg%imino_,this%cfg%imaxo_
+                           stress(i,j,k,1)=coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                           stress(i,j,k,2)=coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                           stress(i,j,k,3)=coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                           stress(i,j,k,4)=coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                           stress(i,j,k,5)=coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                           stress(i,j,k,6)=coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                        end do
+                     end do
+                  end do
+                  case (eptt)
+                  coeff=this%ve%visc_p/(this%ve%trelax*(1-this%ve%affinecoeff))
+                  do k=this%cfg%kmino_,this%cfg%kmaxo_
+                     do j=this%cfg%jmino_,this%cfg%jmaxo_
+                        do i=this%cfg%imino_,this%cfg%imaxo_
+                           if (this%ve%mask(i,j,k).ne.0) cycle
+                           if (this%vf%VF(i,j,k).eq.0.0_WP) cycle
                            stress(i,j,k,1)=coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
                            stress(i,j,k,2)=coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
                            stress(i,j,k,3)=coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component

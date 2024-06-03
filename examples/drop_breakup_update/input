@@ -23,7 +23,9 @@ Turbulence intensity : 0.019
 
 # Non-Newtonian modeling                      
 Polymer viscosity       : 0.0137  
-Polymer relaxation time : 0.0476 
+Polymer relaxation time : 0.0476
+Extensional viscosity parameter : 0.5
+Affine parameter                : 0.12 
 
 # Time integration
 Max timestep size : 2.5e-3
