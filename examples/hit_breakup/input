@@ -1,21 +1,19 @@
 # Parallelization
-Partition :	1 1 1 
-
-# Are we using log conformation stabilzation 
-Stabilization : .true.
+Partition :	1 1 8 
 
 # Mesh definition
 Lx : 5
-nx : 64
+nx : 192
 
 # Droplet properties
 Droplet diameter :        0.8
 Weber number :            10
-Viscosity ratio :         1
+Viscosity ratio :         10
 
-# Non-Newtonian modeling                      
-Polymer Concentration : 0.5  
-Weissenberg Number    : 1.0 
+# Turbulence file
+Keep forcing :            .true.            ! does forcing continue after injection
+Turbulence file :         hit.192           ! file from which to restart
+Droplet injection time :  0                 ! is multiplied by eddy turnover-time
 
 # Time integration
 Max timestep size : 2.5e-3
