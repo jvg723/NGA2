@@ -591,31 +591,8 @@ contains
          call time%increment()
          
          ! Inject droplet
-         if (.not.droplet_injected.and.inj_evt%occurs()) then 
-            call inject_drop()
-            ! Init confomration tensor
-            init_conformation: block
-               integer :: i,j,k,nsc
-               if (stabilization) then 
-                  do k=cfg%kmino_,cfg%kmaxo_
-                     do j=cfg%jmino_,cfg%jmaxo_
-                        do i=cfg%imino_,cfg%imaxo_
-                           if (vf%VF(i,j,k).gt.0.0_WP) then
-                              ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                              ! print *, 'in loop', ve%SCrec(i,j,k,1)
-                              ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-                              ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-                           end if
-                        end do
-                     end do
-                  end do
-                  ! Sync C field
-                  do nsc=1,6
-                     call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
-                  end do
-               end if
-            end block init_conformation
-         end if
+         if (.not.droplet_injected.and.inj_evt%occurs()) call inject_drop()
+
          
          ! Remember old VOF
          vf%VFold=vf%VF
@@ -987,6 +964,29 @@ contains
       call fs%cfg%sync(fs%U)
       call fs%cfg%sync(fs%V)
       call fs%cfg%sync(fs%W)
+
+      ! Init confomration tensor
+      init_conformation: block
+         integer :: i,j,k,nsc
+         if (stabilization) then 
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                        ! print *, 'in loop', ve%SCrec(i,j,k,1)
+                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+            ! Sync C field
+            do nsc=1,6
+               call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
+            end do
+         end if
+      end block init_conformation
       
       ! Set the drop to injected status
       droplet_injected=.true.
