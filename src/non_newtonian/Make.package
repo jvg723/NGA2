@@ -1,4 +1,4 @@
-f90EXE_sources += carreau_class.f90 viscoelastic_class.f90
+f90EXE_sources += carreau_class.f90 
 
 ifeq ($(filter two_phase,$(Bdirs)),two_phase)
   f90EXE_sources += tpviscoelastic_class.f90

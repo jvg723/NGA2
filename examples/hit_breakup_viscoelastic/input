@@ -1,5 +1,8 @@
 # Parallelization
-Partition :	1 1 8 
+Partition :	1 1 8
+
+# Are we using log conformation stabilzation 
+Stabilization : .true.
 
 # Mesh definition
 Lx : 5
@@ -9,6 +12,10 @@ nx : 96
 Droplet diameter :        0.8
 Weber number :            10
 Viscosity ratio :         10
+
+# Non-Newtonian modeling                      
+Polymer Concentration : 0.5  
+Weissenberg Number    : 1.0 
 
 # Turbulence file
 Keep forcing :            .true.            ! does forcing continue after injection
