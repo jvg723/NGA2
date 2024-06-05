@@ -21,7 +21,6 @@ module simulation
    type(tpns),           public :: fs
    type(timetracker),    public :: time
    type(vfs),            public :: vf
-   type(vfs),            public :: vf_flux
    type(tpviscoelastic), public :: ve
 
    !> Include structure tracker
@@ -245,9 +244,9 @@ contains
       
       ! Initialize our VOF solver
       create_vof: block
-         use vfs_class, only: lvira,elvira,plicnet,remap_storage
+         use vfs_class, only: lvira,elvira,plicnet,remap_storage,flux_storage
          ! Create a VOF solver with stored full-cell Lagrangian remap
-         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=remap_storage,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=flux_storage,name='VOF')
          ! Initialize droplet parameters
          call param_read('Droplet diameter',radius); radius=0.5_WP*radius
          call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
@@ -358,23 +357,11 @@ contains
          call compute_stats()
       end block initialize_velocity
 
-      ! Check for initial injection
-      check_injection: block
-         if (inj_evt%tper.eq.0.0_WP) call inject_drop()
-      end block check_injection
-      
-      ! Create structure tracker
-      create_strack: block
-         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
-      end block create_strack
-
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
          use tpviscoelastic_class, only: oldroydb
          use vfs_class,            only: flux_storage,elvira
          integer :: i,j,k
-         ! Create a VOF solver with detailed face flux stroage
-         call vf_flux%initialize(cfg=cfg,reconstruction_method=elvira,transport_method=flux_storage,name='VOF_flux')
          ! Create viscoelastic model solver
          call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
@@ -391,6 +378,16 @@ contains
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
+
+      ! Check for initial injection
+      check_injection: block
+         if (inj_evt%tper.eq.0.0_WP) call inject_drop()
+      end block check_injection
+      
+      ! ! Create structure tracker
+      ! create_strack: block
+      !    call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
+      ! end block create_strack
 
       
       ! Create surfmesh object for interface polygon output
@@ -471,8 +468,8 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
-         call ve%get_max_reconstructed(vf_flux%VF)
-         call ve%get_max(vf_flux%VF)
+         call ve%get_max_reconstructed(vf%VF)
+         call ve%get_max(vf%VF)
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -572,7 +569,6 @@ contains
          
          ! Remember old VOF
          vf%VFold=vf%VF
-         vf_flux%VFold=vf_flux%VF
          
          ! Remember old velocity
          fs%Uold=fs%U
@@ -584,7 +580,6 @@ contains
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
-         call vf_flux%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
          ! Advance stracker
          call strack%advance(make_label=label_liquid)
@@ -601,32 +596,32 @@ contains
                integer :: i,j,k,nsc
                !> Add source terms for constitutive model
                ! Streching
-               call ve%get_CgradU(gradU,SCtmp,vf_flux%VFold);    resSC=SCtmp
+               call ve%get_CgradU(gradU,SCtmp,vf%VFold);    resSC=SCtmp
                ! Relxation
-               call ve%get_relax(SCtmp,time%dt,vf_flux%VFold);   resSC=resSC+SCtmp
+               call ve%get_relax(SCtmp,time%dt,vf%VFold);   resSC=resSC+SCtmp
                ve%SC=ve%SC+time%dt*resSC
                call ve%apply_bcond(time%t,time%dt)
                ve%SCold=ve%SC
                ! Explicit calculation of dSC/dt from scalar equation
-               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf_flux%VFold,VF=vf_flux%VF,detailed_face_flux=vf_flux%detailed_face_flux,dt=time%dt)
+               call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
                ! Update our scalars
                do nsc=1,ve%nscalar
-                  where (ve%mask.eq.0.and.vf_flux%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf_flux%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf_flux%VF
-                  where (vf_flux%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+                  where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
                end do
                ! Apply boundary conditions
                call ve%apply_bcond(time%t,time%dt)
                ! Get eigenvalues and eigenvectors
-               call ve%get_eigensystem(vf_flux%VF)
+               call ve%get_eigensystem(vf%VF)
                ! Reconstruct conformation tensor
-               call ve%reconstruct_conformation(vf_flux%VF)
+               call ve%reconstruct_conformation(vf%VF)
                ! Add in relaxtion source from semi-anlaytical integration
-               call ve%get_relax_analytical(time%dt,vf_flux%VF)
+               call ve%get_relax_analytical(time%dt,vf%VF)
                ! Reconstruct lnC for next time step
                !> get eigenvalues and eigenvectors based on reconstructed C
-               call ve%get_eigensystem_SCrec(vf_flux%VF)
+               call ve%get_eigensystem_SCrec(vf%VF)
                !> Reconstruct lnC from eigenvalues and eigenvectors
-               call ve%reconstruct_log_conformation(vf_flux%VF)
+               call ve%reconstruct_log_conformation(vf%VF)
                ! Take exp(eigenvalues) to use in next time-step
                ve%eigenval=exp(ve%eigenval)
             end block advance_scalar
@@ -670,7 +665,7 @@ contains
                         do j=cfg%jmino_,cfg%jmaxo_
                            do i=cfg%imino_,cfg%imaxo_
                               if (ve%mask(i,j,k).ne.0) cycle
-                              if (vf_flux%VF(i,j,k).eq.0.0_WP) cycle
+                              if (vf%VF(i,j,k).eq.0.0_WP) cycle
                               stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
                               stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
                               stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
@@ -831,8 +826,8 @@ contains
          call compute_stats()
          call fs%get_max()
          call vf%get_max()
-         call ve%get_max_reconstructed(vf_flux%VF)
-         call ve%get_max(vf_flux%VF)
+         call ve%get_max_reconstructed(vf%VF)
+         call ve%get_max(vf%VF)
          call mfile%write()
          call cflfile%write()
          call hitfile%write()
@@ -937,21 +932,19 @@ contains
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
-                  print *, 'pre loop'
-                  if (vf_flux%VF(i,j,k).gt.0.0_WP) then
-                     print *, 'pre assign'
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
                      ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                     print *, 'post assign'
                      ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
                      ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
                   end if
                end do
             end do
          end do
+         print *, 'done with init C'
          do k=cfg%kmino_,cfg%kmaxo_
             do j=cfg%jmino_,cfg%jmaxo_
                do i=cfg%imino_,cfg%imaxo_
-                  if (vf_flux%VF(i,j,k).gt.0.0_WP) then
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
                      print *, 'SCrec1', ve%SCrec(i,j,k,1)
                   end if
                end do
