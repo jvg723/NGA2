@@ -65,10 +65,6 @@ module simulation
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
 
-   !> Check for stabilization 
-   logical :: stabilization 
-   
-
 contains
    
    !> Function that identifies liquid cells
@@ -387,29 +383,11 @@ contains
          call param_read('Polymer Concentration',ve%visc_p); ve%visc_p=fs%visc_l*((1.00_WP-ve%visc_p)/ve%visc_p)
          ! Setup without an implicit solver
          call ve%setup()
-         ! Check first if we use stabilization
-         call param_read('Stabilization',stabilization,default=.false.)
-         ! Initialize C scalar fields
-         if (stabilization) then 
-            !> Allocate storage fo eigenvalues and vectors
-            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
-            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
-            !> Allocate storage for reconstructured C and Cold
-            allocate(ve%SCrec(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
-         !    do k=cfg%kmino_,cfg%kmaxo_
-         !       do j=cfg%jmino_,cfg%jmaxo_
-         !          do i=cfg%imino_,cfg%imaxo_
-         !             if (vf%VF(i,j,k).gt.0.0_WP) then
-         !                ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-         !                ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-         !                ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-         !             end if
-         !          end do
-         !       end do
-         !    end do
-         !    ! Get eigenvalues and eigenvectors
-         !    call ve%get_eigensystem(vf%VF)
-         end if
+         !> Allocate storage fo eigenvalues and vectors
+         allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+         allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+         !> Allocate storage for reconstructured C 
+         allocate(ve%SCrec(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -478,11 +456,9 @@ contains
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_scalar('id',strack%id)
          call ens_out%add_surface('vofplic',smesh)
-         if (stabilization) then 
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
             end do
-         end if
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -495,10 +471,8 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
-         if (stabilization) then
-            call ve%get_max_reconstructed(vf_flux%VF)
-            call ve%get_max(vf_flux%VF)
-         end if
+         call ve%get_max_reconstructed(vf_flux%VF)
+         call ve%get_max(vf_flux%VF)
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -558,16 +532,14 @@ contains
          scfile=monitor(ve%cfg%amRoot,'scalar')
          call scfile%add_column(time%n,'Timestep number')
          call scfile%add_column(time%t,'Time')
-         if (stabilization) then
-            do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
-               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
-            end do
-            do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_lnmin')
-               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_lnmax')
-            end do
-         end if
+         do nsc=1,ve%nscalar
+            call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+            call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+         end do
+         do nsc=1,ve%nscalar
+            call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_lnmin')
+            call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_lnmax')
+         end do
          call scfile%write()
       end block create_monitor
 
@@ -627,18 +599,11 @@ contains
             ! Transport our liquid conformation tensor using log conformation
             advance_scalar: block
                integer :: i,j,k,nsc
-               ! Add source terms for constitutive model
-               if (stabilization) then 
-                  ! Streching 
-                  call ve%get_CgradU_log(gradU,SCtmp,vf_flux%VFold); resSC=SCtmp
-                  ! Relxation
-                  ! call ve%get_relax_log(SCtmp,vf%VFold);             resSC=resSC+SCtmp
-               else
-                  ! Streching
-                  call ve%get_CgradU(gradU,SCtmp,vf_flux%VFold);    resSC=SCtmp
-                  ! Relxation
-                  call ve%get_relax(SCtmp,time%dt,vf_flux%VFold);   resSC=resSC+SCtmp
-               end if
+               !> Add source terms for constitutive model
+               ! Streching
+               call ve%get_CgradU(gradU,SCtmp,vf_flux%VFold);    resSC=SCtmp
+               ! Relxation
+               call ve%get_relax(SCtmp,time%dt,vf_flux%VFold);   resSC=resSC+SCtmp
                ve%SC=ve%SC+time%dt*resSC
                call ve%apply_bcond(time%t,time%dt)
                ve%SCold=ve%SC
@@ -651,24 +616,23 @@ contains
                end do
                ! Apply boundary conditions
                call ve%apply_bcond(time%t,time%dt)
+               ! Get eigenvalues and eigenvectors
+               call ve%get_eigensystem(vf_flux%VF)
+               ! Reconstruct conformation tensor
+               call ve%reconstruct_conformation(vf_flux%VF)
+               ! Add in relaxtion source from semi-anlaytical integration
+               call ve%get_relax_analytical(time%dt,vf_flux%VF)
+               ! Reconstruct lnC for next time step
+               !> get eigenvalues and eigenvectors based on reconstructed C
+               call ve%get_eigensystem_SCrec(vf_flux%VF)
+               !> Reconstruct lnC from eigenvalues and eigenvectors
+               call ve%reconstruct_log_conformation(vf_flux%VF)
+               ! Take exp(eigenvalues) to use in next time-step
+               ve%eigenval=exp(ve%eigenval)
             end block advance_scalar
          end if
 
-         if (stabilization.and.droplet_injected) then 
-            ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem(vf_flux%VF)
-            ! Reconstruct conformation tensor
-            call ve%reconstruct_conformation(vf_flux%VF)
-            ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt,vf_flux%VF)
-            ! Reconstruct lnC for next time step
-            !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec(vf_flux%VF)
-            !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation(vf_flux%VF)
-            ! Take exp(eigenvalues) to use in next time-step
-            ve%eigenval=exp(ve%eigenval)
-         end if
+            
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -699,26 +663,24 @@ contains
                   allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
                   ! Calculate polymer stress for a given model
                   stress=0.0_WP
-                     if (stabilization) then !< Build stress tensor from reconstructed C
-                        select case (ve%model)
-                        case (oldroydb)
-                           coeff=ve%visc_p/ve%trelax
-                           do k=cfg%kmino_,cfg%kmaxo_
-                              do j=cfg%jmino_,cfg%jmaxo_
-                                 do i=cfg%imino_,cfg%imaxo_
-                                    if (ve%mask(i,j,k).ne.0) cycle
-                                    if (vf_flux%VF(i,j,k).eq.0.0_WP) cycle
-                                    stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                                    stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                                    stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                                    stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                                    stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                                    stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                                 end do
-                              end do
+                  select case (ve%model)
+                  case (oldroydb)
+                     coeff=ve%visc_p/ve%trelax
+                     do k=cfg%kmino_,cfg%kmaxo_
+                        do j=cfg%jmino_,cfg%jmaxo_
+                           do i=cfg%imino_,cfg%imaxo_
+                              if (ve%mask(i,j,k).ne.0) cycle
+                              if (vf_flux%VF(i,j,k).eq.0.0_WP) cycle
+                              stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                              stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                              stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                              stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                              stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                              stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
                            end do
-                        end select 
-                     end if
+                        end do
+                     end do
+                  end select 
                   ! Interpolate tensor components to cell edges
                   do k=cfg%kmin_,cfg%kmax_+1
                      do j=cfg%jmin_,cfg%jmax_+1
@@ -869,10 +831,8 @@ contains
          call compute_stats()
          call fs%get_max()
          call vf%get_max()
-         if (stabilization) then
-            call ve%get_max_reconstructed(vf_flux%VF)
-            call ve%get_max(vf_flux%VF)
-         end if
+         call ve%get_max_reconstructed(vf_flux%VF)
+         call ve%get_max(vf_flux%VF)
          call mfile%write()
          call cflfile%write()
          call hitfile%write()
@@ -974,34 +934,33 @@ contains
       ! Init confomration tensor
       init_conformation: block
          integer :: i,j,k,nsc
-         if (stabilization) then 
-            print *, 'in stabilization check'
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                        ! print *, 'in loop', ve%SCrec(i,j,k,1)
-                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-                     end if
-                  end do
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  print *, 'pre loop'
+                  if (vf_flux%VF(i,j,k).gt.0.0_WP) then
+                     print *, 'pre assign'
+                     ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                     print *, 'post assign'
+                     ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                     ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                  end if
                end do
             end do
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        print *, 'SCrec1', ve%SCrec(i,j,k,1)
-                     end if
-                  end do
+         end do
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  if (vf_flux%VF(i,j,k).gt.0.0_WP) then
+                     print *, 'SCrec1', ve%SCrec(i,j,k,1)
+                  end if
                end do
             end do
-            ! Sync C field
-            do nsc=1,6
-               call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
-            end do
-         end if
+         end do
+         ! Sync C field
+         do nsc=1,6
+            call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
+         end do
       end block init_conformation
       
       ! Set the drop to injected status
