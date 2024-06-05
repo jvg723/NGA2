@@ -384,10 +384,10 @@ contains
          if (inj_evt%tper.eq.0.0_WP) call inject_drop()
       end block check_injection
       
-      ! ! Create structure tracker
-      ! create_strack: block
-      !    call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
-      ! end block create_strack
+      ! Create structure tracker
+      create_strack: block
+         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
+      end block create_strack
 
       
       ! Create surfmesh object for interface polygon output
@@ -867,8 +867,6 @@ contains
          call df%push(name='P' ,var=fs%P)
          call df%write()
       end if
-
-      print *, 'in init geometry'
       
       ! Initialize droplet
       do k=vf%cfg%kmino_,vf%cfg%kmaxo_
@@ -936,16 +934,6 @@ contains
                      ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
                      ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
                      ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-                  end if
-               end do
-            end do
-         end do
-         print *, 'done with init C'
-         do k=cfg%kmino_,cfg%kmaxo_
-            do j=cfg%jmino_,cfg%jmaxo_
-               do i=cfg%imino_,cfg%imaxo_
-                  if (vf%VF(i,j,k).gt.0.0_WP) then
-                     print *, 'SCrec1', ve%SCrec(i,j,k,1)
                   end if
                end do
             end do
