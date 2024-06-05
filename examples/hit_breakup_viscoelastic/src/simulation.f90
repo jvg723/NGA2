@@ -563,6 +563,10 @@ contains
                call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
                call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
             end do
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_lnmin')
+               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_lnmax')
+            end do
          end if
          call scfile%write()
       end block create_monitor
@@ -642,7 +646,7 @@ contains
                call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf_flux%VFold,VF=vf_flux%VF,detailed_face_flux=vf_flux%detailed_face_flux,dt=time%dt)
                ! Update our scalars
                do nsc=1,ve%nscalar
-                  where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf_flux%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf_flux%VF
+                  where (ve%mask.eq.0.and.vf_flux%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf_flux%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf_flux%VF
                   where (vf_flux%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
                end do
                ! Apply boundary conditions
@@ -842,7 +846,6 @@ contains
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                               np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                              smesh%var(2,np)=ve%SC(i,j,k,1)+ve%SC(i,j,k,4)+ve%SC(i,j,k,6)
                               smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
                               smesh%var(3,np)=ve%SCrec(i,j,k,1)
                               smesh%var(4,np)=ve%SCrec(i,j,k,2)
@@ -874,6 +877,7 @@ contains
          call cflfile%write()
          call hitfile%write()
          call cvgfile%write()
+         call scfile%write()
          
       end do
       
@@ -908,6 +912,8 @@ contains
          call df%push(name='P' ,var=fs%P)
          call df%write()
       end if
+
+      print *, 'in init geometry'
       
       ! Initialize droplet
       do k=vf%cfg%kmino_,vf%cfg%kmaxo_
@@ -969,6 +975,7 @@ contains
       init_conformation: block
          integer :: i,j,k,nsc
          if (stabilization) then 
+            print *, 'in stabilization check'
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
                   do i=cfg%imino_,cfg%imaxo_
@@ -977,6 +984,15 @@ contains
                         ! print *, 'in loop', ve%SCrec(i,j,k,1)
                         ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
                         ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        print *, 'SCrec1', ve%SCrec(i,j,k,1)
                      end if
                   end do
                end do
