@@ -9,7 +9,7 @@ module simulation
    use timetracker_class,    only: timetracker
    use ensight_class,        only: ensight
    use surfmesh_class,       only: surfmesh
-   use stracker_class,       only: stracker
+   ! use stracker_class,       only: stracker
    use event_class,          only: event
    use monitor_class,        only: monitor
    use pardata_class,        only: pardata
@@ -24,7 +24,7 @@ module simulation
    type(tpviscoelastic), public :: ve
 
    !> Include structure tracker
-   type(stracker) :: strack
+   ! type(stracker) :: strack
  
    !> Ensight postprocessing
    type(ensight)  :: ens_out
@@ -135,40 +135,40 @@ contains
       
    end subroutine compute_stats
    
-   !> Perform droplet analysis
-   subroutine analyse_drops()
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-      use parallel,  only: MPI_REAL_WP
-      use mathtools, only: Pi
-      use string,    only: str_medium
-      use filesys,   only: makedir,isdir
-      character(len=str_medium) :: filename,timestamp
-      real(WP), dimension(:), allocatable :: dvol
-      integer :: iunit,n,m,ierr
-      ! Allocate droplet volume array
-      allocate(dvol(1:strack%nstruct)); dvol=0.0_WP
-      ! Loop over individual structures
-      do n=1,strack%nstruct
-         ! Loop over cells in structure and accumulate volume
-         do m=1,strack%struct(n)%n_
-            dvol(n)=dvol(n)+cfg%vol(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))*&
-            &                 vf%VF(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))
-         end do
-      end do
-      ! Reduce volume data
-      call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,strack%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-      ! Only root process outputs to a file
-      if (cfg%amRoot) then
-         if (.not.isdir('diameter')) call makedir('diameter')
-         filename='diameter_'; write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         do n=1,strack%nstruct
-            ! Output list of diameters
-            write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
-         end do
-         close(iunit)
-      end if
-   end subroutine analyse_drops
+   ! !> Perform droplet analysis
+   ! subroutine analyse_drops()
+   !    use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+   !    use parallel,  only: MPI_REAL_WP
+   !    use mathtools, only: Pi
+   !    use string,    only: str_medium
+   !    use filesys,   only: makedir,isdir
+   !    character(len=str_medium) :: filename,timestamp
+   !    real(WP), dimension(:), allocatable :: dvol
+   !    integer :: iunit,n,m,ierr
+   !    ! Allocate droplet volume array
+   !    allocate(dvol(1:strack%nstruct)); dvol=0.0_WP
+   !    ! Loop over individual structures
+   !    do n=1,strack%nstruct
+   !       ! Loop over cells in structure and accumulate volume
+   !       do m=1,strack%struct(n)%n_
+   !          dvol(n)=dvol(n)+cfg%vol(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))*&
+   !          &                 vf%VF(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))
+   !       end do
+   !    end do
+   !    ! Reduce volume data
+   !    call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,strack%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+   !    ! Only root process outputs to a file
+   !    if (cfg%amRoot) then
+   !       if (.not.isdir('diameter')) call makedir('diameter')
+   !       filename='diameter_'; write(timestamp,'(es12.5)') time%t
+   !       open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+   !       do n=1,strack%nstruct
+   !          ! Output list of diameters
+   !          write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+   !       end do
+   !       close(iunit)
+   !    end if
+   ! end subroutine analyse_drops
    
    
    !> Initialization of problem solver
@@ -384,10 +384,10 @@ contains
          if (inj_evt%tper.eq.0.0_WP) call inject_drop()
       end block check_injection
       
-      ! Create structure tracker
-      create_strack: block
-         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
-      end block create_strack
+      ! ! Create structure tracker
+      ! create_strack: block
+      !    call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
+      ! end block create_strack
 
       
       ! Create surfmesh object for interface polygon output
@@ -395,40 +395,41 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for structure id
-         smesh=surfmesh(nvar=8,name='plic')
-         smesh%varname(1)='id'
-         smesh%varname(2)='trC'
-         smesh%varname(3)='Cxx'
-         smesh%varname(4)='Cxy'
-         smesh%varname(5)='Cxz'
-         smesh%varname(6)='Cyy'
-         smesh%varname(7)='Cyz'
-         smesh%varname(8)='Czz'
+         smesh=surfmesh(nvar=7,name='plic')
+         ! smesh%varname(1)='id'
+         smesh%varname(1)='trC'
+         smesh%varname(2)='Cxx'
+         smesh%varname(3)='Cxy'
+         smesh%varname(4)='Cxz'
+         smesh%varname(5)='Cyy'
+         smesh%varname(6)='Cyz'
+         smesh%varname(7)='Czz'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
          smesh%var(1,:)=0.0_WP
-         smesh%var(2,:)=0.0_WP
-         smesh%var(3,:)=0.0_WP
-         smesh%var(4,:)=0.0_WP
-         smesh%var(5,:)=0.0_WP
-         smesh%var(6,:)=0.0_WP
-         smesh%var(7,:)=0.0_WP
-         smesh%var(8,:)=0.0_WP
+         ! smesh%var(2,:)=0.0_WP
+         ! smesh%var(3,:)=0.0_WP
+         ! smesh%var(4,:)=0.0_WP
+         ! smesh%var(5,:)=0.0_WP
+         ! smesh%var(6,:)=0.0_WP
+         ! smesh%var(7,:)=0.0_WP
+         ! smesh%var(8,:)=0.0_WP
          np=0
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
                do i=vf%cfg%imin_,vf%cfg%imax_
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                        smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
-                        smesh%var(3,np)=ve%SCrec(i,j,k,1)
-                        smesh%var(4,np)=ve%SCrec(i,j,k,2)
-                        smesh%var(5,np)=ve%SCrec(i,j,k,3)
-                        smesh%var(6,np)=ve%SCrec(i,j,k,4)
-                        smesh%var(7,np)=ve%SCrec(i,j,k,5)
-                        smesh%var(8,np)=ve%SCrec(i,j,k,6)
+                        np=np+1; 
+                        ! smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                        smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                        smesh%var(2,np)=ve%SCrec(i,j,k,1)
+                        smesh%var(3,np)=ve%SCrec(i,j,k,2)
+                        smesh%var(4,np)=ve%SCrec(i,j,k,3)
+                        smesh%var(5,np)=ve%SCrec(i,j,k,4)
+                        smesh%var(6,np)=ve%SCrec(i,j,k,5)
+                        smesh%var(7,np)=ve%SCrec(i,j,k,6)
                      end if
                   end do
                end do
@@ -451,7 +452,7 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
-         call ens_out%add_scalar('id',strack%id)
+         ! call ens_out%add_scalar('id',strack%id)
          call ens_out%add_surface('vofplic',smesh)
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
@@ -540,12 +541,12 @@ contains
          call scfile%write()
       end block create_monitor
 
-      ! Initialize an event for drop size analysis
-      drop_analysis: block
-         drop_evt=event(time=time,name='Drop analysis')
-         call param_read('Drop analysis period',drop_evt%tper)
-         if (drop_evt%occurs()) call analyse_drops()
-      end block drop_analysis
+      ! ! Initialize an event for drop size analysis
+      ! drop_analysis: block
+      !    drop_evt=event(time=time,name='Drop analysis')
+      !    call param_read('Drop analysis period',drop_evt%tper)
+      !    if (drop_evt%occurs()) call analyse_drops()
+      ! end block drop_analysis
       
    end subroutine simulation_init
    
@@ -581,8 +582,8 @@ contains
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
-         ! Advance stracker
-         call strack%advance(make_label=label_liquid)
+         ! ! Advance stracker
+         ! call strack%advance(make_label=label_liquid)
 
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
@@ -795,21 +796,22 @@ contains
                smesh%var(5,:)=0.0_WP
                smesh%var(6,:)=0.0_WP
                smesh%var(7,:)=0.0_WP
-               smesh%var(8,:)=0.0_WP
+               ! smesh%var(8,:)=0.0_WP
                np=0
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
                      do i=vf%cfg%imin_,vf%cfg%imax_
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                              np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
-                              smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
-                              smesh%var(3,np)=ve%SCrec(i,j,k,1)
-                              smesh%var(4,np)=ve%SCrec(i,j,k,2)
-                              smesh%var(5,np)=ve%SCrec(i,j,k,3)
-                              smesh%var(6,np)=ve%SCrec(i,j,k,4)
-                              smesh%var(7,np)=ve%SCrec(i,j,k,5)
-                              smesh%var(8,np)=ve%SCrec(i,j,k,6)
+                              np=np+1; 
+                              ! smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                              smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                              smesh%var(2,np)=ve%SCrec(i,j,k,1)
+                              smesh%var(3,np)=ve%SCrec(i,j,k,2)
+                              smesh%var(4,np)=ve%SCrec(i,j,k,3)
+                              smesh%var(5,np)=ve%SCrec(i,j,k,4)
+                              smesh%var(6,np)=ve%SCrec(i,j,k,5)
+                              smesh%var(7,np)=ve%SCrec(i,j,k,6)
                            end if
                         end do
                      end do
@@ -819,8 +821,8 @@ contains
             call ens_out%write_data(time%t)
          end if
          
-         ! Analyse droplets
-         if (drop_evt%occurs()) call analyse_drops()
+         ! ! Analyse droplets
+         ! if (drop_evt%occurs()) call analyse_drops()
          
          ! Perform and output monitoring
          call compute_stats()
