@@ -253,7 +253,7 @@ contains
       create_vof: block
          use vfs_class, only: lvira,elvira,plicnet,remap_storage,flux_storage
          ! Create a VOF solver with stored full-cell Lagrangian remap
-         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=flux_storage,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=flux_storage,name='VOF')
          ! Initialize droplet parameters
          call param_read('Droplet diameter',radius); radius=0.5_WP*radius
          call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
