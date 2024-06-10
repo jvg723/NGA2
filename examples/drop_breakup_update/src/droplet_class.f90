@@ -518,37 +518,37 @@ contains
       ! Calculate grad(U)
       call this%fs%get_gradU(this%gradU)
 
-      ! ! Transport our liquid conformation tensor using log conformation
-      ! advance_scalar: block
-      !    integer :: i,j,k,nsc
-      !    ! Streching source term
-      !    call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
-      !    this%ve%SC=this%ve%SC+this%time%dt*this%resSC
-      !    call this%ve%apply_bcond(this%time%t,this%time%dt)
-      !    this%ve%SCold=this%ve%SC
-      !    ! Explicit calculation of dSC/dt from scalar equation
-      !    call this%ve%get_dSCdt(dSCdt=this%resSC,U=this%fs%U,V=this%fs%V,W=this%fs%W,VFold=this%vf%VFold,VF=this%vf%VF,detailed_face_flux=this%vf%detailed_face_flux,dt=this%time%dt)
-      !    ! Update our scalars
-      !    do nsc=1,this%ve%nscalar
-      !       where (this%ve%mask.eq.0.and.this%vf%VF.ne.0.0_WP) this%ve%SC(:,:,:,nsc)=(this%vf%VFold*this%ve%SCold(:,:,:,nsc)+this%time%dt*this%resSC(:,:,:,nsc))/this%vf%VF
-      !       where (this%vf%VF.eq.0.0_WP) this%ve%SC(:,:,:,nsc)=0.0_WP
-      !    end do
-      !    ! Apply boundary conditions
-      !    call this%ve%apply_bcond(this%time%t,this%time%dt)
-      !    ! Get eigenvalues and eigenvectors
-      !    call this%ve%get_eigensystem(this%vf%VF)
-      !    ! Reconstruct conformation tensor
-      !    call this%ve%reconstruct_conformation(this%vf%VF)
-      !    ! Add in relaxtion source from semi-anlaytical integration
-      !    call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
-      !    ! Reconstruct lnC for next time step
-      !    !> get eigenvalues and eigenvectors based on reconstructed C
-      !    call this%ve%get_eigensystem_SCrec(this%vf%VF)
-      !    !> Reconstruct lnC from eigenvalues and eigenvectors
-      !    call this%ve%reconstruct_log_conformation(this%vf%VF)
-      !    ! Take exp(eigenvalues) to use in next time-step
-      !    this%ve%eigenval=exp(this%ve%eigenval)
-      ! end block advance_scalar
+      ! Transport our liquid conformation tensor using log conformation
+      advance_scalar: block
+         integer :: i,j,k,nsc
+         ! Streching source term
+         call this%ve%get_CgradU_log(this%gradU,this%SCtmp,this%vf%VFold); this%resSC=this%SCtmp
+         this%ve%SC=this%ve%SC+this%time%dt*this%resSC
+         call this%ve%apply_bcond(this%time%t,this%time%dt)
+         this%ve%SCold=this%ve%SC
+         ! Explicit calculation of dSC/dt from scalar equation
+         call this%ve%get_dSCdt(dSCdt=this%resSC,U=this%fs%U,V=this%fs%V,W=this%fs%W,VFold=this%vf%VFold,VF=this%vf%VF,detailed_face_flux=this%vf%detailed_face_flux,dt=this%time%dt)
+         ! Update our scalars
+         do nsc=1,this%ve%nscalar
+            where (this%ve%mask.eq.0.and.this%vf%VF.ne.0.0_WP) this%ve%SC(:,:,:,nsc)=(this%vf%VFold*this%ve%SCold(:,:,:,nsc)+this%time%dt*this%resSC(:,:,:,nsc))/this%vf%VF
+            where (this%vf%VF.eq.0.0_WP) this%ve%SC(:,:,:,nsc)=0.0_WP
+         end do
+         ! Apply boundary conditions
+         call this%ve%apply_bcond(this%time%t,this%time%dt)
+         ! Get eigenvalues and eigenvectors
+         call this%ve%get_eigensystem(this%vf%VF)
+         ! Reconstruct conformation tensor
+         call this%ve%reconstruct_conformation(this%vf%VF)
+         ! Add in relaxtion source from semi-anlaytical integration
+         call this%ve%get_relax_analytical(this%time%dt,this%vf%VF)
+         ! Reconstruct lnC for next time step
+         !> get eigenvalues and eigenvectors based on reconstructed C
+         call this%ve%get_eigensystem_SCrec(this%vf%VF)
+         !> Reconstruct lnC from eigenvalues and eigenvectors
+         call this%ve%reconstruct_log_conformation(this%vf%VF)
+         ! Take exp(eigenvalues) to use in next time-step
+         this%ve%eigenval=exp(this%ve%eigenval)
+      end block advance_scalar
 
 
       ! Perform sub-iterations
@@ -568,65 +568,65 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
 
-         ! ! Add polymer stress term
-         ! polymer_stress: block
-         !    use tpviscoelastic_class, only: oldroydb,eptt
-         !    integer :: i,j,k,nsc,n
-         !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-         !    real(WP), dimension(:,:,:,:), allocatable :: stress
-         !    real(WP) :: coeff,trace
-         !    ! Allocate work arrays
-         !    allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
-         !    allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         !    ! Calculate polymer stress for a given model
-         !    stress=0.0_WP
-         !    select case (this%ve%model)
-         !    case (oldroydb)
-         !       coeff=this%ve%visc_p/this%ve%trelax
-         !       do k=this%cfg%kmino_,this%cfg%kmaxo_
-         !          do j=this%cfg%jmino_,this%cfg%jmaxo_
-         !             do i=this%cfg%imino_,this%cfg%imaxo_
-         !                stress(i,j,k,1)=coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-         !                stress(i,j,k,2)=coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-         !                stress(i,j,k,3)=coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-         !                stress(i,j,k,4)=coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-         !                stress(i,j,k,5)=coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-         !                stress(i,j,k,6)=coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-         !             end do
-         !          end do
-         !       end do
-         !    end select 
-         !    ! Interpolate tensor components to cell edges
-         !    do k=this%cfg%kmin_,this%cfg%kmax_+1
-         !       do j=this%cfg%jmin_,this%cfg%jmax_+1
-         !          do i=this%cfg%imin_,this%cfg%imax_+1
-         !             Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-         !             Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-         !             Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-         !          end do
-         !       end do
-         !    end do
-         !    ! Add divergence of stress to residual
-         !    do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-         !       do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-         !          do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-         !             if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-         !             &                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))                     &
-         !             &                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-         !             if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-         !             &                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))                &
-         !             &                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-         !             if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-         !             &                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))                     &                  
-         !             &                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-         !          end do
-         !       end do
-         !    end do
-         !    ! Clean up
-         !    deallocate(stress,Txy,Tyz,Tzx)
-         ! end block polymer_stress
+         ! Add polymer stress term
+         polymer_stress: block
+            use tpviscoelastic_class, only: oldroydb,eptt
+            integer :: i,j,k,nsc,n
+            real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+            real(WP), dimension(:,:,:,:), allocatable :: stress
+            real(WP) :: coeff,trace
+            ! Allocate work arrays
+            allocate(stress(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
+            allocate(Txy   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            allocate(Tyz   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            allocate(Tzx   (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+            ! Calculate polymer stress for a given model
+            stress=0.0_WP
+            select case (this%ve%model)
+            case (oldroydb)
+               coeff=this%ve%visc_p/this%ve%trelax
+               do k=this%cfg%kmino_,this%cfg%kmaxo_
+                  do j=this%cfg%jmino_,this%cfg%jmaxo_
+                     do i=this%cfg%imino_,this%cfg%imaxo_
+                        stress(i,j,k,1)=coeff*(this%ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                        stress(i,j,k,2)=coeff*(this%ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                        stress(i,j,k,3)=coeff*(this%ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                        stress(i,j,k,4)=coeff*(this%ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                        stress(i,j,k,5)=coeff*(this%ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                        stress(i,j,k,6)=coeff*(this%ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                     end do
+                  end do
+               end do
+            end select 
+            ! Interpolate tensor components to cell edges
+            do k=this%cfg%kmin_,this%cfg%kmax_+1
+               do j=this%cfg%jmin_,this%cfg%jmax_+1
+                  do i=this%cfg%imin_,this%cfg%imax_+1
+                     Txy(i,j,k)=sum(this%fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+                     Tyz(i,j,k)=sum(this%fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+                     Tzx(i,j,k)=sum(this%fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+                  end do
+               end do
+            end do
+            ! Add divergence of stress to residual
+            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+                     if (this%fs%umask(i,j,k).eq.0) this%resU(i,j,k)=this%resU(i,j,k)+sum(this%fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                     &                                               +sum(this%fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))                     &
+                     &                                               +sum(this%fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+                     if (this%fs%vmask(i,j,k).eq.0) this%resV(i,j,k)=this%resV(i,j,k)+sum(this%fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                     &                                               +sum(this%fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))                &
+                     &                                               +sum(this%fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+                     if (this%fs%wmask(i,j,k).eq.0) this%resW(i,j,k)=this%resW(i,j,k)+sum(this%fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                     &                                               +sum(this%fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))                     &                  
+                     &                                               +sum(this%fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+                  end do
+               end do
+            end do
+            ! Clean up
+            deallocate(stress,Txy,Tyz,Tzx)
+         end block polymer_stress
          
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
