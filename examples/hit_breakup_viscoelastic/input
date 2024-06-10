@@ -1,17 +1,14 @@
 # Parallelization
-Partition :	1 1 8
-
-# Are we using log conformation stabilzation 
-Stabilization : .true.
+Partition :	1 3 24
 
 # Mesh definition
 Lx : 5
-nx : 96
+nx : 192
 
 # Droplet properties
 Droplet diameter :        0.8
 Weber number :            10
-Viscosity ratio :         10
+Viscosity ratio :         1
 
 # Non-Newtonian modeling                      
 Polymer Concentration : 0.5  
@@ -28,7 +25,7 @@ Max cfl number :    !0.9
 Max time :          10
 
 # Ensight output
-Ensight output period : 5e-3
+Ensight output period : 5e-2
 
 # Drop analysis
 Drop analysis period :  5e-2
