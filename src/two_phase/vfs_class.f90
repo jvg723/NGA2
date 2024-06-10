@@ -812,7 +812,7 @@ contains
       
       ! Advect interface polygons
       call this%advect_interface(dt,U,V,W)
-
+      
       ! Remove flotsams and thin structures if needed
       call this%remove_flotsams()
       call this%remove_thinstruct()
@@ -828,7 +828,7 @@ contains
       
       ! Create discontinuous polygon mesh from IRL interface
       call this%polygonalize_interface()
-
+      
       ! Perform interface sensing
       if (this%two_planes) call this%sense_interface()
       
@@ -2851,7 +2851,7 @@ contains
       real(IRL_double) :: initial_dist
       logical :: is_wall
       
-      ! Get storage for voluem moments and normal
+      ! Get storage for volume moments and normal
       call new(volume_moments_and_normal)
 
       ! Get r2p object for optimization weights
@@ -3060,6 +3060,8 @@ contains
       real(IRL_double), dimension(0:2) :: center
       real(IRL_double) :: initial_dist
       type(RectCub_type) :: cell
+      ! Get a cell
+      call new(cell)
       ! Traverse domain and reconstruct interface
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
@@ -3150,7 +3152,6 @@ contains
                   normal(2)=-normal(2)
                end if
                ! Locate PLIC plane in cell
-               call new(cell)
                call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
                initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
                call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
@@ -4014,7 +4015,7 @@ contains
       
       ! Query optimal work array size then solve for paraboloid as n=F(t,s)=b1+b2*t+b3*s+b4*t^2+b5*t*s+b6*s^2
       call dsysv('U',6,1,A,6,ipiv,b,6,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      call dsysv('U',6,1,A,6,ipiv,b,6,work,lwork,info); sol=b(1:6)
+      call dsysv('U',6,1,A,6,ipiv,b,6,work,lwork,info); sol=b(1:6); deallocate(work)
       
       ! Get the curvature at (t,s)=(0,0)
       dF_dt=sol(2)+2.0_WP*sol(4)*0.0_WP+sol(5)*0.0_WP; ddF_dtdt=2.0_WP*sol(4)

@@ -286,12 +286,10 @@ contains
             allocate(P12(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P12',var=P12)
             allocate(P13(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P13',var=P13)
             allocate(P14(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P14',var=P14)
-            if (this%vf%two_planes) then
-               allocate(P21(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P21',var=P21)
-               allocate(P22(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P22',var=P22)
-               allocate(P23(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P23',var=P23)
-               allocate(P24(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P24',var=P24)
-            end if
+            allocate(P21(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P21',var=P21)
+            allocate(P22(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P22',var=P22)
+            allocate(P23(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P23',var=P23)
+            allocate(P24(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P24',var=P24)
             do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
                do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
                   do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
@@ -304,12 +302,20 @@ contains
                         call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
                         call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[P11(i,j,k),P12(i,j,k),P13(i,j,k)],P14(i,j,k))
                      end if
+                     ! For this restart, I want to attempt to remove all gas inclusions next to the walls
+                     !rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+                     !if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.0.002_WP.and.abs(this%cfg%Gib(i,j,k)).lt.2.0_WP*this%cfg%min_meshsize) then
+                     !   call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
+                     !   call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],1.0_WP)
+                     !else if (this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.0.00143_WP.and.abs(this%cfg%Gib(i,j,k)).lt.2.0_WP*this%cfg%min_meshsize) then
+                     !   call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
+                     !   call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],1.0_WP)
+                     !end if
                   end do
                end do
             end do
             call this%vf%sync_interface()
-            deallocate(P11,P12,P13,P14)
-            if (this%vf%two_planes) deallocate(P21,P22,P23,P24)
+            deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
             ! Reset moments
             call this%vf%reset_volume_moments()
             ! Ensure that boundaries are correct
@@ -460,7 +466,7 @@ contains
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          this%smesh=surfmesh(nvar=0,name='plic')
-         call this%vf%update_surfmesh_nowall(this%smesh,threshold=0.8_WP)
+         call this%vf%update_surfmesh_nowall(this%smesh)
       end block create_smesh
 
       
@@ -624,18 +630,6 @@ contains
          this%fs%psolv%sol=0.0_WP
          call this%fs%psolv%solve()
          call this%fs%shift_p(this%fs%psolv%sol)
-
-         ! Crude attempt at capturing random HYPRE fails
-         hypre_capture: block
-            use, intrinsic :: iso_fortran_env, only: output_unit
-            ! An identically zero Poisson error is suggestive of an issue, capture it
-            if (this%fs%psolv%aerr.eq.0.0_WP) then
-               ! Generate some output
-               if (this%fs%cfg%amRoot) write(output_unit,'("FAILURE of HYPRE solver [",a,"] for config [",a,"]!!!")') trim(this%fs%psolv%name),trim(this%fs%psolv%cfg%name)
-               ! Just reset the pressure
-               this%fs%P=0.0_WP; this%fs%Pjx=0.0_WP; this%fs%Pjy=0.0_WP; this%fs%Pjz=0.0_WP
-            end if
-         end block hypre_capture
          
          ! Correct velocity
          call this%fs%get_pgrad(this%fs%psolv%sol,this%resU,this%resV,this%resW)
@@ -677,7 +671,7 @@ contains
       
       ! Output to ensight
       if (this%ens_evt%occurs()) then
-         call this%vf%update_surfmesh_nowall(this%smesh,threshold=0.8_WP)
+         call this%vf%update_surfmesh_nowall(this%smesh)
          call this%ens_out%write_data(this%time%t)
       end if
       
