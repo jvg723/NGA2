@@ -366,15 +366,17 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
-         use tpviscoelastic_class, only: oldroydb
-         use vfs_class,            only: flux_storage,elvira
+         use tpviscoelastic_class, only: oldroydb,fenecr
+         use vfs_class,            only: flux_storage
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Weissenberg Number',ve%trelax);    ve%trelax=ve%trelax*taueta_tgt
          ! Polymer viscosity
-         call param_read('Polymer Concentration',ve%visc_p); ve%visc_p=fs%visc_l*((1.00_WP-ve%visc_p)/ve%visc_p)
+         call param_read('Polymer viscosity ratio',ve%visc_p); ve%visc_p=ve%visc_p*fs%visc_l
+         ! Maximum polymer extensibility
+         call param_read('Maximum polymer extensibility', ve%Lmax)
          ! Setup without an implicit solver
          call ve%setup()
          !> Allocate storage fo eigenvalues and vectors
@@ -600,9 +602,7 @@ contains
                integer :: i,j,k,nsc
                !> Add source terms for constitutive model
                ! Streching
-               call ve%get_CgradU(gradU,SCtmp,vf%VFold);    resSC=SCtmp
-               ! Relxation
-               call ve%get_relax(SCtmp,time%dt,vf%VFold);   resSC=resSC+SCtmp
+               call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
                ve%SC=ve%SC+time%dt*resSC
                call ve%apply_bcond(time%t,time%dt)
                ve%SCold=ve%SC
@@ -649,11 +649,11 @@ contains
             if (droplet_injected) then
                ! Add polymer stress term
                polymer_stress: block
-                  use tpviscoelastic_class, only: oldroydb
+                  use tpviscoelastic_class, only: oldroydb,fenecr
                   integer :: i,j,k,nsc
                   real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
                   real(WP), dimension(:,:,:,:), allocatable :: stress
-                  real(WP) :: coeff
+                  real(WP) :: coeff,trace
                   ! Allocate work arrays
                   allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
                   allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -669,6 +669,26 @@ contains
                            do i=cfg%imino_,cfg%imaxo_
                               if (ve%mask(i,j,k).ne.0) cycle
                               if (vf%VF(i,j,k).eq.0.0_WP) cycle
+                              stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+                              stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+                              stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+                              stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+                              stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+                              stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+                           end do
+                        end do
+                     end do
+                  case (fenecr)
+                     do k=cfg%kmino_,cfg%kmaxo_
+                        do j=cfg%jmino_,cfg%jmaxo_
+                           do i=cfg%imino_,cfg%imaxo_
+                              !>Trace of reconstructed conformation tensor
+                              trace=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,2)+ve%SCrec(i,j,k,3)
+                              !>Relaxation function coefficent
+                              coeff=1.00_WP/(1.0_WP-trace/ve%Lmax**2)
+                              coeff=coeff/ve%trelax
+                              coeff=ve%visc_p*coeff
+                              ! Build stress tensor
                               stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
                               stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
                               stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
@@ -968,7 +988,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU,resSC,SCtmp)
       
    end subroutine simulation_final
    

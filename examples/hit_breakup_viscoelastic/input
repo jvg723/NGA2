@@ -1,17 +1,18 @@
 # Parallelization
-Partition :	1 3 24
+Partition :	1 1 8
 
 # Mesh definition
 Lx : 5
-nx : 192
+nx : 96
 
 # Droplet properties
 Droplet diameter :        0.8
 Weber number :            10
 Viscosity ratio :         1
+Maximum polymer extensibility : 1
 
 # Non-Newtonian modeling                      
-Polymer Concentration : 0.5  
+Polymer viscosity ratio : 1.0  
 Weissenberg Number    : 1.0 
 
 # Turbulence file
