@@ -268,7 +268,7 @@ contains
          ! Relaxation time for polymer
          call param_read('Weissenberg Number',this%ve%trelax);    this%ve%trelax=this%ve%trelax
          ! Polymer viscosity
-         call param_read('Polymer Concentration',this%ve%visc_p); this%ve%visc_p=this%fs%visc_l*((1.00_WP-this%ve%visc_p)/this%ve%visc_p)
+         call param_read('Polymer viscosity ratio',this%ve%visc_p); this%ve%visc_p=this%ve%visc_p*this%fs%visc_l
          ! Setup without an implicit solver
          call this%ve%setup()
          ! Initialize C scalar fields
