@@ -283,7 +283,9 @@ contains
       type(prt), pointer :: my_prt
       real(SP), dimension(:,:,:), allocatable :: spbuff
       real(WP), dimension(:), allocatable :: temp_time
-      
+      character(len=str_medium) :: ctime
+      real(WP) :: rtime
+
       ! Check provided time stamp and decide what to do
       if (this%ntime.eq.0) then
          ! First time stamp
@@ -293,10 +295,12 @@ contains
          this%time(1)=time
       else
          ! There are time stamps already, check where to insert
+         n=1
          rewind: do i=this%ntime,1,-1
-            if (this%time(i).lt.time-10.0_WP*epsilon(1.0_WP)) then
-               n=i+1
-               exit rewind
+            ! Convert time to appropriate accuracy before comparing
+            ctime=''; write(ctime,'(es12.5)') time; read(ctime,'(es12.5)') rtime
+            if (this%time(i).lt.rtime) then
+               n=i+1; exit rewind
             end if
          end do rewind
          this%ntime=n; allocate(temp_time(1:this%ntime))

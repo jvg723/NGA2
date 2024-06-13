@@ -7,6 +7,7 @@ module simplex_class
    use surfmesh_class,    only: surfmesh
    use ensight_class,     only: ensight
    use hypre_str_class,   only: hypre_str
+   use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use iterator_class,    only: iterator
@@ -39,6 +40,7 @@ module simplex_class
       type(vfs)         :: vf    !< Volume fraction solver
       type(tpns)        :: fs    !< Two-phase flow solver
       type(hypre_str)   :: ps    !< HYPRE linear solver for pressure
+      type(ddadi)       :: vs    !< DDADI linear solver for velocity
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
       
@@ -124,7 +126,7 @@ contains
          this%cfg=ibconfig(grp=group,decomp=partition,grid=grid)
       end block create_config
       
-
+      
       ! Now initialize simplex nozzle geometry
       create_simplex: block
          use ibconfig_class, only: sharp
@@ -240,9 +242,9 @@ contains
                if (.not.isdir('restart')) call makedir('restart')
             end if
             ! Prepare pardata object for saving restart files
-            call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=12)
+            call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=15)
             this%df%valname=['t ','dt']
-            this%df%varname=['U  ','V  ','W  ','P  ','P11','P12','P13','P14','P21','P22','P23','P24']
+            this%df%varname=['U  ','V  ','W  ','P  ','Pjx','Pjy','Pjz','P11','P12','P13','P14','P21','P22','P23','P24']
          end if
       end block restart_and_save
       
@@ -255,8 +257,8 @@ contains
             this%time%told=this%time%t-this%time%dt
          end if
       end block update_timetracker
-
-
+      
+      
       ! Allocate work arrays
       allocate_work_arrays: block
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))   
@@ -271,14 +273,17 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: remap,plicnet,r2p
+         use vfs_class, only: remap,plicnet,r2p,r2pnet
          use irl_fortran_interface
          integer :: i,j,k
          real(WP) :: rad
          real(WP), dimension(:,:,:), allocatable :: P11,P12,P13,P14
          real(WP), dimension(:,:,:), allocatable :: P21,P22,P23,P24
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         this%vf%thin_thld_max=1.5_WP
+         this%vf%twoplane_thld2=0.8_WP
+         this%vf%thin_thld_min=1.0e-2_WP
          ! Initialize the interface inclduing restarts
          if (this%restarted) then
             ! Read in the planes directly and set the IRL interface
@@ -311,6 +316,16 @@ contains
                      !   call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
                      !   call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],1.0_WP)
                      !end if
+                     ! For this restart, I want to remove all liquid outside the nozzle
+                     if (this%vf%cfg%xm(i).gt.0.0_WP) then
+                        call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
+                        call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],-1.0_WP)
+                     end if
+                     rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+                     if (this%vf%cfg%xm(i).gt.-0.0015_WP.and.rad.gt.0.00143_WP) then
+                        call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
+                        call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],-1.0_WP)
+                     end if
                   end do
                end do
             end do
@@ -359,7 +374,7 @@ contains
                      else
                         this%vf%VF(i,j,k)=0.0_WP
                      end if
-                     if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%VF(i,j,k).gt.2.0_WP*epsilon(1.0_WP)) this%vf%VF(i,j,k)=0.0_WP
+                     !if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%VF(i,j,k).gt.2.0_WP*epsilon(1.0_WP)) this%vf%VF(i,j,k)=0.0_WP
                      ! Initialize phasic barycenters
                      this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
                      this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
@@ -391,7 +406,7 @@ contains
          this%vof_removal_layer=iterator(this%cfg,'VOF removal',vof_removal_layer_locator)
          this%vof_removed=0.0_WP
       end block create_iterator
-
+      
       
       ! Create a two-phase flow solver with bconds
       create_flow_solver: block
@@ -405,6 +420,8 @@ contains
          call this%input%read('Liquid density',this%fs%rho_l)
          call this%input%read('Gas density'   ,this%fs%rho_g)
          call this%input%read('Surface tension coefficient',this%fs%sigma)
+         ! Set acceleration of gravity
+         call this%input%read('Gravity',this%fs%gravity)
          ! Inlets on the left
          call this%fs%add_bcond(name='inlets',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=pipe_inlets)
          ! Outflow on the right
@@ -419,8 +436,10 @@ contains
          this%ps%maxlevel=12
          call this%input%read('Pressure iteration',this%ps%maxit)
          call this%input%read('Pressure tolerance',this%ps%rcvg)
+         ! Configure velocity solver
+         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps)
+         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
       end block create_flow_solver
       
       
@@ -437,6 +456,9 @@ contains
             call this%df%pull(name='V',var=this%fs%V)
             call this%df%pull(name='W',var=this%fs%W)
             call this%df%pull(name='P',var=this%fs%P)
+            call this%df%pull(name='Pjx',var=this%fs%Pjx)
+            call this%df%pull(name='Pjy',var=this%fs%Pjy)
+            call this%df%pull(name='Pjz',var=this%fs%Pjz)
             ! Apply boundary conditions
             call this%fs%apply_bcond(this%time%t,this%time%dt)
          end if
@@ -456,7 +478,7 @@ contains
          call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       end block initialize_velocity
       
-
+      
       ! Create an LES model
       create_sgs: block
          this%sgs=sgsmodel(cfg=this%fs%cfg,umask=this%fs%umask,vmask=this%fs%vmask,wmask=this%fs%wmask)
@@ -468,7 +490,7 @@ contains
          this%smesh=surfmesh(nvar=0,name='plic')
          call this%vf%update_surfmesh_nowall(this%smesh)
       end block create_smesh
-
+      
       
       ! Add Ensight output
       create_ensight: block
@@ -562,16 +584,12 @@ contains
          this%resU=this%vf%VF*this%fs%rho_l+(1.0_WP-this%vf%VF)*this%fs%rho_g
          call this%fs%get_gradu(this%gradU)
          call this%sgs%get_visc(type=vreman,dt=this%time%dtold,rho=this%resU,gradu=this%gradU)
-         do k=this%fs%cfg%kmino_+1,this%fs%cfg%kmaxo_
-            do j=this%fs%cfg%jmino_+1,this%fs%cfg%jmaxo_
-               do i=this%fs%cfg%imino_+1,this%fs%cfg%imaxo_
-                  this%fs%visc(i,j,k)   =this%fs%visc(i,j,k)   +this%sgs%visc(i,j,k)
-                  this%fs%visc_xy(i,j,k)=this%fs%visc_xy(i,j,k)+sum(this%fs%itp_xy(:,:,i,j,k)*this%sgs%visc(i-1:i,j-1:j,k))
-                  this%fs%visc_yz(i,j,k)=this%fs%visc_yz(i,j,k)+sum(this%fs%itp_yz(:,:,i,j,k)*this%sgs%visc(i,j-1:j,k-1:k))
-                  this%fs%visc_zx(i,j,k)=this%fs%visc_zx(i,j,k)+sum(this%fs%itp_xz(:,:,i,j,k)*this%sgs%visc(i-1:i,j,k-1:k))
-               end do
-            end do
-         end do
+         do k=this%fs%cfg%kmino_+1,this%fs%cfg%kmaxo_; do j=this%fs%cfg%jmino_+1,this%fs%cfg%jmaxo_; do i=this%fs%cfg%imino_+1,this%fs%cfg%imaxo_
+            this%fs%visc(i,j,k)   =this%fs%visc(i,j,k)   +this%sgs%visc(i,j,k)
+            this%fs%visc_xy(i,j,k)=this%fs%visc_xy(i,j,k)+sum(this%fs%itp_xy(:,:,i,j,k)*this%sgs%visc(i-1:i,j-1:j,k))
+            this%fs%visc_yz(i,j,k)=this%fs%visc_yz(i,j,k)+sum(this%fs%itp_yz(:,:,i,j,k)*this%sgs%visc(i,j-1:j,k-1:k))
+            this%fs%visc_zx(i,j,k)=this%fs%visc_zx(i,j,k)+sum(this%fs%itp_xz(:,:,i,j,k)*this%sgs%visc(i-1:i,j,k-1:k))
+         end do; end do; end do
       end block sgs_modeling
       
       ! Perform sub-iterations
@@ -588,18 +606,21 @@ contains
          ! Explicit calculation of drho*u/dt from NS
          call this%fs%get_dmomdt(this%resU,this%resV,this%resW)
          
+         ! Add momentum source terms
+         call this%fs%addsrc_gravity(this%resU,this%resV,this%resW)
+         
          ! Assemble explicit residual
          this%resU=-2.0_WP*this%fs%rho_U*this%fs%U+(this%fs%rho_Uold+this%fs%rho_U)*this%fs%Uold+this%time%dt*this%resU
          this%resV=-2.0_WP*this%fs%rho_V*this%fs%V+(this%fs%rho_Vold+this%fs%rho_V)*this%fs%Vold+this%time%dt*this%resV
          this%resW=-2.0_WP*this%fs%rho_W*this%fs%W+(this%fs%rho_Wold+this%fs%rho_W)*this%fs%Wold+this%time%dt*this%resW   
          
          ! Form implicit residuals
-         !call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
+         call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
          
          ! Apply these residuals
-         this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU/this%fs%rho_U
-         this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV/this%fs%rho_V
-         this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW/this%fs%rho_W
+         this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU!/this%fs%rho_U
+         this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV!/this%fs%rho_V
+         this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW!/this%fs%rho_W
          
          ! Apply IB forcing to enforce BC at the pipe walls
          ibforcing: block
@@ -626,6 +647,8 @@ contains
          call this%fs%correct_mfr()
          call this%fs%get_div()
          call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
          this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
          this%fs%psolv%sol=0.0_WP
          call this%fs%psolv%solve()
@@ -722,6 +745,9 @@ contains
             call this%df%push(name='V'  ,var=this%fs%V   )
             call this%df%push(name='W'  ,var=this%fs%W   )
             call this%df%push(name='P'  ,var=this%fs%P   )
+            call this%df%push(name='Pjx',var=this%fs%Pjx )
+            call this%df%push(name='Pjy',var=this%fs%Pjy )
+            call this%df%push(name='Pjz',var=this%fs%Pjz )
             call this%df%push(name='P11',var=P11         )
             call this%df%push(name='P12',var=P12         )
             call this%df%push(name='P13',var=P13         )
