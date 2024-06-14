@@ -3,7 +3,7 @@ Partition :	1 1 8
 
 # Mesh definition
 Lx : 5
-nx : 96
+nx : 72
 
 # Droplet properties
 Droplet diameter :        0.8
@@ -18,7 +18,7 @@ Weissenberg Number    : 1.0
 # Turbulence file
 Keep forcing :            .true.            ! does forcing continue after injection
 #Turbulence file :         hit.192           ! file from which to restart
-Droplet injection time :  0                 ! is multiplied by eddy turnover-time
+Droplet injection time :  1                 ! is multiplied by eddy turnover-time
 
 # Time integration
 Max timestep size : 2.5e-3
