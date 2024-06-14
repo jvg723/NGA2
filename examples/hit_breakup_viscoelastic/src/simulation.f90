@@ -682,6 +682,8 @@ contains
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_
                            do i=cfg%imino_,cfg%imaxo_
+                              if (ve%mask(i,j,k).ne.0) cycle
+                              if (vf%VF(i,j,k).eq.0.0_WP) cycle
                               !>Trace of reconstructed conformation tensor
                               trace=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,2)+ve%SCrec(i,j,k,3)
                               !>Relaxation function coefficent

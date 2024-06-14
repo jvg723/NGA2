@@ -9,16 +9,16 @@ nx : 72
 Droplet diameter :        0.8
 Weber number :            10
 Viscosity ratio :         2
-Maximum polymer extensibility : 1
 
 # Non-Newtonian modeling                      
 Polymer viscosity ratio : 1.0  
 Weissenberg Number    : 1.0 
+Maximum polymer extensibility : 10
 
 # Turbulence file
 Keep forcing :            .true.            ! does forcing continue after injection
 #Turbulence file :         hit.192           ! file from which to restart
-Droplet injection time :  1                 ! is multiplied by eddy turnover-time
+Droplet injection time :  0.1                 ! is multiplied by eddy turnover-time
 
 # Time integration
 Max timestep size : 2.5e-3
