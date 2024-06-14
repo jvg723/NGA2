@@ -8,7 +8,7 @@ nx : 96
 # Droplet properties
 Droplet diameter :        0.8
 Weber number :            10
-Viscosity ratio :         1
+Viscosity ratio :         2
 Maximum polymer extensibility : 1
 
 # Non-Newtonian modeling                      
