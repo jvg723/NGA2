@@ -8,7 +8,7 @@ nx : 72
 # Droplet properties
 Droplet diameter :        0.8
 Weber number :            10
-Viscosity ratio :         2
+Viscosity ratio :         1
 
 # Non-Newtonian modeling                      
 Polymer viscosity ratio : 1.0  
@@ -22,7 +22,7 @@ Droplet injection time :  0.1                 ! is multiplied by eddy turnover-t
 
 # Time integration
 Max timestep size : 2.5e-3
-Max cfl number :    !0.9
+Max cfl number :    0.9
 Max time :          10
 
 # Ensight output
