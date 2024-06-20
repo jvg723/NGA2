@@ -58,6 +58,7 @@ module droplet_class
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
       real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+      real(WP), dimension(:,:,:),     allocatable :: Uslip,Vslip,Wslip
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -176,6 +177,9 @@ contains
          allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(tmp_thickness  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%Uslip(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%Uslip=0.0_WP
+         allocate(this%Vslip(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%Vslip=0.0_WP
+         allocate(this%Wslip(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%Wslip=0.0_WP
       end block allocate_work_arrays
       
       
@@ -363,7 +367,7 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=12,name='plic')
+         this%smesh=surfmesh(nvar=16,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='curv'
          this%smesh%varname(3)='edge_sensor'
@@ -376,6 +380,10 @@ contains
          this%smesh%varname(10)='Cyy'
          this%smesh%varname(11)='Cyz'
          this%smesh%varname(12)='Czz'
+         this%smesh%varname(13)='edge_sensor'
+         this%smesh%varname(14)='Uslip'
+         this%smesh%varname(15)='Vslip'
+         this%smesh%varname(16)='Wslip'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -392,6 +400,10 @@ contains
          this%smesh%var(10,:)=0.0_WP
          this%smesh%var(11,:)=0.0_WP
          this%smesh%var(12,:)=0.0_WP
+         this%smesh%var(13,:)=0.0_WP
+         this%smesh%var(14,:)=0.0_WP
+         this%smesh%var(15,:)=0.0_WP
+         this%smesh%var(15,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -410,6 +422,10 @@ contains
                         this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
                         this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
                         this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                        this%smesh%var(13,np)=this%vf%edge_sensor(i,j,k)
+                        this%smesh%var(14,np)=this%Uslip(i,j,k)
+                        this%smesh%var(15,np)=this%Vslip(i,j,k)
+                        this%smesh%var(16,np)=this%Wslip(i,j,k)
                      end if
                   end do
                end do
@@ -543,9 +559,34 @@ contains
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
+
+      ! Add in slip velocity at hole edges
+      slip_velocity: block
+         integer :: i,j,k
+         ! Store current velocity field 
+         this%Uslip=this%fs%U
+         this%Vslip=this%fs%V
+         this%Wslip=this%fs%W
+         ! Add in retraction velocities
+         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                  if (this%vf%edge_sensor(i,j,k).ge.0.2_WP) then
+                     this%Uslip(i  ,j,k)=this%Uslip(i  ,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                     this%Uslip(i+1,j,k)=this%Uslip(i+1,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                     this%Vslip(i,j  ,k)=this%Vslip(i,j  ,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                     this%Vslip(i,j+1,k)=this%Vslip(i,j+1,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                     this%Wslip(i,j,k  )=this%Wslip(i,j,k  )+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                     this%Wslip(i,j,k+1)=this%Wslip(i,j,k+1)+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                  end if
+               end do 
+            end do 
+         end do
+      end block slip_velocity
          
       ! VOF solver step
-      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      ! call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      call this%vf%advance(dt=this%time%dt,U=this%Uslip,V=this%Vslip,W=this%Wslip)
       
       ! Prepare new staggered viscosity (at n+1)
       call this%fs%get_viscosity(vf=this%vf,strat=harmonic_visc)
@@ -731,6 +772,19 @@ contains
             this%vf%VF(this%vof_removal_layer%map(1,n),this%vof_removal_layer%map(2,n),this%vof_removal_layer%map(3,n))=0.0_WP
          end do
       end block remove_vof
+
+
+      ! Puncture a hole in the film based upon the thin region label
+      puncture_film: block
+      integer :: i,j,k,nn,n
+         do n=1,this%ccl%nstruct
+            do nn=1,this%ccl%struct(n)%n_
+               i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+               this%vf%VF(i,j,k)=0.0_WP
+            end do
+         end do
+      end block puncture_film
+
       
       ! Output to ensight
       if (this%ens_evt%occurs()) then
@@ -754,6 +808,10 @@ contains
             this%smesh%var(10,:)=0.0_WP
             this%smesh%var(11,:)=0.0_WP
             this%smesh%var(12,:)=0.0_WP
+            this%smesh%var(13,:)=0.0_WP
+            this%smesh%var(14,:)=0.0_WP
+            this%smesh%var(15,:)=0.0_WP
+            this%smesh%var(16,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -772,6 +830,10 @@ contains
                            this%smesh%var(10,np)=this%ve%SCrec(i,j,k,4)
                            this%smesh%var(11,np)=this%ve%SCrec(i,j,k,5)
                            this%smesh%var(12,np)=this%ve%SCrec(i,j,k,6)
+                           this%smesh%var(13,np)=this%vf%edge_sensor(i,j,k)
+                           this%smesh%var(14,np)=this%Uslip(i,j,k)
+                           this%smesh%var(15,np)=this%Vslip(i,j,k)
+                           this%smesh%var(16,np)=this%Wslip(i,j,k)
                         end if
                      end do
                   end do
@@ -809,7 +871,7 @@ contains
       class(droplet), intent(inout) :: this
       
       ! Deallocate work arrays
-      deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
+      deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%Uslip,this%Vslip,this%Wslip)
       deallocate(this%resSC,this%gradU,this%SCtmp,tmp_thickness)
       
    end subroutine final
