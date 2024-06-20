@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 2 4
+Partition :	1 1 1
 # Partition : 1 14 24 # 28 nodes 
 
 
@@ -34,7 +34,7 @@ Pressure tolerance : 1e-5
 Pressure iteration : 100
 
 # Ensight output
-Ensight output period : 1
+Ensight output period : 0.1
 
 # Post-processing output
 Postproc output period : 1

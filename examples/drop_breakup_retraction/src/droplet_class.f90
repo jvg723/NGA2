@@ -14,6 +14,7 @@ module droplet_class
    use lpt_class,            only: lpt
    use transfermodel_class,  only: transfermodels
    use event_class,          only: event
+   use cclabel_class,        only: cclabel
    use monitor_class,        only: monitor
    implicit none
    private
@@ -36,6 +37,7 @@ module droplet_class
       type(timetracker)    :: time  !< Time info
       type(transfermodels) :: tm
       type(event)          :: ppevt
+      type(cclabel)        :: ccl  !< Label object for thin regions
      
 
       !> Ensight postprocessing
@@ -59,7 +61,7 @@ module droplet_class
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
-      
+
       
    contains
       procedure :: init                    !< Initialize nozzle simulation
@@ -69,6 +71,12 @@ module droplet_class
 
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=5
+
+   !> A temp array for film thickness
+   real(WP), dimension(:,:,:), allocatable :: tmp_thickness
+
+   !> Min film thickness for puncture
+   real(WP), parameter :: min_filmthickness=1.1e-4_WP
 
    integer :: id_largest_film
    real(WP) :: initial_volume
@@ -85,6 +93,25 @@ contains
       real(WP) :: G
       G=0.5_WP-sqrt(xyz(1)**2+xyz(2)**2+xyz(3)**2)
    end function levelset_droplet
+
+   !> Function that identifies cells that need a label to min thickness region 
+   logical function make_label(i,j,k)
+      implicit none
+      integer, intent(in) :: i,j,k
+      if (tmp_thickness(i,j,k).le.min_filmthickness.and.tmp_thickness(i,j,k).gt.0.0_WP) then
+         make_label=.true.
+      else
+         make_label=.false.
+      end if
+   end function make_label
+
+   !> Function that identifies if cell pairs have same label
+   logical function same_label(i1,j1,k1,i2,j2,k2)
+      implicit none
+      integer, intent(in) :: i1,j1,k1,i2,j2,k2
+      same_label=.true.
+   end function same_label
+
 
    
    !> Initialization of droplet simulation
@@ -148,6 +175,7 @@ contains
          allocate(this%resSC     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%SCtmp     (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_,1:6))
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(tmp_thickness  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -257,6 +285,13 @@ contains
          ! Compute divergence
          call this%fs%get_div()
       end block create_flow_solver
+
+
+      ! Create cclabel object
+      film_label: block
+         call this%ccl%initialize(pg=this%cfg%pgrid,name='film_thickness')
+      end block film_label
+
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
@@ -679,6 +714,15 @@ contains
       ! Recompute interpolated velocity and divergence
       call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       call this%fs%get_div()
+
+      ! Label thin film based upon min_filmthickness
+      label_thin: block
+         ! Copy over thin sensor for label functions
+         tmp_thickness=0.0_WP
+         tmp_thickness=this%vf%thickness
+         call this%ccl%build(make_label,same_label)
+      end block label_thin
+
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -766,7 +810,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
-      deallocate(this%resSC,this%gradU,this%SCtmp)
+      deallocate(this%resSC,this%gradU,this%SCtmp,tmp_thickness)
       
    end subroutine final
    
