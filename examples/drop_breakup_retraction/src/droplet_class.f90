@@ -367,7 +367,7 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         this%smesh=surfmesh(nvar=16,name='plic')
+         this%smesh=surfmesh(nvar=17,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='curv'
          this%smesh%varname(3)='edge_sensor'
@@ -384,6 +384,7 @@ contains
          this%smesh%varname(14)='Uslip'
          this%smesh%varname(15)='Vslip'
          this%smesh%varname(16)='Wslip'
+         this%smesh%varname(17)='id_thickness'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh(this%smesh)
          ! Also populate nplane variable
@@ -403,7 +404,8 @@ contains
          this%smesh%var(13,:)=0.0_WP
          this%smesh%var(14,:)=0.0_WP
          this%smesh%var(15,:)=0.0_WP
-         this%smesh%var(15,:)=0.0_WP
+         this%smesh%var(16,:)=0.0_WP
+         this%smesh%var(17,:)=0.0_WP
          np=0
          do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
             do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -426,6 +428,7 @@ contains
                         this%smesh%var(14,np)=this%Uslip(i,j,k)
                         this%smesh%var(15,np)=this%Vslip(i,j,k)
                         this%smesh%var(16,np)=this%Wslip(i,j,k)
+                        this%smesh%var(17,np)=real(this%ccl%id(i,j,k),WP)
                      end if
                   end do
                end do
@@ -560,33 +563,33 @@ contains
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
 
-      ! Add in slip velocity at hole edges
-      slip_velocity: block
-         integer :: i,j,k
-         ! Store current velocity field 
-         this%Uslip=this%fs%U
-         this%Vslip=this%fs%V
-         this%Wslip=this%fs%W
-         ! Add in retraction velocities
-         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                  if (this%vf%edge_sensor(i,j,k).ge.0.2_WP) then
-                     this%Uslip(i  ,j,k)=this%Uslip(i  ,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                     this%Uslip(i+1,j,k)=this%Uslip(i+1,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                     this%Vslip(i,j  ,k)=this%Vslip(i,j  ,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                     this%Vslip(i,j+1,k)=this%Vslip(i,j+1,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                     this%Wslip(i,j,k  )=this%Wslip(i,j,k  )+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                     this%Wslip(i,j,k+1)=this%Wslip(i,j,k+1)+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                  end if
-               end do 
-            end do 
-         end do
-      end block slip_velocity
+      ! ! Add in slip velocity at hole edges
+      ! slip_velocity: block
+      !    integer :: i,j,k
+      !    ! Store current velocity field 
+      !    this%Uslip=this%fs%U
+      !    this%Vslip=this%fs%V
+      !    this%Wslip=this%fs%W
+      !    ! Add in retraction velocities
+      !    do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+      !       do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+      !          do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+      !             if (this%vf%edge_sensor(i,j,k).ge.0.2_WP) then
+      !                this%Uslip(i  ,j,k)=this%Uslip(i  ,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                this%Uslip(i+1,j,k)=this%Uslip(i+1,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                this%Vslip(i,j  ,k)=this%Vslip(i,j  ,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                this%Vslip(i,j+1,k)=this%Vslip(i,j+1,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                this%Wslip(i,j,k  )=this%Wslip(i,j,k  )+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                this%Wslip(i,j,k+1)=this%Wslip(i,j,k+1)+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !             end if
+      !          end do 
+      !       end do 
+      !    end do
+      ! end block slip_velocity
          
       ! VOF solver step
-      ! call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-      call this%vf%advance(dt=this%time%dt,U=this%Uslip,V=this%Vslip,W=this%Wslip)
+      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      ! call this%vf%advance(dt=this%time%dt,U=this%Uslip,V=this%Vslip,W=this%Wslip)
       
       ! Prepare new staggered viscosity (at n+1)
       call this%fs%get_viscosity(vf=this%vf,strat=harmonic_visc)
@@ -774,16 +777,16 @@ contains
       end block remove_vof
 
 
-      ! Puncture a hole in the film based upon the thin region label
-      puncture_film: block
-      integer :: i,j,k,nn,n
-         do n=1,this%ccl%nstruct
-            do nn=1,this%ccl%struct(n)%n_
-               i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
-               this%vf%VF(i,j,k)=0.0_WP
-            end do
-         end do
-      end block puncture_film
+      ! ! Puncture a hole in the film based upon the thin region label
+      ! puncture_film: block
+      ! integer :: i,j,k,nn,n
+      !    do n=1,this%ccl%nstruct
+      !       do nn=1,this%ccl%struct(n)%n_
+      !          i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+      !          this%vf%VF(i,j,k)=0.0_WP
+      !       end do
+      !    end do
+      ! end block puncture_film
 
       
       ! Output to ensight
@@ -812,6 +815,7 @@ contains
             this%smesh%var(14,:)=0.0_WP
             this%smesh%var(15,:)=0.0_WP
             this%smesh%var(16,:)=0.0_WP
+            this%smesh%var(17,:)=0.0_WP
             np=0
             do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
                do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
@@ -834,6 +838,7 @@ contains
                            this%smesh%var(14,np)=this%Uslip(i,j,k)
                            this%smesh%var(15,np)=this%Vslip(i,j,k)
                            this%smesh%var(16,np)=this%Wslip(i,j,k)
+                           this%smesh%var(17,np)=real(this%ccl%id(i,j,k),WP)
                         end if
                      end do
                   end do
