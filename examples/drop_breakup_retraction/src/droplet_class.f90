@@ -767,6 +767,17 @@ contains
          call this%ccl%build(make_label,same_label)
       end block label_thin
 
+      ! Puncture a hole in the film based upon the thin region label
+      puncture_film: block
+      integer :: i,j,k,nn,n
+         do n=1,this%ccl%nstruct
+            do nn=1,this%ccl%struct(n)%n_
+               i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+               this%vf%VF(i,j,k)=0.0_WP
+            end do
+         end do
+      end block puncture_film
+
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -775,18 +786,6 @@ contains
             this%vf%VF(this%vof_removal_layer%map(1,n),this%vof_removal_layer%map(2,n),this%vof_removal_layer%map(3,n))=0.0_WP
          end do
       end block remove_vof
-
-
-      ! ! Puncture a hole in the film based upon the thin region label
-      ! puncture_film: block
-      ! integer :: i,j,k,nn,n
-      !    do n=1,this%ccl%nstruct
-      !       do nn=1,this%ccl%struct(n)%n_
-      !          i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
-      !          this%vf%VF(i,j,k)=0.0_WP
-      !       end do
-      !    end do
-      ! end block puncture_film
 
       
       ! Output to ensight
