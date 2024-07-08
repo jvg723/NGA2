@@ -169,6 +169,7 @@ module tpns_class
       procedure :: get_strainrate                         !< Calculate deviatoric part of strain rate tensor
       procedure :: get_strainrate_interpolated            !< Calculate strain rate tensor based on Ui/Wi/Vi
       procedure :: get_gradu                              !< Calculate velocity gradient tensor
+      procedure :: get_div_stress                         !< Calculate divergence of stress
       procedure :: get_vorticity                          !< Calculate vorticity tensor
       procedure :: get_mfr                                !< Calculate outgoing MFR through each bcond
       procedure :: correct_mfr                            !< Correct for mfr mismatch to ensure global conservation
@@ -1659,10 +1660,12 @@ contains
    
    
    !> Calculate the velocity divergence based on U/V/W
-   subroutine get_div(this)
+   subroutine get_div(this,src)
       implicit none
       class(tpns), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), optional :: src !< Mass source term
       integer :: i,j,k
+      ! Calculate divergence of velocity
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
@@ -1672,6 +1675,16 @@ contains
             end do
          end do
       end do
+      ! If present, account for mass source
+      if (present(src)) then
+         do k=this%cfg%kmin_,this%cfg%kmax_
+            do j=this%cfg%jmin_,this%cfg%jmax_
+               do i=this%cfg%imin_,this%cfg%imax_
+                  this%div(i,j,k)=this%div(i,j,k)-src(i,j,k)
+               end do
+            end do
+         end do
+      end if
       ! Sync it
       call this%cfg%sync(this%div)
    end subroutine get_div
@@ -2480,6 +2493,126 @@ contains
    end subroutine get_gradu
    
    
+   !> Calculate divergence of stress based on U/V/W/P/Pj (needed by LPT class)
+   subroutine get_div_stress(this,divx,divy,divz)
+      implicit none
+      class(tpns), intent(inout) :: this
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: divx !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: divy !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(out) :: divz !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer :: i,j,k,ii,jj,kk
+      real(WP), dimension(:,:,:), allocatable :: FX,FY,FZ
+      
+      ! Allocate flux arrays
+      allocate(FX(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FY(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      allocate(FZ(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+      
+      ! Flux of rhoU
+      do kk=this%cfg%kmin_,this%cfg%kmax_+1
+         do jj=this%cfg%jmin_,this%cfg%jmax_+1
+            do ii=this%cfg%imin_,this%cfg%imax_+1
+               ! Fluxes on x-face
+               i=ii-1; j=jj-1; k=kk-1
+               FX(i,j,k)=-sum(this%hybu_x(:,i,j,k)*this%rho_Uold(i:i+1,j,k))*sum(this%hybu_x(:,i,j,k)*this%U(i:i+1,j,k))*sum(this%itpu_x(:,i,j,k)*this%U(i:i+1,j,k)) &
+               &         +this%visc   (i,j,k)*(sum(this%grdu_x(:,i,j,k)*this%U(i:i+1,j,k))+sum(this%grdu_x(:,i,j,k)*this%U(i:i+1,j,k))) &
+               &         -this%P(i,j,k)
+               ! Fluxes on y-face
+               i=ii; j=jj; k=kk
+               FY(i,j,k)=-sum(this%hybu_y(:,i,j,k)*this%rho_Uold(i,j-1:j,k))*sum(this%hybu_y(:,i,j,k)*this%U(i,j-1:j,k))*sum(this%itpv_x(:,i,j,k)*this%V(i-1:i,j,k)) &
+               &         +this%visc_xy(i,j,k)*(sum(this%grdu_y(:,i,j,k)*this%U(i,j-1:j,k))+sum(this%grdv_x(:,i,j,k)*this%V(i-1:i,j,k)))
+               ! Fluxes on z-face
+               i=ii; j=jj; k=kk
+               FZ(i,j,k)=-sum(this%hybu_z(:,i,j,k)*this%rho_Uold(i,j,k-1:k))*sum(this%hybu_z(:,i,j,k)*this%U(i,j,k-1:k))*sum(this%itpw_x(:,i,j,k)*this%W(i-1:i,j,k)) &
+               &         +this%visc_zx(i,j,k)*(sum(this%grdu_z(:,i,j,k)*this%U(i,j,k-1:k))+sum(this%grdw_x(:,i,j,k)*this%W(i-1:i,j,k)))
+            end do
+         end do
+      end do
+      ! Time derivative of rhoU
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               divx(i,j,k)=sum(this%divu_x(:,i,j,k)*FX(i-1:i,j,k))+&
+               &           sum(this%divu_y(:,i,j,k)*FY(i,j:j+1,k))+&
+               &           sum(this%divu_z(:,i,j,k)*FZ(i,j,k:k+1))+this%Pjx(i,j,k)
+            end do
+         end do
+      end do
+      ! Sync it
+      call this%cfg%sync(divx)
+      
+      ! Flux of rhoV
+      do kk=this%cfg%kmin_,this%cfg%kmax_+1
+         do jj=this%cfg%jmin_,this%cfg%jmax_+1
+            do ii=this%cfg%imin_,this%cfg%imax_+1
+               ! Fluxes on x-face
+               i=ii; j=jj; k=kk
+               FX(i,j,k)=-sum(this%hybv_x(:,i,j,k)*this%rho_Vold(i-1:i,j,k))*sum(this%hybv_x(:,i,j,k)*this%V(i-1:i,j,k))*sum(this%itpu_y(:,i,j,k)*this%U(i,j-1:j,k)) &
+               &         +this%visc_xy(i,j,k)*(sum(this%grdv_x(:,i,j,k)*this%V(i-1:i,j,k))+sum(this%grdu_y(:,i,j,k)*this%U(i,j-1:j,k)))
+               ! Fluxes on y-face
+               i=ii-1; j=jj-1; k=kk-1
+               FY(i,j,k)=-sum(this%hybv_y(:,i,j,k)*this%rho_Vold(i,j:j+1,k))*sum(this%hybv_y(:,i,j,k)*this%V(i,j:j+1,k))*sum(this%itpv_y(:,i,j,k)*this%V(i,j:j+1,k)) &
+               &         +this%visc   (i,j,k)*(sum(this%grdv_y(:,i,j,k)*this%V(i,j:j+1,k))+sum(this%grdv_y(:,i,j,k)*this%V(i,j:j+1,k))) &
+               &         -this%P(i,j,k)
+               ! Fluxes on z-face
+               i=ii; j=jj; k=kk
+               FZ(i,j,k)=-sum(this%hybv_z(:,i,j,k)*this%rho_Vold(i,j,k-1:k))*sum(this%hybv_z(:,i,j,k)*this%V(i,j,k-1:k))*sum(this%itpw_y(:,i,j,k)*this%W(i,j-1:j,k)) &
+               &         +this%visc_yz(i,j,k)*(sum(this%grdv_z(:,i,j,k)*this%V(i,j,k-1:k))+sum(this%grdw_y(:,i,j,k)*this%W(i,j-1:j,k)))
+            end do
+         end do
+      end do
+      ! Time derivative of rhoV
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               divy(i,j,k)=sum(this%divv_x(:,i,j,k)*FX(i:i+1,j,k))+&
+               &           sum(this%divv_y(:,i,j,k)*FY(i,j-1:j,k))+&
+               &           sum(this%divv_z(:,i,j,k)*FZ(i,j,k:k+1))+this%Pjy(i,j,k)
+            end do
+         end do
+      end do
+      ! Sync it
+      call this%cfg%sync(divy)
+      
+      ! Flux of rhoW
+      do kk=this%cfg%kmin_,this%cfg%kmax_+1
+         do jj=this%cfg%jmin_,this%cfg%jmax_+1
+            do ii=this%cfg%imin_,this%cfg%imax_+1
+               ! Fluxes on x-face
+               i=ii; j=jj; k=kk
+               FX(i,j,k)=-sum(this%hybw_x(:,i,j,k)*this%rho_Wold(i-1:i,j,k))*sum(this%hybw_x(:,i,j,k)*this%W(i-1:i,j,k))*sum(this%itpu_z(:,i,j,k)*this%U(i,j,k-1:k)) &
+               &         +this%visc_zx(i,j,k)*(sum(this%grdw_x(:,i,j,k)*this%W(i-1:i,j,k))+sum(this%grdu_z(:,i,j,k)*this%U(i,j,k-1:k)))
+               ! Fluxes on y-face
+               i=ii; j=jj; k=kk
+               FY(i,j,k)=-sum(this%hybw_y(:,i,j,k)*this%rho_Wold(i,j-1:j,k))*sum(this%hybw_y(:,i,j,k)*this%W(i,j-1:j,k))*sum(this%itpv_z(:,i,j,k)*this%V(i,j,k-1:k)) &
+               &         +this%visc_yz(i,j,k)*(sum(this%grdw_y(:,i,j,k)*this%W(i,j-1:j,k))+sum(this%grdv_z(:,i,j,k)*this%V(i,j,k-1:k)))
+               ! Fluxes on z-face
+               i=ii-1; j=jj-1; k=kk-1
+               FZ(i,j,k)=-sum(this%hybw_z(:,i,j,k)*this%rho_Wold(i,j,k:k+1))*sum(this%hybw_z(:,i,j,k)*this%W(i,j,k:k+1))*sum(this%itpw_z(:,i,j,k)*this%W(i,j,k:k+1)) &
+               &         +this%visc   (i,j,k)*(sum(this%grdw_z(:,i,j,k)*this%W(i,j,k:k+1))+sum(this%grdw_z(:,i,j,k)*this%W(i,j,k:k+1))) &
+               &         -this%P(i,j,k)
+            end do
+         end do
+      end do
+      ! Time derivative of rhoW
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               divz(i,j,k)=sum(this%divw_x(:,i,j,k)*FX(i:i+1,j,k))+&
+               &           sum(this%divw_y(:,i,j,k)*FY(i,j:j+1,k))+&
+               &           sum(this%divw_z(:,i,j,k)*FZ(i,j,k-1:k))+this%Pjz(i,j,k)
+            end do
+         end do
+      end do
+      ! Sync it
+      call this%cfg%sync(divz)
+      
+      ! Deallocate flux arrays
+      deallocate(FX,FY,FZ)
+      
+   end subroutine get_div_stress
+   
+   
    !> Calculate vorticity vector
    subroutine get_vorticity(this,vort)
       use messager, only: die
@@ -2750,17 +2883,23 @@ contains
    
    
    !> Correct MFR through correctable bconds
-   subroutine correct_mfr(this)
+   subroutine correct_mfr(this,src)
       use mpi_f08, only: MPI_SUM
       implicit none
       class(tpns), intent(inout) :: this
-      real(WP) :: mfr_error,vel_correction
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), optional :: src !< Mass source term
+      real(WP) :: mfr_error,vel_correction,int
       integer :: i,j,k,n
       type(bcond), pointer :: my_bc
       
       ! Evaluate MFR mismatch and velocity correction
       call this%get_mfr()
       mfr_error=sum(this%mfr)
+      if (present(src)) then
+         ! Also account for provided source term
+         call this%cfg%integrate_without_VF(src,int)
+         mfr_error=mfr_error-int
+      end if
       if (abs(mfr_error).lt.10.0_WP*epsilon(1.0_WP).or.abs(this%correctable_area).lt.10.0_WP*epsilon(1.0_WP)) return
       vel_correction=-mfr_error/(this%correctable_area)
       

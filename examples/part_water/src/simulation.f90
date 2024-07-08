@@ -36,15 +36,15 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: srcU,srcV,srcW
+   real(WP), dimension(:,:,:), allocatable :: srcU,srcV,srcW,srcM
    real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi,rho
+   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
    
    !> Problem definition
    real(WP) :: depth
    
    !> Max timestep size for LPT
-   real(WP) :: lp_dt,lp_dt_max
+   real(WP) :: lp_dt,lp_dt_max,lp_inj_duration
    
 contains
    
@@ -68,16 +68,16 @@ contains
       
       ! Allocate work arrays
       allocate_work_arrays: block
-         allocate(srcU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(srcV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(srcW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(resW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(rho (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(srcU (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(srcV (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(srcW (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(srcM (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resU (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -103,6 +103,8 @@ contains
          call param_read('Gravity',lp%gravity)
          ! Set filter scale to 3.5*dx
          lp%filter_width=3.5_WP*cfg%min_meshsize
+         ! Turn off drag (Tenneti blows up?)
+         lp%drag_model='SN'
          ! Initialize with zero particles
          call lp%resize(0)
          ! Get initial particle volume fraction
@@ -111,7 +113,7 @@ contains
          call param_read('Particle timestep size',lp_dt_max,default=huge(1.0_WP))
          lp_dt=lp_dt_max
          ! Set collision timescale
-         lp%tau_col=5.0_WP*time%dt
+         lp%tau_col=7.0_WP*lp_dt_max
          ! Set coefficient of restitution
          call param_read('Coefficient of restitution',lp%e_n)
          call param_read('Wall restitution',lp%e_w)
@@ -132,6 +134,7 @@ contains
          lp%inj_pos(1)=lp%cfg%x(lp%cfg%imin)+lp%inj_dmax
          lp%inj_pos(2:3)=0.0_WP
          lp%inj_T=300.0_WP
+         call param_read('Particle injection duration',lp_inj_duration)
       end block initialize_lpt
       
       
@@ -196,6 +199,8 @@ contains
       
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
+         use mathtools,       only: Pi
+         use tpns_class,      only: clipped_neumann
          use hypre_str_class, only: pcg_pfmg2
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
@@ -205,10 +210,18 @@ contains
          ! Assign constant density to each phase
          call param_read('Liquid density',fs%rho_l)
          call param_read('Gas density',fs%rho_g)
-         ! Read in surface tension coefficient
+         ! Read in surface tension coefficient and contact angle
          call param_read('Surface tension coefficient',fs%sigma)
+         call param_read('Static contact angle',fs%contact_angle)
+         fs%contact_angle=fs%contact_angle*Pi/180.0_WP
+         ! Transfer to lpt for surface tension modeling
+         lp%sigma=fs%sigma
+         lp%contact_angle=fs%contact_angle
+         lp%VFst=0.1_WP
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
+         ! Outlet on the left
+         call fs%add_bcond(name='outlet',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
@@ -259,6 +272,7 @@ contains
          call ens_out%add_scalar('epsp',lp%VF)
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('VOF',vf%VF)
+         call ens_out%add_scalar('curv',vf%curv)
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_surface('plic',smesh)
          ! Output to ensight
@@ -346,12 +360,6 @@ contains
          call time%adjust_dt()
          call time%increment()
          
-         ! Perform particle injection, collisions, and advancement
-         
-         call lp%collide(dt=time%dt)
-         resU=vf%VF*fs%rho_l+(1.0_WP-vf%VF)*fs%rho_g
-         call lp%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W,rho=resU,visc=fs%visc,srcU=srcU,srcV=srcV,srcW=srcW)
-         
          ! Remember old VOF
          vf%VFold=vf%VF
          
@@ -363,14 +371,31 @@ contains
          ! Particle update
          lpt_step: block
             real(WP) :: dt_done,mydt
-            real(WP), dimension(:,:,:), allocatable :: tmp1,tmp2,tmp3
+            real(WP), dimension(:,:,:), allocatable :: tmp1,tmp2,tmp3,VFold,rho
+            real(WP), dimension(:,:,:), allocatable :: dVFdx,dVFdy,dVFdz
+            integer :: i,j,k
+            ! Allocate and store rho
+            allocate(rho  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); rho  =vf%VF*fs%rho_l+(1.0_WP-vf%VF)*fs%rho_g
+            ! Allocate and store VFold
+            allocate(VFold(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); VFold=lp%VF
             ! Allocate src storage
-            allocate(tmp1(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp1=0.0_WP
-            allocate(tmp2(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp2=0.0_WP
-            allocate(tmp3(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp3=0.0_WP
+            allocate(tmp1 (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp1 =0.0_WP
+            allocate(tmp2 (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp2 =0.0_WP
+            allocate(tmp3 (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp3 =0.0_WP
+            ! Allocate grad(VF) storage
+            allocate(dVFdx(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); dVFdx=0.0_WP
+            allocate(dVFdy(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); dVFdy=0.0_WP
+            allocate(dVFdz(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); dVFdz=0.0_WP
+            do k=vf%cfg%kmin_,vf%cfg%kmax_; do j=vf%cfg%jmin_,vf%cfg%jmax_; do i=vf%cfg%imin_,vf%cfg%imax_
+               dVFdx(i,j,k)=sum(fs%divu_x(:,i,j,k)*vf%VF(i-1:i,j,k))
+               dVFdy(i,j,k)=sum(fs%divu_y(:,i,j,k)*vf%VF(i,j-1:j,k))
+               dVFdz(i,j,k)=sum(fs%divu_z(:,i,j,k)*vf%VF(i,j,k-1:k))
+            end do; end do; end do
+            call fs%cfg%sync(dVFdx)
+            call fs%cfg%sync(dVFdy)
+            call fs%cfg%sync(dVFdz)
             ! Get fluid stress
-            !call fs%get_div_stress(resU,resV,resW)
-            resU=0.0_WP; resV=0.0_WP; resW=0.0_WP
+            resU=0.0_WP; resV=0.0_WP; resW=0.0_WP; call fs%get_div_stress(resU,resV,resW)
             ! Zero-out LPT source terms
             srcU=0.0_WP; srcV=0.0_WP; srcW=0.0_WP
             ! Sub-iterate
@@ -381,21 +406,32 @@ contains
                ! Decide the timestep size
                mydt=min(lp_dt,time%dtmid-dt_done)
                ! Inject, collide and advance particles
-               call lp%inject (dt=mydt,avoid_overlap=.true.)
+               if (time%t.le.lp_inj_duration) call lp%inject(dt=mydt,avoid_overlap=.true.)
                call lp%collide(dt=mydt)
-               rho=vf%VF*fs%rho_l+(1.0_WP-vf%VF)*fs%rho_g
-               call lp%advance(dt=mydt,U=fs%U,V=fs%V,W=fs%W,rho=rho,visc=fs%visc,stress_x=resU,stress_y=resV,stress_z=resW,srcU=tmp1,srcV=tmp2,srcW=tmp3)
+               call lp%advance(dt=mydt,U=fs%U,V=fs%V,W=fs%W,rho=rho,visc=fs%visc,stress_x=resU,stress_y=resV,stress_z=resW,gradVF_x=dVFdx,gradVF_y=dVFdy,gradVF_z=dVFdz,srcU=tmp1,srcV=tmp2,srcW=tmp3)
                srcU=srcU+tmp1
                srcV=srcV+tmp2
                srcW=srcW+tmp3
                ! Increment
                dt_done=dt_done+mydt
             end do
-            ! Update density based on particle volume fraction
-            !fs%rho=rho*(1.0_WP-lp%VF)
-            !dRHOdt=(fs%RHO-fs%RHOold)/time%dtmid
+            ! Get dilatation from particles: call lp%get_dilatation(dt=time%dtmid,U=fs%U,V=fs%V,W=fs%W,VFold=VFold,dil=srcM)
+            srcM=0.0_WP
+            resU=1.0_WP-0.5_WP*(lp%VF+VFold)
+            do k=lp%cfg%kmin_,lp%cfg%kmax_; do j=lp%cfg%jmin_,lp%cfg%jmax_; do i=lp%cfg%imin_,lp%cfg%imax_
+               ! Need non-zero fluid volume fraction
+               if (resU(i,j,k).le.0.0_WP) cycle
+               ! Skip walls
+               if (lp%cfg%VF(i,j,k).eq.0.0_WP) cycle
+               ! Compute consistent divergence source
+               srcM(i,j,k)=1.0_WP/(resU(i,j,k))*((lp%VF(i,j,k)-VFold(i,j,k))/time%dtmid &
+               &                                +0.5_WP*(fs%U(i,j,k)*sum(lp%grd_x(:,i,j,k)*resU(i-1:i,j,k))+fs%U(i+1,j,k)*sum(lp%grd_x(:,i+1,j,k)*resU(i:i+1,j,k))) &
+               &                                +0.5_WP*(fs%V(i,j,k)*sum(lp%grd_y(:,i,j,k)*resU(i,j-1:j,k))+fs%V(i,j+1,k)*sum(lp%grd_y(:,i,j+1,k)*resU(i,j:j+1,k))) &
+               &                                +0.5_WP*(fs%W(i,j,k)*sum(lp%grd_z(:,i,j,k)*resU(i,j,k-1:k))+fs%W(i,j,k+1)*sum(lp%grd_z(:,i,j,k+1)*resU(i,j,k:k+1))) )
+            end do; end do; end do
+            call fs%cfg%sync(srcM)
             ! Deallocate
-            deallocate(tmp1,tmp2,tmp3)
+            deallocate(tmp1,tmp2,tmp3,VFold,rho,dVFdx,dVFdy,dVFdz)
          end block lpt_step
          
          ! Apply time-varying Dirichlet conditions
@@ -406,6 +442,9 @@ contains
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+
+         ! Zero out surface tension in the bed
+         where (lp%VF.gt.lp%VFst) vf%curv=0.0_WP
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
@@ -432,9 +471,12 @@ contains
             resV=-2.0_WP*fs%rho_V*fs%V+(fs%rho_Vold+fs%rho_V)*fs%Vold+time%dt*resV
             resW=-2.0_WP*fs%rho_W*fs%W+(fs%rho_Wold+fs%rho_W)*fs%Wold+time%dt*resW
             
-            ! Add momentum source term from lpt
+            ! Add momentum source term from lpt - divide by fluid volume fraction!
             add_lpt_src: block
                integer :: i,j,k
+               srcU=srcU/(1.0_WP-lp%VF)
+               srcV=srcV/(1.0_WP-lp%VF)
+               srcW=srcW/(1.0_WP-lp%VF)
                do k=fs%cfg%kmin_,fs%cfg%kmax_; do j=fs%cfg%jmin_,fs%cfg%jmax_; do i=fs%cfg%imin_,fs%cfg%imax_
                   if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%itpr_x(:,i,j,k)*srcU(i-1:i,j,k))
                   if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%itpr_y(:,i,j,k)*srcV(i,j-1:j,k))
@@ -458,8 +500,8 @@ contains
             
             ! Solve Poisson equation
             call fs%update_laplacian()
-            call fs%correct_mfr()
-            call fs%get_div()
+            call fs%correct_mfr(src=srcM)
+            call fs%get_div(src=srcM)
             call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
             fs%psolv%rhs=-fs%cfg%vol*fs%div/time%dt
             fs%psolv%sol=0.0_WP
@@ -480,7 +522,7 @@ contains
          
          ! Recompute interpolated velocity and divergence
          call fs%interp_vel(Ui,Vi,Wi)
-         call fs%get_div()
+         call fs%get_div(src=srcM)
          
          ! Output to ensight
          if (ens_evt%occurs()) then
@@ -520,8 +562,21 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(srcU,srcV,srcW,resU,resV,resW,Ui,Vi,Wi,rho)
+      deallocate(srcU,srcV,srcW,srcM,resU,resV,resW,Ui,Vi,Wi)
       
    end subroutine simulation_final
+   
+   
+   !> Function that localizes the left (x-) of the domain
+   function xm_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin) isIn=.true.
+   end function xm_locator
+   
    
 end module simulation
