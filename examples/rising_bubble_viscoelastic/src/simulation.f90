@@ -29,25 +29,20 @@ module simulation
    type(event)    :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,bubblefile,scfile,eigfile
-
-   !> For time trackers
-   real(WP)      :: tpscalar_advance_timer
-   real(WP)      :: step_timer
-   type(monitor) :: timerfile !< File for timers
+   type(monitor) :: mfile,cflfile,bubblefile,scfile
    
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
    logical :: moving_domain
-   real(WP), dimension(3) :: center,center2,gravity
-   real(WP) :: volume,radius,radius2,Ycent,Vrise
+   real(WP), dimension(3) :: center,gravity
+   real(WP) :: volume,radius,Ycent,Vrise
    real(WP) :: Vin,Vin_old,Vrise_ref,Ycent_ref,G,ti
 
    !> Check for stabilization 
@@ -90,50 +85,6 @@ contains
       if (j.eq.pg%jmin) isIn=.true.
    end function ym_locator
 
-   !> Function that localizes the x+ side of the domain
-   function xp_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imax+1) isIn=.true.
-   end function xp_locator
-
-   !> Function that localizes the y- side of the domain
-   function xm_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imin) isIn=.true.
-   end function xm_locator
-
-   !> Function that localizes the z+ side of the domain
-   function zp_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmax+1) isIn=.true.
-   end function zp_locator
-
-   !> Function that localizes the z- side of the domain
-   function zm_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmin) isIn=.true.
-   end function zm_locator
-
 
    !> Function that localizes y- boundary for scalar
    function ym_locator_sc(pg,i,j,k) result(isIn)
@@ -155,46 +106,6 @@ contains
       isIn=.false.
       if (j.eq.pg%jmax+1) isIn=.true.
    end function yp_locator_sc
-   
-   !> Function that localizes x- boundary for scalar
-   function xm_locator_sc(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid),intent(in) :: pg
-      integer,intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imin-1) isIn=.true.
-   end function xm_locator_sc
-
-   !> Function that localizes x+ boundary for scalar
-   function xp_locator_sc(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid),intent(in) :: pg
-      integer,intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imax+1) isIn=.true.
-   end function xp_locator_sc
-
-   !> Function that localizes z- boundary for scalar
-   function zm_locator_sc(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid),intent(in) :: pg
-      integer,intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmin-1) isIn=.true.
-   end function zm_locator_sc
-
-   !> Function that localizes z+ boundary for scalar
-   function zp_locator_sc(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid),intent(in) :: pg
-      integer,intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmax+1) isIn=.true.
-   end function zp_locator_sc
    
    
    !> Routine that computes rise velocity
@@ -384,8 +295,6 @@ contains
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',ve%visc_p)
-         ! Maximum polymer extensibility
-         call param_read('Maximum polymer extensibility', ve%Lmax)
          ! Extensional viscosity parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%elongvisc)
          ! Affine parameter (ePTT)
@@ -406,7 +315,6 @@ contains
             allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
             !> Allocate storage for reconstructured C and Cold
             allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
-            allocate(ve%SCrecold(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrecold=0.0_WP
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
                   do i=cfg%imino_,cfg%imaxo_
@@ -420,22 +328,6 @@ contains
             end do
             ! Get eigenvalues and eigenvectors
             call ve%get_eigensystem(vf%VF)
-            ! Check for positive definte C based upon eigenvalues
-            call ve%check_positive_def_eign(vf%VF)
-            ! Check for positive definte C based upon determiant
-            call ve%check_positive_def_det(vf%VF)
-         else
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        ve%SC(i,j,k,1)=1.0_WP  !< Cxx
-                        ve%SC(i,j,k,4)=1.0_WP  !< Cyy
-                        ve%SC(i,j,k,6)=1.0_WP  !< Czz
-                     end if
-                  end do
-               end do
-            end do
          end if
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
@@ -467,24 +359,6 @@ contains
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
             end do
-            ! call ens_out%add_scalar('pos_def_eign',ve%positive_definite_eign)
-            ! call ens_out%add_scalar('pos_def_det',ve%positive_definite_det)
-            ! call ens_out%add_scalar('eigval1',ve%eigenval(1,:,:,:))
-            ! call ens_out%add_scalar('eigval2',ve%eigenval(2,:,:,:))
-            ! call ens_out%add_scalar('eigval3',ve%eigenval(3,:,:,:))
-            ! call ens_out%add_scalar('eigvec11',ve%eigenvec(1,1,:,:,:))
-            ! call ens_out%add_scalar('eigvec12',ve%eigenvec(1,2,:,:,:))
-            ! call ens_out%add_scalar('eigvec13',ve%eigenvec(1,3,:,:,:))
-            ! call ens_out%add_scalar('eigvec21',ve%eigenvec(2,1,:,:,:))
-            ! call ens_out%add_scalar('eigvec22',ve%eigenvec(2,2,:,:,:))
-            ! call ens_out%add_scalar('eigvec23',ve%eigenvec(2,3,:,:,:))
-            ! call ens_out%add_scalar('eigvec31',ve%eigenvec(3,1,:,:,:))
-            ! call ens_out%add_scalar('eigvec32',ve%eigenvec(3,2,:,:,:))
-            ! call ens_out%add_scalar('eigvec33',ve%eigenvec(3,3,:,:,:))
-         else
-            do nsc=1,ve%nscalar
-               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
-            end do 
          end if
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -501,10 +375,6 @@ contains
          call rise_vel()
          if (stabilization) then
             call ve%get_max_reconstructed(vf%VF)
-            call ve%get_max(vf%VF)
-            call ve%get_max_eign(vf%VF)
-         else
-            call ve%get_max(vf%VF)
          end if
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
@@ -552,38 +422,8 @@ contains
                call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_RCmin')
                call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_RCmax')
             end do
-            do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_lnmin')
-               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_lnmax')
-            end do
-         else
-            do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_min')
-               call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_max')
-            end do
          end if
          call scfile%write()
-         ! Create Eigenvalue monitor
-         if (stabilization) then
-         eigfile=monitor(ve%cfg%amRoot,'eigenvlaue')
-            call eigfile%add_column(time%n,'Timestep number')
-            call eigfile%add_column(time%t,'Time')
-            call eigfile%add_column(ve%Eval1max,'Eval1max')
-            call eigfile%add_column(ve%Eval2max,'Eval2max')
-            call eigfile%add_column(ve%Eval3max,'Eval3max')
-            call eigfile%add_column(ve%Eval1min,'Eval1min')
-            call eigfile%add_column(ve%Eval2min,'Eval2min')
-            call eigfile%add_column(ve%Eval3min,'Eval3min')
-            call eigfile%write()
-         end if
-         ! Create object time tracker monitor
-         timerfile=monitor(fs%cfg%amRoot,'rising_bubble_timers')
-         call timerfile%add_column(time%n,'Timestep number')
-         call timerfile%add_column(time%t,'Simulation Time')
-         call timerfile%add_column(cfg%nproc, 'Num of Proc')
-         call timerfile%add_column(tpscalar_advance_timer,'tpscalar time')
-         call timerfile%add_column(step_timer, 'step time')
-         call timerfile%write()
       end block create_monitor
         
    end subroutine simulation_init
@@ -591,18 +431,13 @@ contains
    
    !> Perform an NGA2 simulation
    subroutine simulation_run
-      use tpns_class, only: harmonic_visc, arithmetic_visc
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-      use parallel, only: MPI_REAL_WP
+      use tpns_class, only: harmonic_visc
       implicit none
-      real(WP) :: starttime_step,endtime_step,my_time_step
       integer  :: ierr
       
       ! Perform time integration
       do while (.not.time%done())
 
-         ! Start time step timer
-         starttime_step=mpi_wtime()
          
          ! Increment time
          call fs%get_cfl(time%dt,time%cfl)
@@ -647,32 +482,17 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
-         ! Remember old reconstructed conformation tensor
-         if (stabilization) ve%SCrecold=ve%SCrec
-
          ! Transport our liquid conformation tensor using log conformation
          advance_scalar: block
-            use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-            use parallel, only: MPI_REAL_WP
-            real(WP) :: starttime,endtime,my_time
             integer :: ierr
             integer :: i,j,k,nsc
             ! Add source terms for constitutive model
             if (stabilization) then 
                ! Streching 
                call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
-               ! Relxation
-               ! call ve%get_relax_log(SCtmp,vf%VFold);             resSC=resSC+SCtmp
-            else
-               ! Streching
-               call ve%get_CgradU(gradU,SCtmp,vf%VFold);    resSC=SCtmp
-               ! Relxation
-               call ve%get_relax(SCtmp,time%dt,vf%VFold);   resSC=resSC+SCtmp
             end if
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
-            tpscalar_advance_timer=0.0_WP
-            starttime=MPI_WTIME()
             ve%SCold=ve%SC
             ! Explicit calculation of dSC/dt from scalar equation
             call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
@@ -681,12 +501,6 @@ contains
                where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
-            endtime=MPI_WTIME()
-            my_time=endtime-starttime
-            ! Reduce time to get total sum time across all processors
-            call MPI_ALLREDUCE(my_time,tpscalar_advance_timer,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
-            ! Find average wall time
-            tpscalar_advance_timer=tpscalar_advance_timer/cfg%nproc
             ! Apply boundary conditions
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
@@ -705,10 +519,6 @@ contains
             call ve%reconstruct_log_conformation(vf%VF)
             ! Take exp(eigenvalues) to use in next time-step
             ve%eigenval=exp(ve%eigenval)
-            ! ! Check for positive definte C based upon eigenvalues
-            ! call ve%check_positive_def_eign(vf%VF)
-            ! ! Check for positive definte C based upon determiant
-            ! call ve%check_positive_def_det(vf%VF)
          end if
 
          ! Perform sub-iterations
@@ -731,11 +541,11 @@ contains
 
             ! Add polymer stress term
             polymer_stress: block
-               use tpviscoelastic_class, only: fenecr,oldroydb,lptt,eptt,fenep
+               use tpviscoelastic_class, only: eptt
                integer :: i,j,k,nsc
                real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
                real(WP), dimension(:,:,:,:), allocatable :: stress
-               real(WP) :: coeff,trace
+               real(WP) :: coeff
                ! Allocate work arrays
                allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
                allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -745,63 +555,7 @@ contains
                stress=0.0_WP
                if (stabilization) then !< Build stress tensor from reconstructed C
                   select case (ve%model)
-                  case (oldroydb)
-                     coeff=ve%visc_p/ve%trelax
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do
-                        end do
-                     end do
-                  case (fenecr)
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              !>Trace of reconstructed conformation tensor
-                              trace=ve%eigenval(1,i,j,k)*ve%eigenvec(1,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(1,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(1,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(2,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(2,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(2,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(3,1,i,j,j)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(3,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(3,3,i,j,k)**2
-                              !>Relaxation function coefficent
-                              coeff=1.00_WP/(1.0_WP-trace/ve%Lmax**2)
-                              coeff=coeff/ve%trelax
-                              coeff=ve%visc_p*coeff
-                              ! Build stress tensor
-                              stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do
-                        end do
-                     end do
-                  case (fenep)
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              !>Trace of reconstructed conformation tensor
-                              trace=ve%eigenval(1,i,j,k)*ve%eigenvec(1,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(1,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(1,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(2,1,i,j,k)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(2,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(2,3,i,j,k)**2+&
-                              &     ve%eigenval(1,i,j,k)*ve%eigenvec(3,1,i,j,j)**2+ve%eigenval(2,i,j,k)*ve%eigenvec(3,2,i,j,k)**2+ve%eigenval(3,i,j,k)*ve%eigenvec(3,3,i,j,k)**2
-                              !>Relaxation function coefficent
-                              coeff=(ve%Lmax**2-3.00_WP)/(ve%Lmax**2-trace)
-                              ! Build stress tensor
-                              stress(i,j,k,1)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*(ve%visc_p/ve%trelax)*(coeff*ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do 
-                        end do
-                     end do
-                  case (eptt,lptt)
+                  case (eptt)
                      coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
                      do k=cfg%kmino_,cfg%kmaxo_
                         do j=cfg%jmino_,cfg%jmaxo_
@@ -818,31 +572,6 @@ contains
                         end do
                      end do
                   end select 
-               else
-                  select case (ve%model)
-                  case (oldroydb,fenecr,fenep)
-                     ! Calculate the polymer stress
-                     call ve%get_relax(stress,time%dt,vf%VF)
-                     ! Build liquid stress tensor
-                     do nsc=1,6
-                        stress(:,:,:,nsc)=-ve%visc_p*vf%VF*stress(:,:,:,nsc)
-                     end do
-                  case (eptt,lptt)
-                     ! Calculate the polymer stress
-                     coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              stress(i,j,k,1)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=vf%VF(i,j,k)*coeff*(ve%SC(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do
-                        end do
-                     end do
-                  end select
                end if
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1
@@ -925,29 +654,17 @@ contains
          ! Get rise velocity
          call rise_vel()
 
-         ! End time step timer
-         endtime_step=mpi_wtime()
-         my_time_step=endtime_step-starttime_step
-
-         ! Reduce time to get total sum time across all processors
-         call MPI_ALLREDUCE(my_time_step,step_timer,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
 
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
          if (stabilization) then
             call ve%get_max_reconstructed(vf%VF)
-            call ve%get_max(vf%VF)
-            call ve%get_max_eign(vf%VF)
-            call eigfile%write()
-         else
-            call ve%get_max(vf%VF)
          end if
          call mfile%write()
          call cflfile%write()
          call bubblefile%write()
          call scfile%write()
-         call timerfile%write()
          
       end do
       
@@ -957,12 +674,6 @@ contains
    !> Finalize the NGA2 simulation
    subroutine simulation_final
       implicit none
-      
-      ! Get rid of all objects - need destructors
-      ! monitor
-      ! ensight
-      ! bcond
-      ! timetracker
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
