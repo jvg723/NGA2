@@ -35,13 +35,8 @@ module tpviscoelastic_class
       real(WP), dimension(:,:,:,:,:), allocatable :: eigenvec  !< Field of eigenvectors of the conformation tensor
       ! Storage for reconstructed conformation tensor
       real(WP), dimension(:,:,:,:),   allocatable ::SCrec
-      real(WP), dimension(:,:,:,:),   allocatable ::SCrecold
       ! Monitoring quantities
       real(WP), dimension(:),     allocatable :: SCrecmax,SCrecmin,SCrecint   !< Maximum and minimum, integral reconstructed scalar feild 
-      real(WP), dimension(:,:,:), allocatable :: positive_definite_eign       !< Check to ensure C is positive definte based upon eigenvalues (=1 it is positive definite, =2 it is NOT positive definite)
-      real(WP), dimension(:,:,:), allocatable :: positive_definite_det       !< Check to ensure C is positive definte based upon its determinant (=1 it is positive definite, =2 it is NOT positive definite)
-      real(WP)                            :: Eval1max,Eval2max,Eval3max   !< Maximum eigenvalue in domain
-      real(WP)                            :: Eval1min,Eval2min,Eval3min   !< Minimum eigenvalue in domain
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
@@ -54,9 +49,6 @@ module tpviscoelastic_class
       procedure :: reconstruct_conformation                !< Reconstruct conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: reconstruct_log_conformation            !< Reconstruct log conformation tensor for decomposed eigenvalues and eigenvectors
       procedure :: get_max_reconstructed                   !< Calculate maximum and integral field value for reconstructed C field
-      procedure :: get_max_eign                            !< Calculate maximum and minimum of eigenvalues
-      procedure :: check_positive_def_eign                 !< Check if the conformation tensor is positive definite in a cell based upon its eigenvalues
-      procedure :: check_positive_def_det                  !< Check if the conformation tensor is positive definite in a cell based upon its determinant
    end type tpviscoelastic
    
    
@@ -76,9 +68,6 @@ contains
       this%phase=phase; this%SCname=['Cxx','Cxy','Cxz','Cyy','Cyz','Czz']
       ! Assign closure model for viscoelastic fluid
       this%model=model
-      ! Allocate monitoring array
-      allocate(this%positive_definite_eign(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%positive_definite_eign=0.0_WP
-      allocate(this%positive_definite_det (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%positive_definite_det=0.0_WP
    end subroutine init
    
    
@@ -159,7 +148,7 @@ contains
       class(tpviscoelastic), intent(inout) :: this
       real(WP), dimension(1:,1:,this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in)    :: gradU
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:,1:),    intent(inout) :: resSC
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),       intent(in) :: VF
+      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:),       intent(in)    :: VF
       integer :: i,j,k
       ! Temp scalar values for matrix multiplication
       real(WP), dimension(3,3) :: tmpMat,M,B,Omega   !< Matrices for diagonalization 
@@ -390,7 +379,6 @@ contains
                   if (this%mask(i,j,k).ne.0) cycle
                   if (VF(i,j,k).eq.0.0_WP) cycle
                   f=0.0_WP; coeff=0.0_WP
-                  ! f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCrecold(i,j,k,1)+this%SCrecold(i,j,k,4)+this%SCrecold(i,j,k,6))-3.0_WP))
                   f=exp(this%elongvisc/(1.0_WP-this%affinecoeff)*((this%SCrec(i,j,k,1)+this%SCrec(i,j,k,4)+this%SCrec(i,j,k,6))-3.0_WP))
                   coeff=-1.00_WP*((f*dt)/this%trelax)    
                   this%SCrec(i,j,k,1)=this%SCrec(i,j,k,1)*exp(coeff)+(1.00_WP-exp(coeff))*1.0_WP !< xx tensor component
@@ -685,107 +673,6 @@ contains
       end do
       deallocate(tmp)
    end subroutine get_max_reconstructed
-
-   !> Calculate the max of our fields
-   subroutine get_max_eign(this,VF)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_MAX
-      use parallel, only: MPI_REAL_WP
-      implicit none
-      class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
-      integer :: i,j,k,ierr
-      real(WP) :: my_Eval1max,my_Eval2max,my_Eval3max
-      real(WP) :: my_Eval1min,my_Eval2min,my_Eval3min
-      ! Initalize to 1 becuase C=I at begining of simulation 
-      my_Eval1max=1.0_WP; my_Eval2max=1.0_WP; my_Eval3max=1.0_WP
-      my_Eval1min=1.0_WP; my_Eval2min=1.0_WP; my_Eval3min=1.0_WP
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               if (this%mask(i,j,k).ne.0.and.VF(i,j,k).eq.0.0_WP) cycle
-               my_Eval1max=max(my_Eval1max,this%eigenval(1,i,j,k))
-               my_Eval2max=max(my_Eval2max,this%eigenval(2,i,j,k))
-               my_Eval3max=max(my_Eval3max,this%eigenval(3,i,j,k))
-               my_Eval1min=min(my_Eval1min,this%eigenval(1,i,j,k))
-               my_Eval2min=min(my_Eval2min,this%eigenval(2,i,j,k))
-               my_Eval3min=min(my_Eval3min,this%eigenval(3,i,j,k))
-            end do
-         end do
-      end do
-      ! Get the parallel max
-      call MPI_ALLREDUCE(my_Eval1max  ,this%Eval1max  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eval2max  ,this%Eval2max  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eval3max  ,this%Eval3max  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eval1min  ,this%Eval1min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eval2min  ,this%Eval2min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-      call MPI_ALLREDUCE(my_Eval3min  ,this%Eval3min  ,1,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
-   end subroutine get_max_eign
-
-   !> Mark if a cell is positive definite based upon eigenvalues
-   subroutine check_positive_def_eign(this,VF)
-      implicit none
-      class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
-      integer :: i,j,k
-      ! Default value is 0
-      this%positive_definite_eign=0.0_WP
-      do k=this%cfg%kmino_,this%cfg%kmaxo_
-         do j=this%cfg%jmino_,this%cfg%jmaxo_
-            do i=this%cfg%imino_,this%cfg%imaxo_
-               ! Skip wall/bcond cells
-               if (this%mask(i,j,k).ne.0) cycle
-               ! Skip gas cells
-               if (VF(i,j,k).eq.0.0_WP) cycle
-               ! Check eigenvalues
-               if (this%eigenval(1,i,j,k).le.0.0_WP.or.this%eigenval(2,i,j,k).le.0.0_WP.or.this%eigenval(2,i,j,k).le.0.0_WP) then
-                  !< C has eignevlaues less than or equal to 0 (positive_def=2)
-                  this%positive_definite_eign(i,j,k)=2.00_WP
-               else
-                  !< C has eignevlaues greater than 0 (positive_def=1)
-                  this%positive_definite_eign(i,j,k)=1.00_WP
-               end if
-            end do
-         end do
-      end do
-   end subroutine check_positive_def_eign
-
-   !> Mark if a cell is positive definite based upon its determinant (Sylvester's criterion)
-   subroutine check_positive_def_det(this,VF)
-      implicit none
-      class(tpviscoelastic), intent(inout) :: this
-      real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: VF
-      integer :: i,j,k
-      real(WP) :: det1x1,det2x2,det3x3
-      ! Default value is 0
-      this%positive_definite_det=0.0_WP
-      do k=this%cfg%kmino_,this%cfg%kmaxo_
-         do j=this%cfg%jmino_,this%cfg%jmaxo_
-            do i=this%cfg%imino_,this%cfg%imaxo_
-               ! Skip wall/bcond cells
-               if (this%mask(i,j,k).ne.0) cycle
-               ! Skip gas cells
-               if (VF(i,j,k).eq.0.0_WP) cycle
-               det1x1=0.0_WP;det2x2=0.0_WP;det3x3=0.0_WP
-               ! upper left 1-by-1 corner of C
-               det1x1=this%SCrec(i,j,k,1)
-               ! upper left 2-by-2 corner of C
-               det2x2=this%SCrec(i,j,k,1)*this%SCrec(i,j,k,4)-this%SCrec(i,j,k,2)*this%SCrec(i,j,k,2)
-               ! upper left 3-by-3 corner of C
-               det3x3=this%SCrec(i,j,k,1)*(this%SCrec(i,j,k,4)*this%SCrec(i,j,k,6)-this%SCrec(i,j,k,5)*this%SCrec(i,j,k,5))-&
-               &      this%SCrec(i,j,k,2)*(this%SCrec(i,j,k,2)*this%SCrec(i,j,k,6)-this%SCrec(i,j,k,5)*this%SCrec(i,j,k,3))+&
-               &      this%SCrec(i,j,k,3)*(this%SCrec(i,j,k,2)*this%SCrec(i,j,k,5)-this%SCrec(i,j,k,4)*this%SCrec(i,j,k,3))
-               ! Check determinant values
-               if (det1x1.le.0.0_WP.or.det2x2.le.0.0_WP.or.det3x3.le.0.0_WP) then
-                  !< C has a determinant less than or equal to 0 (positive_def=2)
-                  this%positive_definite_det(i,j,k)=2.00_WP
-               else
-                  !< C has determinants greater than 0 (positive_def=1)
-                  this%positive_definite_det(i,j,k)=1.00_WP
-               end if
-            end do
-         end do
-      end do
-   end subroutine check_positive_def_det
 
 
 end module tpviscoelastic_class
