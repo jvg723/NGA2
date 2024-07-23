@@ -15,7 +15,7 @@ module simulation
    implicit none
    private
    
-   !> Get a couple linear solvers, a two-phase flow solver and volume fraction solver and corresponding time tracker
+   !> Get a couple linear solvers, a two-phase flow solver, volume fraction solver, two-phase viscoelastic solver and corresponding time tracker
    type(hypre_str),      public :: ps
    type(ddadi),          public :: vs
    type(tpns),           public :: fs
@@ -298,7 +298,7 @@ contains
          ! Extensional viscosity parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%elongvisc)
          ! Affine parameter (ePTT)
-         call param_read('Extensional viscosity parameter',ve%affinecoeff)
+         call param_read('Affine parameter',ve%affinecoeff)
          ! Apply boundary conditions
          if (moving_domain) then
             call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
@@ -313,7 +313,7 @@ contains
             !> Allocate storage fo eigenvalues and vectors
             allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
             allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
-            !> Allocate storage for reconstructured C and Cold
+            !> Allocate storage for reconstructured C
             allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
             do k=cfg%kmino_,cfg%kmaxo_
                do j=cfg%jmino_,cfg%jmaxo_
@@ -419,8 +419,8 @@ contains
          call scfile%add_column(time%t,'Time')
          if (stabilization) then
             do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_RCmin')
-               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_RCmax')
+               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
             end do
          end if
          call scfile%write()
@@ -438,7 +438,6 @@ contains
       ! Perform time integration
       do while (.not.time%done())
 
-         
          ! Increment time
          call fs%get_cfl(time%dt,time%cfl)
          call time%adjust_dt()
