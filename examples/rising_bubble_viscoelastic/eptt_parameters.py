@@ -7,7 +7,7 @@ import re
 
 # Experimental data from Pilz & Brenn (2007) for aqueous 0.8% weight P2500 solution
 exp_data=np.zeros((30,2))
-####### strain rate (s^-1) ######## ####### viscosity (Pa*s) ########
+####### strain rate (s^-1) ########  ####### viscosity (Pa*s) ########
 exp_data[0][0] =0.03320264167012359; exp_data[0][1] =1.555542634556734
 exp_data[1][0] =0.04759095611380148; exp_data[1][1] =1.555542634556734
 exp_data[2][0] =0.06821442481378769; exp_data[2][1] =1.529332243485468
@@ -51,10 +51,33 @@ exp_data[29][0]=1007.5284747070853 ; exp_data[29][1]= 0.02967049031542662
 #     # return root estimate at first iteration if it is a root of f(x)
 #     if f(c)
 
+# ePTT model parameters
+trelax     =0.203 # (s) polymer relaxation time
+visc_p     =1.483 # (Pa-s) polymer viscosity
+visc_s     =0.03  # (Pa-s) solvent viscosity
+affine     =0.12  # ---- Adjust to fit curve ----
+extensional=0.5   # ---- Adjust to fit curve ----
+
+# Arrays
+sr_vec=np.arange(1e-2,0.1,1e3) # Shear rate vector
+txx   =np.zeros_like(sr_vec)   # Normal stress
+tauxy =np.zeros_like(sr_vec)   # Shear stress
+visc  =np.zeros_like(sr_vec)   # Rate dependent viscosity
+
+# # Solve for viscosity as a function of shear rate
+# for i in range(len(sr_vec)):
+#     # fun = trelax tauxx: fun_bisection(tauxx, sr_vec[i])
+#     # txx[i] = bisect(fun, 0, 100)
+
+#     tauxy[i]=(visc_p*sr_vec[i]+((affine-2.0)/(2.0-affine))*trelax*sr_vec[i]*affine*txx[i])*\
+#              (1.0/np.exp((2.0*extensional*trelax)/visc_p*txx[i]*((1.0-affine)/(2.0 - affine))))
+
+#     visc[i]=tauxy[i]/sr_vec[i]+visc_s
+
 
 # Plotting
 plt.figure(figsize=(10, 6))
-plt.scatter(exp_data[:, 0], exp_data[:, 1], marker='o', color='k', label='Experimental Data (Pilz & Brenn, 2007)')
+plt.scatter(exp_data[:, 0], exp_data[:, 1], marker='o', color='r', label='Experimental Data (Pilz & Brenn, 2007)')
 plt.xscale('log')  # Set logarithmic scale for the x-axis
 plt.yscale('log')  # Set logarithmic scale for the y-axis
 plt.xlabel('Strain Rate (s^-1)')
