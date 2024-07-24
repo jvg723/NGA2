@@ -39,17 +39,124 @@ exp_data[27][0]=512.976795051085   ; exp_data[27][1]=0.0363819195224116
 exp_data[28][0]=702.9194126327736  ; exp_data[28][1]=0.032301678647516555
 exp_data[29][0]=1007.5284747070853 ; exp_data[29][1]= 0.02967049031542662
 
+def bisection_method(f, a, b, opts=None):
+    # ----------------------------------
+    # Sets (or defaults) solver options.
+    # ----------------------------------
+    
+    # sets maximum number of iterations (defaults to 200)
+    if opts is None or 'k_max' not in opts:
+        k_max = 200
+    else:
+        k_max = opts['k_max']
+    
+    # determines if all intermediate estimates should be returned
+    if opts is None or 'return_all' not in opts:
+        return_all = False
+    else:
+        return_all = opts['return_all']
+    
+    # sets tolerance (defaults to 10⁻¹⁰)
+    if opts is None or 'TOL' not in opts:
+        TOL = 1e-10
+    else:
+        TOL = opts['TOL']
+    
+    # -----------------
+    # Bisection method.
+    # -----------------
+    
+    # root estimate at first iteration
+    c = (a + b) / 2
+    
+    # returns root estimate at first iteration if it is a root of f(x)
+    if f(c) == 0:
+        return c
+    
+    # function evaluations at first iteration
+    fa = f(a)
+    fc = f(c)
+    
+    # preallocates array
+    x_all = np.zeros(k_max + 1) if return_all else None
+    
+    # iteration
+    for k in range(1, k_max + 1):
+        # stores results in arrays
+        if return_all:
+            x_all[k - 1] = c
+        
+        # updates interval
+        if fc == 0:
+            break
+        elif fa * fc > 0:
+            a = c
+            fa = fc
+        else:
+            b = c
+        
+        # updates root estimate
+        c = (a + b) / 2
+        
+        # terminates solver if converged
+        if (b - a) < TOL:
+            break
+        
+        # function evaluation at updated root estimate
+        fc = f(c)
+    
+    # converged root
+    x = c
+    
+    # stores converged result and trims array
+    if return_all:
+        x_all[k] = x
+        x_all = x_all[:k + 1]
+    
+    return x, x_all if return_all else x
+
 # # Bisection root finder function
-# def bisection(f,a,b)
-#     # method parameters
-#     k_max=200 # max number of iterations
-#     tol=1e-10 # tolerance
-
-#     # root estimate at first iteration
+# # f - function to solve
+# # a - lower bound of interval containing root
+# # b - upper bound of interval containing root 
+# def bisection_method(f,a,b):
+#     # Set solver options
+#     k_max=200
+#     TOL  =1e-10
+#     # Root estimate at first iteration
 #     c=(a+b)/2.0
-
-#     # return root estimate at first iteration if it is a root of f(x)
-#     if f(c)
+#     # Returns root estimate at first iteration if it is a root of f(x)
+#     if f(c)==0:
+#         return c
+#     # Function evaluations at first iteration
+#     fa=f(a)
+#     fc=f(c)
+#     # Iterate 
+#     for k in range(1,k_max+1):
+#         # Updates interval
+#         if fc==0:
+#             break
+#         elif fa*f >0:
+#             a=c
+#             fa=fc
+#         else:
+#             b=c
+#         # Updates root estimate
+#         c=(a+b)/2.0
+#         # Terminates solver if converged
+#         if (b-a)<TOL:
+#             break
+#         # Function evaluation at updated root estimate
+#         fc=f(c)
+#     # Converged root
+#     x=c
+#     # Stores converged result and trims array
+#     if return_all:
+#         x_all[k]=x
+#         x_all=x_all[:k+1]
+#         return x_all
+#     else:
+#         return x
 
 # ePTT model parameters
 trelax     =0.203 # (s) polymer relaxation time
@@ -60,19 +167,22 @@ extensional=0.5   # ---- Adjust to fit curve ----
 
 # Arrays
 sr_vec=np.arange(1e-2,0.1,1e3) # Shear rate vector
-txx   =np.zeros_like(sr_vec)   # Normal stress
+tauxx =np.zeros_like(sr_vec)   # Normal stress
 tauxy =np.zeros_like(sr_vec)   # Shear stress
 visc  =np.zeros_like(sr_vec)   # Rate dependent viscosity
 
-# # Solve for viscosity as a function of shear rate
-# for i in range(len(sr_vec)):
-#     # fun = trelax tauxx: fun_bisection(tauxx, sr_vec[i])
-#     # txx[i] = bisect(fun, 0, 100)
-
-#     tauxy[i]=(visc_p*sr_vec[i]+((affine-2.0)/(2.0-affine))*trelax*sr_vec[i]*affine*txx[i])*\
-#              (1.0/np.exp((2.0*extensional*trelax)/visc_p*txx[i]*((1.0-affine)/(2.0 - affine))))
-
-#     visc[i]=tauxy[i]/sr_vec[i]+visc_s
+# Solve for viscosity as a function of shear rate
+for i in range(len(sr_vec)):
+    # Calcuate normal stress using bisection method to rind root
+    fun = lambda txx: (np.exp((2.0*extensional*trelax)/(visc_p*tauxx*((1-affine)/(2.0-affine))))**2/ 
+                        (trelax*(2.0-affine)*sr_vec[i]))* txx\
+                        -visc_p*sr_vec[i]-((affine-2.0)/(2.0-affine))*trelax*sr_vec[i]*affine*txx
+    tauxx[i]=bisection_method(fun,0.0,100.0)
+    # Shear stress
+    tauxy[i]=(visc_p*sr_vec[i]+((affine-2.0)/(2.0-affine))*trelax*sr_vec[i]*affine*txx[i])*\
+             (1.0/np.exp((2.0*extensional*trelax)/visc_p*txx[i]*((1.0-affine)/(2.0 - affine))))
+    # Viscosity
+    visc[i]=tauxy[i]/sr_vec[i]+visc_s
 
 
 # Plotting
