@@ -48,12 +48,13 @@ def bisection_method(fun,a,b,tol=1e-5):
             a=midpoint
     return (a+b)/2.0
 
-# ePTT model parameters
+# ePTT model parameters 
+# ---- Adjust to fit curve ----
 trelax     =0.203 # (s) polymer relaxation time
 visc_p     =1.483 # (Pa-s) polymer viscosity
 visc_s     =0.03  # (Pa-s) solvent viscosity
-affine     =0.12  # ---- Adjust to fit curve ----
-extensional=0.5   # ---- Adjust to fit curve ----
+affine     =0.12  # non-affine motion parameter
+extensional=0.5   # extensional viscosity parameter
 
 # Arrays
 sr_vec=np.arange(1e-2,1e3,0.1) # Shear rate vector
@@ -73,7 +74,6 @@ for i in range(len(sr_vec)):
     # Viscosity
     visc[i]=tauxy[i]/sr_vec[i]+visc_s
 
-
 # Plotting
 plt.figure(figsize=(8, 6))
 plt.scatter(exp_data[:,0], exp_data[:,1], marker='o', color='r', label='Experimental Data (Pilz & Brenn, 2007)')
@@ -87,4 +87,13 @@ plt.legend()
 plt.tight_layout()
 plt.xlim([10**-2, 10**3])
 plt.ylim([10**-2, 10**1])
+textstr = '\n'.join((
+    r'$\mu_p=%.3f$' % (visc_p, ),
+    r'$\mu_s=%.2f$' % (visc_s, ),
+    r'$\lambda=%.3f$' % (trelax, ),
+    r'$\xi=%.2f$' % (affine, ),
+    r'$\mathrm{\epsilon}=%.2f$' % (extensional, )))
+props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+plt.text(0.05, 0.1, textstr,fontsize=14,
+        verticalalignment='top', bbox=props)
 plt.show()
