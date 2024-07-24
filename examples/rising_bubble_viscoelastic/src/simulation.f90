@@ -15,7 +15,7 @@ module simulation
    implicit none
    private
    
-   !> Get a couple linear solvers, a two-phase flow solver, volume fraction solver, two-phase viscoelastic solver and corresponding time tracker
+   !> Get linear solvers, a two-phase flow solver, volume fraction solver, two-phase viscoelastic solver and corresponding time tracker
    type(hypre_str),      public :: ps
    type(ddadi),          public :: vs
    type(tpns),           public :: fs
@@ -485,9 +485,8 @@ contains
          advance_scalar: block
             integer :: ierr
             integer :: i,j,k,nsc
-            ! Add source terms for constitutive model
+            ! Add streching source term for constitutive model
             if (stabilization) then 
-               ! Streching 
                call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
             end if
             ve%SC=ve%SC+time%dt*resSC
@@ -504,6 +503,7 @@ contains
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
 
+         ! Add in relaxation forcing and reconstruct C
          if (stabilization) then 
             ! Get eigenvalues and eigenvectors
             call ve%get_eigensystem(vf%VF)

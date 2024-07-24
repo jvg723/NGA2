@@ -389,7 +389,7 @@ contains
          ! Extensional viscosity parameter (ePTT)
          call param_read('Extensional viscosity parameter',ve%elongvisc)
          ! Affine parameter (ePTT)
-         call param_read('Extensional viscosity parameter',ve%affinecoeff)
+         call param_read('Affine parameter',ve%affinecoeff)
          ! Apply boundary conditions
          if (moving_domain) then
             call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')

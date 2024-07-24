@@ -40,9 +40,9 @@ module tpviscoelastic_class
    contains
       procedure :: init                                    !< Initialization of tpviscoelastic class (different name is used because of extension...)
       procedure :: get_CgradU                              !< Calculate streching and distortion term
+      procedure :: get_CgradU_log                          !< Calculate streching and distortion term for log-conformation tensor
       procedure :: get_relax                               !< Calculate relaxation term
       procedure :: get_relax_analytical                    !< Calculate relaxation term based on a semi-analytical integration 
-      procedure :: get_CgradU_log                          !< Calculate streching and distortion term for log-conformation tensor
       procedure :: get_relax_log                           !< Calculate relaxation term for log-conformation tensor
       procedure :: get_eigensystem                         !< Calculate eigenvalues and eigenvectors for conformation tensor
       procedure :: get_eigensystem_SCrec                   !< Calculate eigenvalues and eigenvectors for conformation tensor
@@ -553,7 +553,6 @@ contains
 
    
    !> Calculate the ln(eigenval) and eigenvectors of the conformation tensor in cells where VF>0
-   !> Assumes scalar being transported is C
    subroutine get_eigensystem_SCrec(this,VF)
       use mathtools, only: eigensolve3
       implicit none
