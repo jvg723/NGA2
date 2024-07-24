@@ -1,9 +1,6 @@
 # Importing packages
 import matplotlib.pyplot as plt
 import numpy as np
-import math
-import os
-import re
 
 # Experimental data from Pilz & Brenn (2007) for aqueous 0.8% weight P2500 solution
 exp_data=np.zeros((30,2))
@@ -67,9 +64,8 @@ visc  =np.zeros_like(sr_vec)   # Rate dependent viscosity
 # Solve for viscosity as a function of shear rate
 for i in range(len(sr_vec)):
     # Calcuate normal stress using bisection method to rind root
-    fun = lambda txx: (np.exp((2 * extensional * trelax) / visc_p * txx * ((1 - affine) / (2 - affine)))**2 / (trelax* (2 - affine) * sr_vec[i])) * txx \
-                         - visc_p * sr_vec[i] - ((affine - 2) / (2 - affine)) * trelax * sr_vec[i] * affine * txx
-
+    fun = lambda txx: (np.exp((2*extensional*trelax)/visc_p*txx*((1-affine)/(2-affine)))**2/(trelax*(2-affine)*sr_vec[i]))*txx\
+                      -visc_p*sr_vec[i]-((affine-2)/(2-affine))*trelax*sr_vec[i]*affine*txx
     tauxx[i]=bisection_method(fun,0,100)
     # Shear stress
     tauxy[i]=(visc_p*sr_vec[i]+((affine-2.0)/(2.0-affine))*trelax*sr_vec[i]*affine*tauxx[i])*\
@@ -79,14 +75,16 @@ for i in range(len(sr_vec)):
 
 
 # Plotting
-plt.figure(figsize=(10, 6))
-plt.scatter(exp_data[:, 0], exp_data[:, 1], marker='o', color='r', label='Experimental Data (Pilz & Brenn, 2007)')
-plt.plot(sr_vec, visc, color='k', linewidth=5, label='ePTT parameter fit')
-plt.xscale('log')  # Set logarithmic scale for the x-axis
-plt.yscale('log')  # Set logarithmic scale for the y-axis
+plt.figure(figsize=(8, 6))
+plt.scatter(exp_data[:,0], exp_data[:,1], marker='o', color='r', label='Experimental Data (Pilz & Brenn, 2007)')
+plt.plot(sr_vec, visc, color='k', linewidth=3, label='ePTT parameter fit')
+plt.xscale('log')  
+plt.yscale('log') 
 plt.xlabel('Strain Rate (s^-1)')
 plt.ylabel('Viscosity (Pa-s)')
 plt.grid(True, which="both", ls="--", linewidth=0.5)
 plt.legend()
 plt.tight_layout()
+plt.xlim([10**-2, 10**3])
+plt.ylim([10**-2, 10**1])
 plt.show()
