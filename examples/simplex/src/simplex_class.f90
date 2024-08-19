@@ -559,8 +559,29 @@ contains
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
-         this%smesh=surfmesh(nvar=0,name='plic')
-         call this%vf%update_surfmesh_nowall(this%smesh)
+         use irl_fortran_interface
+         integer :: i,j,k,nplane,np
+         this%smesh=surfmesh(nvar=2,name='plic')
+         this%smesh%varname(1)='nplane'
+         this%smesh%varname(2)='thickness'
+         ! Transfer polygons to smesh
+         call this%vf%update_surfmesh(this%smesh)
+         ! Also populate nplane variable
+         this%smesh%var(1,:)=1.0_WP
+         np=0
+         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; 
+                        this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                        this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                     end if
+                  end do
+               end do
+            end do
+         end do
       end block create_smesh
       
       
@@ -763,10 +784,34 @@ contains
          call this%ccl%build(make_label,same_label)
          vof=this%vf%VF; call this%remove_drops()
       end block remove_vof
-      
+
       ! Output to ensight
       if (this%ens_evt%occurs()) then
-         call this%vf%update_surfmesh_nowall(this%smesh)
+         ! Update surfmesh object 
+         update_smesh: block
+            use irl_fortran_interface
+            integer :: i,j,k,nplane,np
+            ! Transfer polygons to smesh
+            call this%vf%update_surfmesh(this%smesh)
+            ! Also populate nplane variable
+            this%smesh%var(1,:)=1.0_WP
+            ! Initalize variables to 0
+            this%smesh%var(2,:)=0.0_WP
+            np=0
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end block update_smesh
+         ! Write to ensignt
          call this%ens_out%write_data(this%time%t)
       end if
       
