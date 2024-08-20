@@ -7,7 +7,6 @@ module geometry
    
    !> Single config
    type(config), public :: cfg
-   real(WP), public :: Lchannel,Wchannel
    
    public :: geometry_init
 
@@ -33,21 +32,20 @@ contains
          call param_read('Lx',Lx); call param_read('nx',nx); allocate(x(nx+1))
          call param_read('Ly',Ly); call param_read('ny',ny); allocate(y(ny+1))
          call param_read('Lz',Lz); call param_read('nz',nz); allocate(z(nz+1))
-         call param_read('Length of channel',Lchannel)
 
          ! Create simple rectilinear grid
          do i=1,nx+1
-            x(i)=real(i-1,WP)/real(nx,WP)*Lx
+            x(i)=real(i-1,WP)/real(nx,WP)*Lx-0.5_WP*Lx
          end do
          do j=1,ny+1
-            y(j)=real(j-1,WP)/real(ny,WP)*Ly-Lchannel
+            y(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
          end do
          do k=1,nz+1
             z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
          end do
          
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.true.,name='wall_jet')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.true.,name='stag_flow')
          
       end block create_grid
       
@@ -67,14 +65,6 @@ contains
       create_walls: block
          integer :: i,j,k
          cfg%VF=1.0_WP
-         do k=cfg%kmino_,cfg%kmaxo_
-            do j=cfg%jmino_,cfg%jmaxo_
-               do i=cfg%imino_,cfg%imaxo_
-                  if (cfg%xm(i).lt.0.0_WP) cfg%VF(i,j,k)=0.0_WP
-                  if (cfg%ym(j).lt.0.0_WP.and.cfg%xm(i).gt.1.0_WP) cfg%VF(i,j,k)=0.0_WP
-               end do
-            end do
-         end do
       end block create_walls
       
 

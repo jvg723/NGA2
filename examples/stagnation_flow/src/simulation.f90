@@ -3,6 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg
    use hypre_str_class,   only: hypre_str
+   use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use timetracker_class, only: timetracker
@@ -15,7 +16,7 @@ module simulation
    
    !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
    type(hypre_str),   public :: ps
-	type(hypre_str),   public :: vs
+   type(ddadi),       public :: vs
    type(tpns),        public :: fs
    type(vfs),         public :: vf
    type(timetracker), public :: time
@@ -56,19 +57,32 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (j.eq.pg%jmax+1.and.pg%xm(i).gt.0.0_WP) isIn=.true.
+      if (j.eq.pg%jmax+1) isIn=.true.
    end function yp_locator
+
+   !> Function that localizes the y- side of the domain
+   function ym_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      implicit none
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (j.eq.pg%jmin) isIn=.true.
+   end function ym_locator
 
 
    !> Function that localizes the inlet
-   function inlet_locator(pg,i,j,k) result(isIn)
+   function xm_inlet_locator(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
       class(pgrid), intent(in) :: pg
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (j.eq.pg%jmin.and.pg%xm(i).gt.0.0_WP.and.pg%xm(i).lt.1.0_WP) isIn=.true.
-   end function inlet_locator
+      ! if (j.eq.pg%jmin.and.pg%xm(i).gt.0.0_WP.and.pg%xm(i).lt.1.0_WP) isIn=.true.
+      ! if (i.eq.pg%imax+1.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
+      if (i.eq.pg%imin.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
+   end function xm_inlet_locator
    
    
    !> Initialization of problem solver
@@ -90,7 +104,7 @@ contains
       
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
-         time=timetracker(amRoot=cfg%amRoot,name='wall_jet')
+         time=timetracker(amRoot=cfg%amRoot,name='stag_flow')
          call param_read('Max timestep size',time%dtmax)
          call param_read('Max cfl number',time%cflmax)
          call param_read('Max time',time%tmax)
@@ -102,20 +116,20 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,r2p,VFhi,VFlo
+         use vfs_class, only: remap,lvira,r2p,VFhi,VFlo
          integer :: i,j,k,n,si,sj,sk
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=remap,name='VOF')
          ! Set liquid in the inlet
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
-                  if (vf%cfg%xm(i).gt.0.0_WP.and.vf%cfg%xm(i).lt.1.0_WP.and.vf%cfg%ym(j).lt.0.0_WP) then
-                     vf%VF(i,j,k)=1.0_WP
+                  if (vf%cfg%xm(i).ge.-0.5_WP.and.vf%cfg%xm(i).le.0.5_WP) then
+                     vf%VF(i,j,k)=0.0_WP
                   else
                      vf%VF(i,j,k)=0.0_WP
                   end if
@@ -146,7 +160,7 @@ contains
       ! Create a two-phase flow solver without bconds
       create_flow_solver: block
          use tpns_class,      only: dirichlet,clipped_neumann,slip
-         use hypre_str_class, only: pcg_pfmg
+         use hypre_str_class, only: pcg_pfmg2
          use mathtools,       only: Pi
          integer :: i,j,k
          ! Create flow solver
@@ -159,23 +173,18 @@ contains
          call param_read('Gas density'   ,fs%rho_g)
          ! Read in surface tension coefficient
          call param_read('Surface tension coefficient',fs%sigma)
-         call param_read('Static contact angle',fs%contact_angle)
-         fs%contact_angle=fs%contact_angle*Pi/180.0_WP
          ! Inlet on the bottom of domain
-         call fs%add_bcond(name='inlet',type=dirichlet,face='y',dir=-1,canCorrect=.false.,locator=inlet_locator)
-         ! Clipped Neumann outflow on the top of domain
-         call fs%add_bcond(name='top',type=clipped_neumann,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
-         ! Slip boundary on the side of domain
-         call fs%add_bcond(name='side',type=slip,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
+         call fs%add_bcond(name='xm_inlet',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_inlet_locator)
+         ! Clipped Neumann outflow on the top and bottom of domain
+         call fs%add_bcond(name='top',   type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
+         call fs%add_bcond(name='bottom',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
-         vs=hypre_str(cfg=cfg,name='Velocity',method=pcg_pfmg,nst=7)
-         call param_read('Implicit iteration',vs%maxit)
-         call param_read('Implicit tolerance',vs%rcvg)
+         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
 			! Setup the solver
 		   call fs%setup(pressure_solver=ps,implicit_solver=vs)
       end block create_flow_solver
@@ -185,15 +194,14 @@ contains
       initialize_velocity: block
          use tpns_class, only: bcond
          type(bcond), pointer :: mybc
-         real(WP) :: r,theta
          integer  :: n,i,j,k
          ! Zero initial field in the domain
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
          ! Set inlet velocity
-         call fs%get_bcond('inlet',mybc)
+         call fs%get_bcond('xm_inlet',mybc)
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            fs%V(i,j,k)=1.0_WP
+            fs%U(i,j,k)=1.0_WP
          end do
          ! Apply all other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
