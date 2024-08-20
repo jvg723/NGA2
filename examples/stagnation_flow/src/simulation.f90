@@ -207,8 +207,8 @@ contains
          call fs%add_bcond(name='bottom',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          call fs%add_bcond(name='top',   type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          ! Slip on the sides of domain next to inlet
-         call fs%add_bcond(name='xm_oulet',type=slip,face='x',dir=-1,canCorrect=.false.,locator=xm_outlet_locator)
-         call fs%add_bcond(name='xp_oulet',type=slip,face='x',dir=+1,canCorrect=.false.,locator=xp_outlet_locator)
+         call fs%add_bcond(name='xm_oulet',type=clipped_neumann,face='x',dir=-1,canCorrect=.false.,locator=xm_outlet_locator)
+         call fs%add_bcond(name='xp_oulet',type=clipped_neumann,face='x',dir=+1,canCorrect=.false.,locator=xp_outlet_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
