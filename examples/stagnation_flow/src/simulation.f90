@@ -79,7 +79,7 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
+      if (i.eq.pg%imin.and.pg%ym(j).ge.-0.25_WP.and.pg%ym(j).le.0.25_WP) isIn=.true.
    end function xm_inlet_locator
 
    !> Function that localizes the outlet on xm boundary
@@ -89,7 +89,7 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.eq.pg%imin.and.pg%ym(j).lt.-0.5_WP.and.pg%ym(j).gt.0.5_WP) isIn=.true.
+      if (i.eq.pg%imin.and.pg%ym(j).lt.-0.25_WP.and.pg%ym(j).gt.0.25_WP) isIn=.true.
    end function xm_outlet_locator
 
    !> Function that localizes the inlet on xp boundary
@@ -99,7 +99,7 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.eq.pg%imax+1.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
+      if (i.eq.pg%imax+1.and.pg%ym(j).ge.-0.25_WP.and.pg%ym(j).le.0.25_WP) isIn=.true.
    end function xp_inlet_locator
 
    !> Function that localizes the outlet on xp boundary
@@ -109,7 +109,7 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (i.eq.pg%imax+1.and.pg%ym(j).lt.-0.5_WP.and.pg%ym(j).gt.0.5_WP) isIn=.true.
+      if (i.eq.pg%imax+1.and.pg%ym(j).lt.-0.25_WP.and.pg%ym(j).gt.0.25_WP) isIn=.true.
    end function xp_outlet_locator
    
    
@@ -207,8 +207,8 @@ contains
          call fs%add_bcond(name='bottom',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          call fs%add_bcond(name='top',   type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          ! Slip on the sides of domain next to inlet
-         call fs%add_bcond(name='xm_oulet',type=clipped_neumann,face='x',dir=-1,canCorrect=.false.,locator=xm_outlet_locator)
-         call fs%add_bcond(name='xp_oulet',type=clipped_neumann,face='x',dir=+1,canCorrect=.false.,locator=xp_outlet_locator)
+         call fs%add_bcond(name='xm_oulet',type=slip,face='x',dir=-1,canCorrect=.false.,locator=xm_outlet_locator)
+         call fs%add_bcond(name='xp_oulet',type=slip,face='x',dir=+1,canCorrect=.false.,locator=xp_outlet_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
