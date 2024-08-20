@@ -72,8 +72,18 @@ contains
    end function ym_locator
 
 
-   !> Function that localizes the inlet
+   !> Function that localizes the inlet on xm boundary
    function xm_inlet_locator(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid), intent(in) :: pg
+      integer, intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (i.eq.pg%imin.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
+   end function xm_inlet_locator
+
+   !> Function that localizes the inlet on xp boundary
+   function xp_inlet_locator(pg,i,j,k) result(isIn)
       use pgrid_class, only: pgrid
       class(pgrid), intent(in) :: pg
       integer, intent(in) :: i,j,k
@@ -81,8 +91,8 @@ contains
       isIn=.false.
       ! if (j.eq.pg%jmin.and.pg%xm(i).gt.0.0_WP.and.pg%xm(i).lt.1.0_WP) isIn=.true.
       ! if (i.eq.pg%imax+1.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
-      if (i.eq.pg%imin.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
-   end function xm_inlet_locator
+      if (i.eq.pg%imax+1.and.pg%ym(j).ge.-0.5_WP.and.pg%ym(j).le.0.5_WP) isIn=.true.
+   end function xp_inlet_locator
    
    
    !> Initialization of problem solver
@@ -173,8 +183,9 @@ contains
          call param_read('Gas density'   ,fs%rho_g)
          ! Read in surface tension coefficient
          call param_read('Surface tension coefficient',fs%sigma)
-         ! Inlet on the bottom of domain
+         ! Inlet on the sides of domain
          call fs%add_bcond(name='xm_inlet',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_inlet_locator)
+         call fs%add_bcond(name='xp_inlet',type=dirichlet,face='x',dir=+1,canCorrect=.false.,locator=xp_inlet_locator)
          ! Clipped Neumann outflow on the top and bottom of domain
          call fs%add_bcond(name='top',   type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          call fs%add_bcond(name='bottom',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
@@ -202,6 +213,11 @@ contains
          do n=1,mybc%itr%no_
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
             fs%U(i,j,k)=1.0_WP
+         end do
+         call fs%get_bcond('xp_inlet',mybc)
+         do n=1,mybc%itr%no_
+            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            fs%U(i,j,k)=-1.0_WP
          end do
          ! Apply all other boundary conditions
          call fs%apply_bcond(time%t,time%dt)
