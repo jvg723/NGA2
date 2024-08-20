@@ -171,7 +171,6 @@ contains
       create_flow_solver: block
          use tpns_class,      only: dirichlet,clipped_neumann,slip
          use hypre_str_class, only: pcg_pfmg2
-         use mathtools,       only: Pi
          integer :: i,j,k
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
@@ -187,8 +186,8 @@ contains
          call fs%add_bcond(name='xm_inlet',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=xm_inlet_locator)
          call fs%add_bcond(name='xp_inlet',type=dirichlet,face='x',dir=+1,canCorrect=.false.,locator=xp_inlet_locator)
          ! Clipped Neumann outflow on the top and bottom of domain
-         call fs%add_bcond(name='top',   type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
-         call fs%add_bcond(name='bottom',type=clipped_neumann,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
+         call fs%add_bcond(name='top',   type=slip,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
+         call fs%add_bcond(name='bottom',type=slip,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
