@@ -120,7 +120,7 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=remap,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=r2p,transport_method=remap,name='VOF')
          ! Set liquid in the inlet
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
