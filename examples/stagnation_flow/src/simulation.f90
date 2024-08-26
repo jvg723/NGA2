@@ -455,17 +455,17 @@ contains
             call ve%get_eigensystem(vf%VF)
             ! Reconstruct conformation tensor 
             call ve%reconstruct_conformation(vf%VF)
-            ! ! Add in relaxtion source from semi-anlaytical integration
-            ! call ve%get_relax_analytical(time%dt,vf%VF)
-            ! ! Reconstruct lnC for next time step
-            ! !> get eigenvalues and eigenvectors based on reconstructed C
-            ! call ve%get_eigensystem_SCrec(vf%VF)
-            ! !> Reconstruct lnC from eigenvalues and eigenvectors
-            ! call ve%reconstruct_log_conformation(vf%VF)
-            ! ! Take exp(eigenvalues) to use in next time-step
-            ! ve%eigenval=exp(ve%eigenval)
-            ! ! Apply boundary conditions
-            ! call ve%apply_bcond(time%t,time%dt)
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt,vf%VF)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec(vf%VF)
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation(vf%VF)
+            ! Take exp(eigenvalues) to use in next time-step
+            ve%eigenval=exp(ve%eigenval)
+            ! Apply boundary conditions
+            call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
          
          ! Perform sub-iterations
