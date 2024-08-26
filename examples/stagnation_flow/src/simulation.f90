@@ -273,7 +273,7 @@ contains
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
@@ -343,7 +343,8 @@ contains
          call ens_out%add_scalar('eigvec32',ve%eigenvec(3,2,:,:,:))
          call ens_out%add_scalar('eigvec33',ve%eigenvec(3,3,:,:,:))
          do nsc=1,ve%nscalar
-            call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+            ! call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+            call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SC(:,:,:,nsc))
          end do
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -452,11 +453,11 @@ contains
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
             ! Apply boundary conditions
-            call ve%apply_bcond(time%t,time%dt)
-            ! Get eigenvalues and eigenvectors
+            ! call ve%apply_bcond(time%t,time%dt)
+            ! Get eigenvalues and eigenvectors (******** causing blow up ********)
             call ve%get_eigensystem(vf%VF)
-            ! Reconstruct conformation tensor (causing blow up)
-            call ve%reconstruct_conformation(vf%VF)
+            ! Reconstruct conformation tensor 
+            ! call ve%reconstruct_conformation(vf%VF)
             ! ! Add in relaxtion source from semi-anlaytical integration
             ! call ve%get_relax_analytical(time%dt,vf%VF)
             ! ! Reconstruct lnC for next time step
