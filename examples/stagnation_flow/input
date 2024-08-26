@@ -8,20 +8,21 @@ Stabilization : .true.
 Lx : 5
 Ly : 5
 Lz : 0.05
-nx : 199
-ny : 199
+nx : 99
+ny : 99
 nz : 1
 
 # Fluid properties
-Liquid dynamic viscosity :    2e-4    !< This is 1/Re_l
+Liquid dynamic viscosity :    2e-2    !< This is 1/Re_l
 Gas dynamic viscosity :       2e-6
 Liquid density :              1.0
 Gas density :                 1e-3
 Surface tension coefficient : 1e-4    !< This is 1/We_l
 
 # Non-Newtonian modeling                      
-Polymer viscosity :             1     
-Polymer relaxation time :       1   
+Polymer viscosity :             0.01     
+Polymer relaxation time :       1
+Maximum polymer extensibility : 10   
 
 # Time integration
 Max timestep size : 1e-2

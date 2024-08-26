@@ -38,9 +38,6 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
-
-   !> Check for stabilization 
-   logical :: stabilization 
    
 
 contains
@@ -107,6 +104,26 @@ contains
       isIn=.false.
       if (j.eq.pg%jmax+1) isIn=.true.
    end function yp_locator_sc
+
+   !> Function that localizes z- boundary for scalar
+   function zm_locator_sc(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid),intent(in) :: pg
+      integer,intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmin-1) isIn=.true.
+   end function zm_locator_sc
+
+   !> Function that localizes z+ boundary for scalar
+   function zp_locator_sc(pg,i,j,k) result(isIn)
+      use pgrid_class, only: pgrid
+      class(pgrid),intent(in) :: pg
+      integer,intent(in) :: i,j,k
+      logical :: isIn
+      isIn=.false.
+      if (k.eq.pg%kmax+1) isIn=.true.
+   end function zp_locator_sc
 
    
    
@@ -251,44 +268,42 @@ contains
 
       ! Create a viscoleastic model with log conformation stablization method
       create_viscoelastic: block
-         use tpviscoelastic_class, only: oldroydb
+         use tpviscoelastic_class, only: oldroydb,fenecr
          use tpscalar_class,       only: bcond,neumann
          type(bcond), pointer :: mybc
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
          ! Relaxation time for polymer
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',ve%visc_p)
+         ! Maximum polymer extensibility
+         call param_read('Maximum polymer extensibility', ve%Lmax)
          ! Setup without an implicit solver
          call ve%setup()
-         ! Check first if we use stabilization
-         call param_read('Stabilization',stabilization,default=.false.)
          ! Apply boundary conditions
          call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
          call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator_sc,dir='ym')
+         ! Allocate storage fo eigenvalues and vectors
+         allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+         allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+         ! Allocate storage for reconstructured C
+         allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
          ! Initialize C scalar fields
-         if (stabilization) then 
-            !> Allocate storage fo eigenvalues and vectors
-            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
-            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
-            !> Allocate storage for reconstructured C
-            allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (vf%VF(i,j,k).gt.0.0_WP) then
-                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
-                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
-                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
-                     end if
-                  end do
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  if (vf%VF(i,j,k).gt.0.0_WP) then
+                     ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                     ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                     ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                  end if
                end do
             end do
-            ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem(vf%VF)
-         end if
+         end do
+         ! Get eigenvalues and eigenvectors
+         call ve%get_eigensystem(vf%VF)
          ! Apply boundary conditions
          call ve%apply_bcond(time%t,time%dt)
       end block create_viscoelastic
@@ -315,11 +330,21 @@ contains
          call ens_out%add_scalar('Pressure',fs%P)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_surface('plic',smesh)
-         if (stabilization) then
-            do nsc=1,ve%nscalar
-               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
-            end do
-         end if
+         call ens_out%add_scalar('eigval1',ve%eigenval(1,:,:,:))
+         call ens_out%add_scalar('eigval2',ve%eigenval(2,:,:,:))
+         call ens_out%add_scalar('eigval3',ve%eigenval(3,:,:,:))
+         call ens_out%add_scalar('eigvec11',ve%eigenvec(1,1,:,:,:))
+         call ens_out%add_scalar('eigvec12',ve%eigenvec(1,2,:,:,:))
+         call ens_out%add_scalar('eigvec13',ve%eigenvec(1,3,:,:,:))
+         call ens_out%add_scalar('eigvec21',ve%eigenvec(2,1,:,:,:))
+         call ens_out%add_scalar('eigvec22',ve%eigenvec(2,2,:,:,:))
+         call ens_out%add_scalar('eigvec23',ve%eigenvec(2,3,:,:,:))
+         call ens_out%add_scalar('eigvec31',ve%eigenvec(3,1,:,:,:))
+         call ens_out%add_scalar('eigvec32',ve%eigenvec(3,2,:,:,:))
+         call ens_out%add_scalar('eigvec33',ve%eigenvec(3,3,:,:,:))
+         do nsc=1,ve%nscalar
+            call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+         end do
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -332,9 +357,7 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
-         if (stabilization) then
-            call ve%get_max_reconstructed(vf%VF)
-         end if
+         call ve%get_max_reconstructed(vf%VF)
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -369,12 +392,10 @@ contains
          scfile=monitor(ve%cfg%amRoot,'scalar')
          call scfile%add_column(time%n,'Timestep number')
          call scfile%add_column(time%t,'Time')
-         if (stabilization) then
-            do nsc=1,ve%nscalar
-               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
-               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
-            end do
-         end if
+         do nsc=1,ve%nscalar
+            call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+            call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+         end do
          call scfile%write()
       end block create_monitor
 
@@ -419,9 +440,7 @@ contains
          advance_scalar: block
             integer :: i,j,k,nsc
             ! Add streching source term for constitutive model
-            if (stabilization) then 
-               call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
-            end if
+            call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
             ve%SC=ve%SC+time%dt*resSC
             call ve%apply_bcond(time%t,time%dt)
             ve%SCold=ve%SC
@@ -434,24 +453,22 @@ contains
             end do
             ! Apply boundary conditions
             call ve%apply_bcond(time%t,time%dt)
-         end block advance_scalar
-
-         ! Add in relaxation forcing and reconstruct C
-         if (stabilization) then 
             ! Get eigenvalues and eigenvectors
             call ve%get_eigensystem(vf%VF)
-            ! Reconstruct conformation tensor
+            ! Reconstruct conformation tensor (causing blow up)
             call ve%reconstruct_conformation(vf%VF)
-            ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt,vf%VF)
-            ! Reconstruct lnC for next time step
-            !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec(vf%VF)
-            !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation(vf%VF)
-            ! Take exp(eigenvalues) to use in next time-step
-            ve%eigenval=exp(ve%eigenval)
-         end if
+            ! ! Add in relaxtion source from semi-anlaytical integration
+            ! call ve%get_relax_analytical(time%dt,vf%VF)
+            ! ! Reconstruct lnC for next time step
+            ! !> get eigenvalues and eigenvectors based on reconstructed C
+            ! call ve%get_eigensystem_SCrec(vf%VF)
+            ! !> Reconstruct lnC from eigenvalues and eigenvectors
+            ! call ve%reconstruct_log_conformation(vf%VF)
+            ! ! Take exp(eigenvalues) to use in next time-step
+            ! ve%eigenval=exp(ve%eigenval)
+            ! ! Apply boundary conditions
+            ! call ve%apply_bcond(time%t,time%dt)
+         end block advance_scalar
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -580,9 +597,7 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
-         if (stabilization) then
-            call ve%get_max_reconstructed(vf%VF)
-         end if
+         call ve%get_max_reconstructed(vf%VF)
          call mfile%write()
          call cflfile%write()
          call scfile%write()
