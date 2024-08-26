@@ -164,7 +164,7 @@ contains
                B=0.0_WP; Omega=0.0_WP; D=0.0_WP; M=0.0_WP; tmpMat=0.0_WP
                omega_xy=0.0_WP; omega_xz=0.0_WP; omega_yz=0.0_WP
                ! Check  C is proportional to I based upon C's eigenvalues (i.e., Lambda_ii=Lambda_jj)
-               if (abs(this%eigenval(1,i,j,k)-this%eigenval(2,i,j,k)).le.1.0e-15_WP.or.abs(this%eigenval(2,i,j,k)-this%eigenval(3,i,j,k)).le.1.0e-15_WP) then
+               if (abs(this%eigenval(1,i,j,k)-this%eigenval(2,i,j,k)).le.1.0e-15_WP.or.abs(this%eigenval(2,i,j,k)-this%eigenval(3,i,j,k)).le.1.0e-15_WP.or.abs(this%eigenval(1,i,j,k)-this%eigenval(3,i,j,k)).le.1.0e-15_WP) then
                   !>Set B equal to the strain rate tensor
                   B(1,1)=gradU(1,1,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(1,2)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(1,3)=0.5_WP*(gradU(1,3,i,j,k)+gradU(3,1,i,j,k))
                   B(2,1)=0.5_WP*(gradU(1,2,i,j,k)+gradU(2,1,i,j,k));                                   B(2,2)=gradU(2,2,i,j,k)-(gradU(1,1,i,j,k)+gradU(2,2,i,j,k)+gradU(3,3,i,j,k))/3.0_WP; B(2,3)=0.5_WP*(gradU(2,3,i,j,k)+gradU(3,2,i,j,k))
