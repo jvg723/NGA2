@@ -278,8 +278,6 @@ contains
          call param_read('Polymer relaxation time',ve%trelax)
          ! Polymer viscosity
          call param_read('Polymer viscosity',ve%visc_p)
-         ! Maximum polymer extensibility
-         call param_read('Maximum polymer extensibility', ve%Lmax)
          ! Setup without an implicit solver
          call ve%setup()
          ! Apply boundary conditions
@@ -453,8 +451,8 @@ contains
                where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
             end do
             ! Apply boundary conditions
-            ! call ve%apply_bcond(time%t,time%dt)
-            ! Get eigenvalues and eigenvectors (******** causing blow up ********)
+            call ve%apply_bcond(time%t,time%dt)
+            ! Get eigenvalues and eigenvectors
             call ve%get_eigensystem(vf%VF)
             ! Reconstruct conformation tensor 
             ! call ve%reconstruct_conformation(vf%VF)
