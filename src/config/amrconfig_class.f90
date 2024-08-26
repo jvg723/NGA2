@@ -5,6 +5,7 @@ module amrconfig_class
    use precision,        only: WP
    use string,           only: str_medium
    use amrex_amr_module, only: amrex_geometry
+   use mpi_f08,          only: MPI_Comm
    implicit none
    private
    
@@ -12,7 +13,7 @@ module amrconfig_class
    ! Expose type/constructor/methods
    public :: amrconfig,finalize_amrex
    public :: mak_lvl_stype,clr_lvl_stype,err_est_stype
-   
+
    
    !> Amrconfig object definition based on AMReX's amrcore
    type :: amrconfig
@@ -36,18 +37,30 @@ module amrconfig_class
       ! Blocking factor
       integer :: nbloc=8
       ! Refinement ratio
-      integer :: rref=2
+      integer, dimension(:), allocatable :: rref
       ! Geometry object at each level
       type(amrex_geometry), dimension(:), allocatable :: geom
+      ! Parallel info
+      type(MPI_Comm) :: comm            !< Communicator for our group
+      integer        :: nproc           !< Number of processors
+      integer        :: rank            !< Processor grid rank
+      logical        :: amRoot          !< Am I the root?
    contains
       procedure :: initialize            ! Initialization of amrconfig object
       procedure :: finalize              ! Finalization of amrconfig object
-      procedure :: register_udf          ! Register user-defined functions for regriding
+      procedure :: register_udp          ! Register user-defined procedures for regriding
       procedure :: initialize_data       ! Initialize data on armconfig according to registered function
+      procedure :: regrid                ! Perform regriding operation on level baselvl
+      procedure :: print                 ! Print out grid info
+      procedure :: get_boxarray          ! Obtain box array at a given level
+      procedure :: get_distromap         ! Obtain distromap at a given level
+      procedure :: clvl                  ! Return current finest level
+      procedure :: average_down          ! Average down a given multifab throughout all levels
+      procedure :: average_downto        ! Average down a given multifab to level lvl
    end type amrconfig
    
    
-   !> Interfaces for regriding subroutines
+   !> Interfaces for user-defined subroutines
    abstract interface
       subroutine mak_lvl_stype(lvl,time,ba,dm) bind(c)
          import :: c_ptr,WP
@@ -78,6 +91,7 @@ contains
    
    !> Initialization of an amrconfig object
    subroutine initialize(this,name)
+      use messager, only: die
       implicit none
       class(amrconfig), intent(inout) :: this
       character(len=*), intent(in), optional :: name
@@ -103,10 +117,12 @@ contains
          integer, dimension(3) :: per
          call amrex_parmparse_build(pp,'amr')
          call pp%addarr('n_cell'         ,[this%nx,this%ny,this%nz])
+         if (this%nlvl.lt.0) call die('[amrconfig initialize] nlvl must be >= 0')
          call pp%add   ('max_level'      ,this%nlvl)
          call pp%add   ('blocking_factor',this%nbloc)
          call pp%add   ('max_grid_size'  ,this%nmax)
-         call pp%add   ('ref_ratio'      ,this%rref)
+         if (.not.allocated(this%rref)) this%rref=[2]
+         call pp%addarr('ref_ratio'      ,this%rref)
          call amrex_parmparse_destroy(pp)
          call amrex_parmparse_build(pp,'geometry')
          call pp%add   ('coord_sys'  ,this%coordsys)
@@ -144,12 +160,33 @@ contains
             end subroutine amrex_fi_get_geometry
          end interface
          integer :: n
-         allocate(this%geom(0:this%nlvl-1))
-         do n=0,this%nlvl-1
+         allocate(this%geom(0:this%nlvl))
+         do n=0,this%nlvl
             call amrex_fi_get_geometry(this%geom(n)%p,n,this%amrcore)
             call amrex_geometry_init_data(this%geom(n))
          end do
       end block store_geometries
+      ! Store effective refinement ratio
+      store_ref_ratio: block
+         interface
+            subroutine amrex_fi_get_ref_ratio(ref_ratio,core) bind(c)
+               import :: c_ptr
+               implicit none
+               integer, dimension(*), intent(inout) :: ref_ratio
+               type(c_ptr), value :: core
+            end subroutine amrex_fi_get_ref_ratio
+         end interface
+         deallocate(this%rref); allocate(this%rref(0:this%nlvl-1))
+         call amrex_fi_get_ref_ratio(this%rref,this%amrcore)
+      end block store_ref_ratio
+      ! Store parallel info
+      store_parallel_info: block
+         use parallel, only: comm,nproc,rank,amRoot
+         this%comm=comm
+         this%nproc=nproc
+         this%rank=rank
+         this%amRoot=amRoot
+      end block store_parallel_info
    end subroutine initialize
    
    
@@ -159,7 +196,7 @@ contains
       class(amrconfig), intent(inout) :: this
       real(WP), intent(in) :: time
       interface
-         subroutine amrex_fi_init_from_scratch (t,core) bind(c)
+         subroutine amrex_fi_init_from_scratch(t,core) bind(c)
             import :: c_ptr,WP
             implicit none
             real(WP), value :: t
@@ -169,6 +206,25 @@ contains
       call amrex_fi_init_from_scratch(time,this%amrcore)
    end subroutine initialize_data
    
+
+   !> Perform regriding operation on baselvl
+   subroutine regrid(this,baselvl,time)
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      integer,  intent(in) :: baselvl
+      real(WP), intent(in) :: time
+      interface
+         subroutine amrex_fi_regrid(blvl,t,core) bind(c)
+            import :: c_ptr,c_int,WP
+            implicit none
+            integer(c_int), value :: blvl
+            real(WP), value :: t
+            type(c_ptr), value :: core
+         end subroutine amrex_fi_regrid
+      end interface
+      call amrex_fi_regrid(baselvl,time,this%amrcore)
+   end subroutine regrid
+
    
    !> Finalization of amrconfig object
    subroutine finalize(this)
@@ -186,8 +242,8 @@ contains
    end subroutine finalize
    
    
-   !> Register user-defined functions for regriding
-   subroutine register_udf(this,mak_lvl_init,mak_lvl_crse,mak_lvl_remk,clr_lvl,err_est)
+   !> Register user-defined procedures for regriding
+   subroutine register_udp(this,mak_lvl_init,mak_lvl_crse,mak_lvl_remk,clr_lvl,err_est)
       implicit none
       class(amrconfig), intent(inout) :: this
       procedure(mak_lvl_stype) :: mak_lvl_init,mak_lvl_crse,mak_lvl_remk
@@ -202,7 +258,122 @@ contains
          end subroutine amrex_fi_init_virtual_functions
       end interface
       call amrex_fi_init_virtual_functions(c_funloc(mak_lvl_init),c_funloc(mak_lvl_crse),c_funloc(mak_lvl_remk),c_funloc(clr_lvl),c_funloc(err_est),this%amrcore)
-   end subroutine register_udf
+   end subroutine register_udp
+   
+   
+   !> Obtain box array at a level
+   function get_boxarray(this,lvl) result(ba)
+      use amrex_amr_module, only: amrex_boxarray
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      integer, intent(in)  :: lvl
+      type(amrex_boxarray) :: ba
+      interface
+         subroutine amrex_fi_get_boxarray(barray,lev,core) bind(c)
+            import :: c_ptr,c_int
+            implicit none
+            type(c_ptr), intent(out) :: barray
+            integer(c_int), value :: lev
+            type(c_ptr), value :: core
+         end subroutine amrex_fi_get_boxarray
+      end interface
+      call amrex_fi_get_boxarray(ba%p,lvl,this%amrcore)
+   end function get_boxarray
+   
+   
+   !> Obtain distromap at a level
+   function get_distromap(this,lvl) result(dm)
+      use amrex_amr_module, only: amrex_distromap
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      integer, intent(in)  :: lvl
+      type(amrex_distromap) :: dm
+      interface
+         subroutine amrex_fi_get_distromap(dmap,lev,core) bind(c)
+            import :: c_ptr,c_int
+            implicit none
+            type(c_ptr), intent(out) :: dmap
+            integer(c_int), value :: lev
+            type(c_ptr), value :: core
+         end subroutine amrex_fi_get_distromap
+      end interface
+      call amrex_fi_get_distromap(dm%p,lvl,this%amrcore)
+   end function get_distromap
+   
+   
+   !> Return current finest level
+   function clvl(this) result(cl)
+      use amrex_amr_module, only: amrex_boxarray
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      integer :: cl
+      interface
+         integer(c_int) function amrex_fi_get_finest_level(core) bind(c)
+            import :: c_int,c_ptr
+            implicit none
+            type(c_ptr), value :: core
+         end function amrex_fi_get_finest_level
+      end interface
+      cl=amrex_fi_get_finest_level(this%amrcore)
+   end function clvl
+
+
+   !> Average down entire multifab array
+   subroutine average_down(this,mfab)
+      use amrex_amr_module, only: amrex_multifab,amrex_average_down
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      type(amrex_multifab), dimension(0:) :: mfab
+      integer :: n
+      do n=this%clvl()-1,0,-1
+         call amrex_average_down(mfab(n+1),mfab(n),this%geom(n+1),this%geom(n),1,mfab(0)%nc,this%rref(n))
+      end do
+   end subroutine average_down
+
+
+   !> Average entire multifab array down to level lvl
+   subroutine average_downto(this,mfab,lvl)
+      use amrex_amr_module, only: amrex_multifab,amrex_average_down
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      type(amrex_multifab), dimension(0:) :: mfab
+      integer, intent(in) :: lvl
+      call amrex_average_down(mfab(lvl+1),mfab(lvl),this%geom(lvl+1),this%geom(lvl),1,mfab(0)%nc,this%rref(lvl))
+   end subroutine average_downto
+   
+   
+   !> Print amrconfig object
+   subroutine print(this)
+      use, intrinsic :: iso_fortran_env, only: output_unit
+      use amrex_amr_module, only: amrex_boxarray,amrex_box
+      use parallel, only: amRoot
+      implicit none
+      class(amrconfig), intent(inout) :: this
+      type(amrex_boxarray) :: ba
+      type(amrex_box)      :: bx
+      integer :: n,m,nb
+      integer, dimension(3) :: lo,hi
+      if (amRoot) then
+         write(output_unit,'("AMR Cartesian grid [",a,"]")') trim(this%name)
+         write(output_unit,'(" > amr level = ",i2)') this%clvl()
+         write(output_unit,'(" > max level = ",i2)') this%nlvl
+         write(output_unit,'(" > ref ratio = ",100(" ",i0))') this%rref
+         write(output_unit,'(" >    extent = [",es12.5,",",es12.5,"]x[",es12.5,",",es12.5,"]x[",es12.5,",",es12.5,"]")') this%xlo,this%xhi,this%ylo,this%yhi,this%zlo,this%zhi
+         write(output_unit,'(" >  periodic = ",l1,"x",l1,"x",l1)') this%xper,this%yper,this%zper
+         ! Loop over levels
+         do n=0,this%clvl()
+            ! Get boxarray at that level
+            ba=this%get_boxarray(lvl=n)
+            write(output_unit,'(" >>> Level ",i2,"/",i2," with [dx =",es12.5,",dy =",es12.5,",dz =",es12.5,"]")') n,this%clvl(),this%geom(n)%dx(1),this%geom(n)%dx(2),this%geom(n)%dx(3)
+            ! Loop over boxes
+            nb=int(ba%nboxes())
+            do m=1,nb
+               bx=ba%get_box(m-1)
+               write(output_unit,'(" >>> Box ",i0,"/",i0," from [",i3,",",i3,",",i3,"] to [",i3,",",i3,",",i3,"]")') m,nb,bx%lo,bx%hi
+            end do
+         end do
+      end if
+   end subroutine print
    
    
    !> Finalization of amrex
