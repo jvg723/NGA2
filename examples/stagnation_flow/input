@@ -8,8 +8,8 @@ Stabilization : .true.
 Lx : 5
 Ly : 5
 Lz : 0.05
-nx : 99
-ny : 99
+nx : 79
+ny : 79
 nz : 1
 
 # Fluid properties
@@ -24,7 +24,8 @@ Polymer viscosity :             2e-4
 Polymer relaxation time :       0.1   
 
 # Time integration
-Max timestep size : 1e-3
+# Max timestep size : 1e-3
+Max timestep size : 1e-4        # For VE case
 Max cfl number :    0.9
 Max time :          100
 
