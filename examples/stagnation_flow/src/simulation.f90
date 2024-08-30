@@ -1,7 +1,7 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,            only: WP
-   use geometry,             only: cfg
+   use geometry,             only: cfg,Lx,Ly,Lz
    use hypre_str_class,      only: hypre_str
    use ddadi_class,          only: ddadi
    use tpns_class,           only: tpns
@@ -29,7 +29,7 @@ module simulation
    type(event)   :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,scfile
+   type(monitor) :: mfile,cflfile,scfile,filmfile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -38,6 +38,9 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+
+   !> Parameters for analysis
+   real(WP) :: film_vol,film_thickness
    
 
 contains
@@ -124,6 +127,27 @@ contains
       isIn=.false.
       if (k.eq.pg%kmax+1) isIn=.true.
    end function zp_locator_sc
+
+   !> Routine that computes rise velocity
+   subroutine get_film_stats()
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      integer :: i,j,k,ierr
+      real(WP) :: myvol
+      myvol=0.0_WP
+      do k=vf%cfg%kmin_,vf%cfg%kmax_
+         do j=vf%cfg%jmin_,vf%cfg%jmax_
+            do i=vf%cfg%imin_,vf%cfg%imax_
+               myvol=myvol+vf%VF(i,j,k)*cfg%vol(i,j,k)
+            end do
+         end do
+      end do
+      call MPI_ALLREDUCE(myvol,film_vol,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      ! Approximate film thickness
+      film_thickness=0.0_WP
+      film_thickness = film_vol/(Ly*Lz)
+   end subroutine
 
    
    
@@ -356,6 +380,7 @@ contains
          call fs%get_max()
          call vf%get_max()
          call ve%get_max_reconstructed(vf%VF)
+         call get_film_stats()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -395,6 +420,13 @@ contains
             call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
          end do
          call scfile%write()
+         ! Create a film monitor file
+         filmfile=monitor(fs%cfg%amRoot,'film')
+         call filmfile%add_column(time%n,'Timestep number')
+         call filmfile%add_column(time%t,'Time')
+         call filmfile%add_column(film_vol,'volume')
+         call filmfile%add_column(film_thickness, 'thickness')
+         call filmfile%write()
       end block create_monitor
 
       
@@ -434,39 +466,39 @@ contains
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
-         ! Transport our liquid conformation tensor using log conformation
-         advance_scalar: block
-            integer :: i,j,k,nsc
-            ! Add streching source term for constitutive model
-            call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
-            ve%SC=ve%SC+time%dt*resSC
-            call ve%apply_bcond(time%t,time%dt)
-            ve%SCold=ve%SC
-            ! Explicit calculation of dSC/dt from scalar equation
-            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
-            ! Update our scalars
-            do nsc=1,ve%nscalar
-               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
-               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
-            end do
-            ! Apply boundary conditions
-            call ve%apply_bcond(time%t,time%dt)
-            ! Get eigenvalues and eigenvectors
-            call ve%get_eigensystem(vf%VF)
-            ! Reconstruct conformation tensor 
-            call ve%reconstruct_conformation(vf%VF)
-            ! Add in relaxtion source from semi-anlaytical integration
-            call ve%get_relax_analytical(time%dt,vf%VF)
-            ! Reconstruct lnC for next time step
-            !> get eigenvalues and eigenvectors based on reconstructed C
-            call ve%get_eigensystem_SCrec(vf%VF)
-            !> Reconstruct lnC from eigenvalues and eigenvectors
-            call ve%reconstruct_log_conformation(vf%VF)
-            ! Take exp(eigenvalues) to use in next time-step
-            ve%eigenval=exp(ve%eigenval)
-            ! Apply boundary conditions
-            call ve%apply_bcond(time%t,time%dt)
-         end block advance_scalar
+         ! ! Transport our liquid conformation tensor using log conformation
+         ! advance_scalar: block
+         !    integer :: i,j,k,nsc
+         !    ! Add streching source term for constitutive model
+         !    call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
+         !    ve%SC=ve%SC+time%dt*resSC
+         !    call ve%apply_bcond(time%t,time%dt)
+         !    ve%SCold=ve%SC
+         !    ! Explicit calculation of dSC/dt from scalar equation
+         !    call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+         !    ! Update our scalars
+         !    do nsc=1,ve%nscalar
+         !       where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+         !       where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+         !    end do
+         !    ! Apply boundary conditions
+         !    call ve%apply_bcond(time%t,time%dt)
+         !    ! Get eigenvalues and eigenvectors
+         !    call ve%get_eigensystem(vf%VF)
+         !    ! Reconstruct conformation tensor 
+         !    call ve%reconstruct_conformation(vf%VF)
+         !    ! Add in relaxtion source from semi-anlaytical integration
+         !    call ve%get_relax_analytical(time%dt,vf%VF)
+         !    ! Reconstruct lnC for next time step
+         !    !> get eigenvalues and eigenvectors based on reconstructed C
+         !    call ve%get_eigensystem_SCrec(vf%VF)
+         !    !> Reconstruct lnC from eigenvalues and eigenvectors
+         !    call ve%reconstruct_log_conformation(vf%VF)
+         !    ! Take exp(eigenvalues) to use in next time-step
+         !    ve%eigenval=exp(ve%eigenval)
+         !    ! Apply boundary conditions
+         !    call ve%apply_bcond(time%t,time%dt)
+         ! end block advance_scalar
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -482,65 +514,65 @@ contains
             ! Explicit calculation of drho*u/dt from NS
             call fs%get_dmomdt(resU,resV,resW)
 
-            ! Add polymer stress term
-            polymer_stress: block
-               use tpviscoelastic_class, only: oldroydb
-               integer :: i,j,k,nsc,n
-               real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-               real(WP), dimension(:,:,:,:), allocatable :: stress
-               real(WP) :: coeff,trace
-               ! Allocate work arrays
-               allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
-               allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-               ! Calculate polymer stress for a given model
-               stress=0.0_WP
-               select case (ve%model)
-               case (oldroydb)
-                  coeff=ve%visc_p/ve%trelax
-                  do k=cfg%kmino_,cfg%kmaxo_
-                     do j=cfg%jmino_,cfg%jmaxo_
-                        do i=cfg%imino_,cfg%imaxo_
-                           stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                           stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                           stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                           stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                           stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                           stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                        end do
-                     end do
-                  end do
-               end select 
-               ! Interpolate tensor components to cell edges
-               do k=cfg%kmin_,cfg%kmax_+1
-                  do j=cfg%jmin_,cfg%jmax_+1
-                     do i=cfg%imin_,cfg%imax_+1
-                        Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-                        Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-                        Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-                     end do
-                  end do
-               end do
-               ! Add divergence of stress to residual
-               do k=fs%cfg%kmin_,fs%cfg%kmax_
-                  do j=fs%cfg%jmin_,fs%cfg%jmax_
-                     do i=fs%cfg%imin_,fs%cfg%imax_
-                        if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-                        &                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-                        &                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
-                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-                        &                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-                        &                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
-                        if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-                        &                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-                        &                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
-                     end do
-                  end do
-               end do
-               ! Clean up
-               deallocate(stress,Txy,Tyz,Tzx)
-            end block polymer_stress
+            ! ! Add polymer stress term
+            ! polymer_stress: block
+            !    use tpviscoelastic_class, only: oldroydb
+            !    integer :: i,j,k,nsc,n
+            !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+            !    real(WP), dimension(:,:,:,:), allocatable :: stress
+            !    real(WP) :: coeff,trace
+            !    ! Allocate work arrays
+            !    allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+            !    allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+            !    ! Calculate polymer stress for a given model
+            !    stress=0.0_WP
+            !    select case (ve%model)
+            !    case (oldroydb)
+            !       coeff=ve%visc_p/ve%trelax
+            !       do k=cfg%kmino_,cfg%kmaxo_
+            !          do j=cfg%jmino_,cfg%jmaxo_
+            !             do i=cfg%imino_,cfg%imaxo_
+            !                stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
+            !                stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
+            !                stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
+            !                stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
+            !                stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
+            !                stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
+            !             end do
+            !          end do
+            !       end do
+            !    end select 
+            !    ! Interpolate tensor components to cell edges
+            !    do k=cfg%kmin_,cfg%kmax_+1
+            !       do j=cfg%jmin_,cfg%jmax_+1
+            !          do i=cfg%imin_,cfg%imax_+1
+            !             Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+            !             Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+            !             Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+            !          end do
+            !       end do
+            !    end do
+            !    ! Add divergence of stress to residual
+            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
+            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
+            !          do i=fs%cfg%imin_,fs%cfg%imax_
+            !             if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+            !             &                                                +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+            !             &                                                +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1))
+            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+            !             &                                                +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+            !             &                                                +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1))
+            !             if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+            !             &                                                +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+            !             &                                                +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6))        
+            !          end do
+            !       end do
+            !    end do
+            !    ! Clean up
+            !    deallocate(stress,Txy,Tyz,Tzx)
+            ! end block polymer_stress
             
             ! Assemble explicit residual
             resU=-2.0_WP*fs%rho_U*fs%U+(fs%rho_Uold+fs%rho_U)*fs%Uold+time%dt*resU
@@ -596,9 +628,11 @@ contains
          call fs%get_max()
          call vf%get_max()
          call ve%get_max_reconstructed(vf%VF)
+         call get_film_stats()
          call mfile%write()
          call cflfile%write()
          call scfile%write()
+         call filmfile%write()
          
       end do
       

@@ -7,6 +7,8 @@ module geometry
    
    !> Single config
    type(config), public :: cfg
+
+   real(WP), public :: Lx,Ly,Lz
    
    public :: geometry_init
 
@@ -25,7 +27,7 @@ contains
       create_grid: block
          use sgrid_class, only: cartesian
          integer :: i,j,k,nx,ny,nz
-         real(WP) :: Lx,Ly,Lz
+         ! real(WP) :: Lx,Ly,Lz
          real(WP), dimension(:), allocatable :: x,y,z
          
          ! Read in grid and geometry definition
