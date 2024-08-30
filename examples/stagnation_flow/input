@@ -27,7 +27,7 @@ Polymer relaxation time :       0.1
 # Max timestep size : 1e-3
 Max timestep size : 1e-4        # For VE case
 Max cfl number :    0.9
-Max time :          100
+Max time :          20
 
 # Pressure solver
 Pressure tolerance : 1e-4
