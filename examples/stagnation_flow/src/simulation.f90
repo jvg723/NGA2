@@ -41,6 +41,7 @@ module simulation
 
    !> Parameters for analysis
    real(WP) :: film_vol,film_thickness
+   real(WP), dimension(:,:,:), allocatable :: Tyy
    
 
 contains
@@ -168,6 +169,7 @@ contains
          allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Tyy  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -367,6 +369,7 @@ contains
          do nsc=1,ve%nscalar
             call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
          end do
+         call ens_out%add_scalar('Tyy',Tyy)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -543,7 +546,9 @@ contains
                         end do
                      end do
                   end do
-               end select 
+               end select
+               ! Assign normal stress for output
+               Tyy=stress(:,:,:,4)
                ! Interpolate tensor components to cell edges
                do k=cfg%kmin_,cfg%kmax_+1
                   do j=cfg%jmin_,cfg%jmax_+1
@@ -653,6 +658,7 @@ contains
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
       deallocate(resSC,SCtmp,gradU)
+      deallocate(Tyy)
       
    end subroutine simulation_final
    
