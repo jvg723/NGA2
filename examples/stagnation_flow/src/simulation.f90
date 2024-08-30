@@ -40,7 +40,7 @@ module simulation
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
 
    !> Parameters for analysis
-   real(WP) :: film_vol,film_thickness
+   real(WP) :: film_vol,film_thickness,Cyy_avg,Tyy_avg
    real(WP), dimension(:,:,:), allocatable :: Tyy
    
 
@@ -135,19 +135,25 @@ contains
       use parallel, only: MPI_REAL_WP
       implicit none
       integer :: i,j,k,ierr
-      real(WP) :: myvol
-      myvol=0.0_WP
+      real(WP) :: myvol,myCyy,myTyy
+      myvol=0.0_WP; myCyy=0.0_WP; myTyy=0.0_WP
       do k=vf%cfg%kmin_,vf%cfg%kmax_
          do j=vf%cfg%jmin_,vf%cfg%jmax_
             do i=vf%cfg%imin_,vf%cfg%imax_
                myvol=myvol+vf%VF(i,j,k)*cfg%vol(i,j,k)
+               myCyy=myCyy+vf%VF(i,j,k)*cfg%vol(i,j,k)*ve%SCrec(i,j,k,4)
+               myTyy=myTyy+vf%VF(i,j,k)*cfg%vol(i,j,k)*Tyy(i,j,k)
             end do
          end do
       end do
       call MPI_ALLREDUCE(myvol,film_vol,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(myCyy,Cyy_avg,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(myTyy,Tyy_avg,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
       ! Approximate film thickness
       film_thickness=0.0_WP
       film_thickness = film_vol/(Ly*Lz)
+      Cyy_avg=Cyy_avg/film_vol
+      Tyy_avg=Tyy_avg/film_vol
    end subroutine
 
    
@@ -429,6 +435,8 @@ contains
          call filmfile%add_column(time%t,'Time')
          call filmfile%add_column(film_vol,'volume')
          call filmfile%add_column(film_thickness, 'thickness')
+         call filmfile%add_column(Cyy_avg, 'Cyy')
+         call filmfile%add_column(Tyy_avg, 'Tyy')
          call filmfile%write()
       end block create_monitor
 
