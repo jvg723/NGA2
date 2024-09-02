@@ -200,7 +200,7 @@ contains
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call vf%initialize(cfg=cfg,reconstruction_method=r2p,transport_method=flux_storage,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=flux_storage,name='VOF')
          ! Set liquid in the inlet
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
@@ -439,7 +439,6 @@ contains
          call filmfile%add_column(Tyy_avg, 'Tyy')
          call filmfile%write()
       end block create_monitor
-
       
    end subroutine simulation_init
    
@@ -607,7 +606,8 @@ contains
             call fs%update_laplacian()
             call fs%correct_mfr()
             call fs%get_div()
-            call fs%add_surface_tension_jump_thin(dt=time%dt,div=fs%div,vf=vf)
+            ! call fs%add_surface_tension_jump_thin(dt=time%dt,div=fs%div,vf=vf)
+            call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
             fs%psolv%rhs=-fs%cfg%vol*fs%div/time%dt
             fs%psolv%sol=0.0_WP
             call fs%psolv%solve()
