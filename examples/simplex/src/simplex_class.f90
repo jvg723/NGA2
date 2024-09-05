@@ -348,8 +348,7 @@ contains
          call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
          this%vf%twoplane_thld2=0.3_WP
          ! Read in min film thickness for puncture
-         ! call param_read('Puncture thickness', this%vf%thin_thld_min)
-         this%vf%thin_thld_min=1.0e-3_WP
+         call this%input%read('Puncture thickness', this%vf%thin_thld_min)
          ! Initialize the interface inclduing restarts
          if (this%restarted) then
             ! Read in the planes directly and set the IRL interface
