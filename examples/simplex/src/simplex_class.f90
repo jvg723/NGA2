@@ -338,12 +338,17 @@ contains
          use vfs_class, only: remap,plicnet,r2p,r2pnet
          use irl_fortran_interface
          integer :: i,j,k
+         integer :: reconstruction_method
          real(WP) :: rad
          real(WP), dimension(:,:,:), allocatable :: P11,P12,P13,P14
          real(WP), dimension(:,:,:), allocatable :: P21,P22,P23,P24
+         ! Read in interface reconstrution method
+         ! call param_read('Reconstruction method', reconstruction_method)
          ! Create a VOF solver with plicnet
          call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
          this%vf%twoplane_thld2=0.3_WP
+         ! Read in min film thickness for puncture
+         ! call param_read('Puncture thickness', this%vf%thin_thld_min)
          this%vf%thin_thld_min=1.0e-3_WP
          ! Initialize the interface inclduing restarts
          if (this%restarted) then
@@ -560,28 +565,52 @@ contains
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
+         use vfs_class, only: r2p,plicnet,r2pnet
          integer :: i,j,k,nplane,np
-         this%smesh=surfmesh(nvar=2,name='plic')
-         this%smesh%varname(1)='nplane'
-         this%smesh%varname(2)='thickness'
-         ! Transfer polygons to smesh
-         call this%vf%update_surfmesh(this%smesh)
-         ! Also populate nplane variable
-         this%smesh%var(1,:)=1.0_WP
-         np=0
-         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; 
-                        this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                        this%smesh%var(2,np)=this%vf%thickness(i,j,k)
-                     end if
+         select case (this%vf%reconstruction_method)
+         case (r2p,r2pnet)
+            this%smesh=surfmesh(nvar=2,name='plic')
+            this%smesh%varname(1)='nplane'
+            this%smesh%varname(2)='thickness'
+            ! Transfer polygons to smesh
+            call this%vf%update_surfmesh(this%smesh)
+            ! Also populate nplane variable
+            this%smesh%var(1,:)=1.0_WP
+            np=0
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; 
+                           this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        end if
+                     end do
                   end do
                end do
             end do
-         end do
+         case (plicnet)
+            this%smesh=surfmesh(nvar=1,name='plic')
+            this%smesh%varname(1)='nplane'
+            ! Transfer polygons to smesh
+            call this%vf%update_surfmesh(this%smesh)
+            ! Also populate nplane variable
+            this%smesh%var(1,:)=1.0_WP
+            np=0
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; 
+                           this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end select
       end block create_smesh
       
       
@@ -741,16 +770,23 @@ contains
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          
          ! Solve Poisson equation
-         call this%fs%update_laplacian()
-         call this%fs%correct_mfr()
-         call this%fs%get_div()
-         !call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
-         !call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
-         call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
-         this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
-         this%fs%psolv%sol=0.0_WP
-         call this%fs%psolv%solve()
-         call this%fs%shift_p(this%fs%psolv%sol)
+         solve_poisson: block
+            use vfs_class, only: plicnet,r2p,r2pnet
+            call this%fs%update_laplacian()
+            call this%fs%correct_mfr()
+            call this%fs%get_div()
+            select case (this%vf%reconstruction_method)
+            case(plicnet)
+               call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+            case (r2p,r2pnet)
+               !call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+               call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+            end select
+            this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
+            this%fs%psolv%sol=0.0_WP
+            call this%fs%psolv%solve()
+            call this%fs%shift_p(this%fs%psolv%sol)
+         end block solve_poisson
          
          ! Correct velocity
          call this%fs%get_pgrad(this%fs%psolv%sol,this%resU,this%resV,this%resW)
@@ -795,26 +831,47 @@ contains
          ! Update surfmesh object 
          update_smesh: block
             use irl_fortran_interface
+            use vfs_class, only: plicnet,r2p,r2pnet
             integer :: i,j,k,nplane,np
-            ! Transfer polygons to smesh
-            call this%vf%update_surfmesh(this%smesh)
-            ! Also populate nplane variable
-            this%smesh%var(1,:)=1.0_WP
-            ! Initalize variables to 0
-            this%smesh%var(2,:)=0.0_WP
-            np=0
-            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                           this%smesh%var(2,np)=this%vf%thickness(i,j,k)
-                        end if
+            select case (this%vf%reconstruction_method)
+            case (r2p,r2pnet)
+               ! Transfer polygons to smesh
+               call this%vf%update_surfmesh(this%smesh)
+               ! Also populate nplane variable
+               this%smesh%var(1,:)=1.0_WP
+               ! Initalize variables to 0
+               this%smesh%var(2,:)=0.0_WP
+               np=0
+               do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+                  do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                     do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                              this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                           end if
+                        end do
                      end do
                   end do
                end do
-            end do
+            case(plicnet)
+               ! Transfer polygons to smesh
+               call this%vf%update_surfmesh(this%smesh)
+               ! Also populate nplane variable
+               this%smesh%var(1,:)=1.0_WP
+               np=0
+               do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+                  do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                     do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           end if
+                        end do
+                     end do
+                  end do
+               end do
+            end select
          end block update_smesh
          ! Write to ensignt
          call this%ens_out%write_data(this%time%t)
