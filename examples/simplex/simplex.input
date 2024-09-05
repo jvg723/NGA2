@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 1 8
+Partition :	1 1 1
 I/O partition : 1 1 1
 
 # Mesh definition
@@ -10,6 +10,13 @@ Lz :  0.01
 nx :  88
 ny :  88
 nz :  88
+
+# Methods
+# r2p = 5
+# plicnet = 9
+# r2pnet = 10
+Reconstruction method : 10
+Puncture thickness : 1.0e-3
 
 # Flow conditions
 Mass flow rate : 2.95e-3
@@ -23,7 +30,7 @@ Gas density :                 1.226
 Surface tension coefficient : 0.0728
 
 # Time integration
-Max timestep size : 1e-4
+Max timestep size : 1e-6
 Max cfl number :    0.9
 
 # Pressure solver

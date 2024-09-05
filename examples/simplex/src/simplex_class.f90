@@ -343,9 +343,9 @@ contains
          real(WP), dimension(:,:,:), allocatable :: P11,P12,P13,P14
          real(WP), dimension(:,:,:), allocatable :: P21,P22,P23,P24
          ! Read in interface reconstrution method
-         ! call param_read('Reconstruction method', reconstruction_method)
+         call this%input%read('Reconstruction method', reconstruction_method)
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=reconstruction_method,transport_method=remap,name='VOF')
          this%vf%twoplane_thld2=0.3_WP
          ! Read in min film thickness for puncture
          call this%input%read('Puncture thickness', this%vf%thin_thld_min)
