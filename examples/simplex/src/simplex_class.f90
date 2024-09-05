@@ -346,9 +346,11 @@ contains
          call this%input%read('Reconstruction method', reconstruction_method)
          ! Create a VOF solver with plicnet
          call this%vf%initialize(cfg=this%cfg,reconstruction_method=reconstruction_method,transport_method=remap,name='VOF')
-         this%vf%twoplane_thld2=0.3_WP
-         ! Read in min film thickness for puncture
-         call this%input%read('Puncture thickness', this%vf%thin_thld_min)
+         if (this%vf%reconstruction_method.eq.r2p.or.this%vf%reconstruction_method.eq.r2pnet) then
+            this%vf%twoplane_thld2=0.3_WP
+            ! Read in min film thickness for puncture
+            call this%input%read('Puncture thickness', this%vf%thin_thld_min)
+         end if
          ! Initialize the interface inclduing restarts
          if (this%restarted) then
             ! Read in the planes directly and set the IRL interface

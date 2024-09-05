@@ -15,7 +15,7 @@ nz :  88
 # r2p = 5
 # plicnet = 9
 # r2pnet = 10
-Reconstruction method : 10
+Reconstruction method : 9
 Puncture thickness : 1.0e-3
 
 # Flow conditions
