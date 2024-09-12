@@ -274,6 +274,7 @@ contains
          this%time=timetracker(amRoot=this%cfg%amRoot)
          call this%input%read('Max timestep size',this%time%dtmax)
          call this%input%read('Max cfl number',this%time%cflmax)
+         call this%input%read('Max time',this%time%tmax)
          this%time%dt=this%time%dtmax
          this%time%itmax=2
       end block initialize_timetracker
