@@ -545,8 +545,8 @@ contains
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Vinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Winflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
          
-      ! Start time step timer
-      starttime_step=mpi_wtime()
+      ! ! Start time step timer
+      ! starttime_step=mpi_wtime()
 
       ! Increment time
       call b%fs%get_cfl(b%time%dt,b%time%cfl)
@@ -580,34 +580,34 @@ contains
       ! Prepare old staggered density (at n)
       call b%fs%get_olddensity(vf=b%vf)
       
-      ! Add in slip velocity at hole edges
-      slip_velocity: block
-         integer :: i,j,k
-         ! Store current velocity field 
-         b%Uslip=b%fs%U
-         b%Vslip=b%fs%V
-         b%Wslip=b%fs%W
-         ! Add in retraction velocities
-         do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-            do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-               do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-                  if (b%vf%edge_sensor(i,j,k).ge.0.2_WP) then
-                     b%Uslip(i  ,j,k)=b%Uslip(i  ,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-                     b%Uslip(i+1,j,k)=b%Uslip(i+1,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-                     b%Vslip(i,j  ,k)=b%Vslip(i,j  ,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-                     b%Vslip(i,j+1,k)=b%Vslip(i,j+1,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-                     b%Wslip(i,j,k  )=b%Wslip(i,j,k  )+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-                     b%Wslip(i,j,k+1)=b%Wslip(i,j,k+1)+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-                  end if
-               end do 
-            end do 
-         end do
-      end block slip_velocity
+      ! ! Add in slip velocity at hole edges
+      ! slip_velocity: block
+      !    integer :: i,j,k
+      !    ! Store current velocity field 
+      !    b%Uslip=b%fs%U
+      !    b%Vslip=b%fs%V
+      !    b%Wslip=b%fs%W
+      !    ! Add in retraction velocities
+      !    do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
+      !       do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
+      !          do i=b%vf%cfg%imin_,b%vf%cfg%imax_
+      !             if (b%vf%edge_sensor(i,j,k).ge.0.2_WP) then
+      !                b%Uslip(i  ,j,k)=b%Uslip(i  ,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+      !                b%Uslip(i+1,j,k)=b%Uslip(i+1,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+      !                b%Vslip(i,j  ,k)=b%Vslip(i,j  ,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+      !                b%Vslip(i,j+1,k)=b%Vslip(i,j+1,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+      !                b%Wslip(i,j,k  )=b%Wslip(i,j,k  )+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+      !                b%Wslip(i,j,k+1)=b%Wslip(i,j,k+1)+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
+      !             end if
+      !          end do 
+      !       end do 
+      !    end do
+      ! end block slip_velocity
 
          
       ! VOF solver step
-      ! call b%vf%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W)
-      call b%vf%advance(dt=b%time%dt,U=b%Uslip,V=b%Vslip,W=b%Wslip)
+      call b%vf%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W)
+      ! call b%vf%advance(dt=b%time%dt,U=b%Uslip,V=b%Vslip,W=b%Wslip)
       
          
       ! Prepare new staggered viscosity (at n+1)
@@ -684,39 +684,39 @@ contains
       call b%fs%get_div()
 
 
-      ! Label thin film based upon min_filmthickness
-      label_thin: block
-         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-         use parallel, only: MPI_REAL_WP
-         real(WP) :: starttime,endtime,my_time
-         integer :: ierr
-         ! Copy over thin sensor for label functions
-         tmp_thickness=0.0_WP
-         tmp_thickness=b%vf%thickness
-         my_time=0.0_WP
-         ! Label regions and track time
-         b%cclabel_thin_timer=0.0_WP
-         starttime=MPI_WTIME()
-         call b%ccl%build(make_label,same_label)
-         endtime=MPI_WTIME()
-         my_time=endtime-starttime
-         ! Reduce time to get total sum time across all processors
-         call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-         ! Find average wall time
-         b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
-      end block label_thin
+      ! ! Label thin film based upon min_filmthickness
+      ! label_thin: block
+      !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
+      !    use parallel, only: MPI_REAL_WP
+      !    real(WP) :: starttime,endtime,my_time
+      !    integer :: ierr
+      !    ! Copy over thin sensor for label functions
+      !    tmp_thickness=0.0_WP
+      !    tmp_thickness=b%vf%thickness
+      !    my_time=0.0_WP
+      !    ! Label regions and track time
+      !    b%cclabel_thin_timer=0.0_WP
+      !    starttime=MPI_WTIME()
+      !    call b%ccl%build(make_label,same_label)
+      !    endtime=MPI_WTIME()
+      !    my_time=endtime-starttime
+      !    ! Reduce time to get total sum time across all processors
+      !    call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+      !    ! Find average wall time
+      !    b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
+      ! end block label_thin
 
       
-      ! Puncture a hole in the film based upon the thin region label
-      puncture_film: block
-      integer :: i,j,k,nn,n
-         do n=1,b%ccl%nstruct
-            do nn=1,b%ccl%struct(n)%n_
-               i=b%ccl%struct(n)%map(1,nn); j=b%ccl%struct(n)%map(2,nn); k=b%ccl%struct(n)%map(3,nn)
-               b%vf%VF(i,j,k)=0.0_WP
-            end do
-         end do
-      end block puncture_film
+      ! ! Puncture a hole in the film based upon the thin region label
+      ! puncture_film: block
+      ! integer :: i,j,k,nn,n
+      !    do n=1,b%ccl%nstruct
+      !       do nn=1,b%ccl%struct(n)%n_
+      !          i=b%ccl%struct(n)%map(1,nn); j=b%ccl%struct(n)%map(2,nn); k=b%ccl%struct(n)%map(3,nn)
+      !          b%vf%VF(i,j,k)=0.0_WP
+      !       end do
+      !    end do
+      ! end block puncture_film
       
       
       ! Remove VOF at edge of domain
@@ -793,18 +793,18 @@ contains
       call b%cflfile%write()
       call b%timerfile%write()
 
-      ! End time steo timer
-      endtime_step=mpi_wtime()
-      my_time_step=endtime_step-starttime_step
+      ! ! End time steo timer
+      ! endtime_step=mpi_wtime()
+      ! my_time_step=endtime_step-starttime_step
 
-      ! Reduce time to get total sum time across all processors
-      call MPI_ALLREDUCE(my_time_step,b%step_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-      ! Find average wall time in time step
-      b%step_timer=b%step_timer/b%cfg%nproc
-      ! Percent of time spent in cclabel for thin sensor
-      b%cclabel_thin_percent=b%cclabel_thin_timer/b%step_timer
-      ! Percent of time spent in cclabel for thick sensor
-      b%cclabel_thick_percent=b%cclabel_thick_timer/b%step_timer
+      ! ! Reduce time to get total sum time across all processors
+      ! call MPI_ALLREDUCE(my_time_step,b%step_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
+      ! ! Find average wall time in time step
+      ! b%step_timer=b%step_timer/b%cfg%nproc
+      ! ! Percent of time spent in cclabel for thin sensor
+      ! b%cclabel_thin_percent=b%cclabel_thin_timer/b%step_timer
+      ! ! Percent of time spent in cclabel for thick sensor
+      ! b%cclabel_thick_percent=b%cclabel_thick_timer/b%step_timer
 
    end subroutine step
    
