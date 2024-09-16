@@ -204,6 +204,7 @@ contains
       implicit none
       integer :: i,j,k,ierr
       real(WP) :: myYcent,myVrise,myvol,bubble_vol
+      myYcent=0.0_WP
       myVrise=0.0_WP
       myvol=0.0_WP
       do k=vf%cfg%kmin_,vf%cfg%kmax_
