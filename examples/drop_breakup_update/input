@@ -21,8 +21,8 @@ Target Re_lambda :     45 # not sure what this should be
 Turbulence intensity : 0.019
 
 # Non-Newtonian modeling                      
-Polymer viscosity ratio : 0.5  
-Weissenberg Number      : 1.0 
+Polymer viscosity ratio : 
+Weissenberg Number      : 
 
 # Time integration
 Max timestep size : 1.5e-2
