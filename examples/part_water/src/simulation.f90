@@ -1,9 +1,10 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,         only: WP
-   use geometry,          only: cfg
+   use geometry,          only: cfg,slength,sdepth
    use lpt_class,         only: lpt,part,MPI_PART_SIZE,MPI_PART
-   use hypre_str_class,   only: hypre_str
+   !use hypre_str_class,   only: hypre_str
+   use hypre_uns_class,   only: hypre_uns
    use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
@@ -18,7 +19,8 @@ module simulation
    
    !> Two-phase flow solver, volume fraction solver, LPT solver, time tracker
    type(lpt),         public :: lp
-   type(hypre_str),   public :: ps
+   !type(hypre_str),   public :: ps
+   type(hypre_uns),   public :: ps
    type(ddadi),       public :: vs
    type(tpns),        public :: fs
    type(vfs),         public :: vf
@@ -39,6 +41,7 @@ module simulation
    real(WP), dimension(:,:,:), allocatable :: srcU,srcV,srcW,srcM
    real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:), allocatable :: Ui_old,Vi_old,Wi_old
    
    !> Problem definition
    real(WP) :: depth
@@ -84,6 +87,9 @@ contains
          allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui_old(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi_old(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi_old(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -109,7 +115,7 @@ contains
          ! Set filter scale to 3.5*dx
          lp%filter_width=3.5_WP*cfg%min_meshsize
          ! Set drag model
-         lp%drag_model='Tenneti'
+         lp%drag_model='Tavanashad'
          ! Initialize with zero particles
          call lp%resize(0)
          ! Get initial particle volume fraction
@@ -127,32 +133,32 @@ contains
       
 
       ! Initialize particles - single particle entry case
-      prepare_single_particle: block
-         real(WP) :: dp
-         call param_read('Particle diameter',dp)
-         if (lp%cfg%amRoot) then
-            call lp%resize(1)
-            ! Give id
-            lp%p(1)%id=int(1,8)
-            ! Set the diameter
-            lp%p(1)%d=dp
-            ! Assign start position in the domain
-            lp%p(1)%pos=[0.0_WP,0.335_WP,0.0_WP]
-            ! Give zero velocity
-            lp%p(1)%vel=0.0_WP
-            ! Give zero collision force
-            lp%p(1)%Acol=0.0_WP
-            lp%p(1)%Tcol=0.0_WP
-            ! Give zero dt
-            lp%p(1)%dt=0.0_WP
-            ! Locate the particle on the mesh
-            lp%p(1)%ind=lp%cfg%get_ijk_global(lp%p(1)%pos,[lp%cfg%imin,lp%cfg%jmin,lp%cfg%kmin])
-            ! Activate the particle
-            lp%p(1)%flag=0
-         end if
-         call lp%sync()
-         call lp%update_VF()
-      end block prepare_single_particle
+      !prepare_single_particle: block
+      !   real(WP) :: dp
+      !   call param_read('Particle diameter',dp)
+      !   if (lp%cfg%amRoot) then
+      !      call lp%resize(1)
+      !      ! Give id
+      !      lp%p(1)%id=int(1,8)
+      !      ! Set the diameter
+      !      lp%p(1)%d=dp
+      !      ! Assign start position in the domain
+      !      lp%p(1)%pos=[0.0_WP,0.335_WP,0.0_WP]
+      !      ! Give zero velocity
+      !      lp%p(1)%vel=0.0_WP
+      !      ! Give zero collision force
+      !      lp%p(1)%Acol=0.0_WP
+      !      lp%p(1)%Tcol=0.0_WP
+      !      ! Give zero dt
+      !      lp%p(1)%dt=0.0_WP
+      !      ! Locate the particle on the mesh
+      !      lp%p(1)%ind=lp%cfg%get_ijk_global(lp%p(1)%pos,[lp%cfg%imin,lp%cfg%jmin,lp%cfg%kmin])
+      !      ! Activate the particle
+      !      lp%p(1)%flag=0
+      !   end if
+      !   call lp%sync()
+      !   call lp%update_VF()
+      !end block prepare_single_particle
 
       
       ! Initialize particles - precalculated bed entry case
@@ -221,19 +227,44 @@ contains
       !      deallocate(tmp,pos,id)
       !   end if
       !end block prepare_bed
+
+
+      ! Initialize particles - precalculated static bed case
+      prepare_bed: block
+         use string, only: str_medium
+         character(len=str_medium) :: bedfile
+         integer :: i
+         ! Bed file to use
+         call param_read('Bed file to inject',bedfile)
+         ! Read it in
+         call lp%read(filename=trim(bedfile))
+         ! Loop through particles
+         do i=1,lp%np_
+            ! Shift bed position
+            lp%p(i)%pos(1)=lp%p(i)%pos(1)+0.5_WP*slength
+            lp%p(i)%pos(2)=lp%p(i)%pos(2)+sdepth
+            ! Remove top of bed
+            if (lp%p(i)%pos(2).gt.0.41_WP) lp%p(i)%flag=1
+            ! Zero out velocity
+            lp%p(i)%vel=0.0_WP
+         end do
+         call lp%sync()
+         ! Recalculate VF
+         call lp%update_VF()
+      end block prepare_bed
       
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: plicnet,VFhi,VFlo,remap
+         use vfs_class, only: lvira,VFhi,VFlo,remap
          integer :: i,j,k,n,si,sj,sk
          real(WP), dimension(3,8) :: cube_vertex
          real(WP), dimension(3) :: v_cent,a_cent
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call vf%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=remap,name='VOF')
          ! Initialize to a pool
          call param_read('Pool depth',depth)
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
@@ -285,7 +316,8 @@ contains
       create_and_initialize_flow_solver: block
          use mathtools,       only: Pi
          use tpns_class,      only: clipped_neumann
-         use hypre_str_class, only: pcg_pfmg2
+         !use hypre_str_class, only: pcg_pfmg2
+         use hypre_uns_class, only: pcg_amg
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
          ! Assign constant viscosity to each phase
@@ -301,14 +333,15 @@ contains
          ! Transfer to lpt for surface tension modeling
          lp%sigma=fs%sigma
          lp%contact_angle=fs%contact_angle
-         lp%VFst=0.05_WP
+         lp%VFst=0.25_WP
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
          ! Outlet on the top
          call fs%add_bcond(name='outlet',type=clipped_neumann,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          ! Configure pressure solver
-         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
-         ps%maxlevel=12
+         ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+         !ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         !ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
@@ -444,6 +477,14 @@ contains
          call time%adjust_dt()
          call time%increment()
          
+         ! Remember old Ui
+         store_old_vel: block
+            resU=fs%U; resV=fs%V; resW=fs%W
+            fs%U=fs%Uold; fs%V=fs%Vold; fs%W=fs%Wold
+            call fs%interp_vel(Ui_old,Vi_old,Wi_old)
+            fs%U=resU; fs%V=resV; fs%W=resW
+         end block store_old_vel
+         
          ! Remember old VOF
          vf%VFold=vf%VF
          
@@ -457,6 +498,7 @@ contains
             real(WP) :: dt_done,mydt
             real(WP), dimension(:,:,:), allocatable :: tmp1,tmp2,tmp3,VFold,rho
             real(WP), dimension(:,:,:), allocatable :: dVFdx,dVFdy,dVFdz
+            real(WP), dimension(:,:,:,:), allocatable :: vort,acc
             integer :: i,j,k
             ! Allocate and store rho
             allocate(rho  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); rho  =vf%VF*fs%rho_l+(1.0_WP-vf%VF)*fs%rho_g
@@ -466,6 +508,9 @@ contains
             allocate(tmp1 (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp1 =0.0_WP
             allocate(tmp2 (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp2 =0.0_WP
             allocate(tmp3 (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); tmp3 =0.0_WP
+            ! Allocate vorticity and ugradu storage
+            allocate(vort(1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); vort=0.0_WP
+            allocate(acc (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); acc =0.0_WP
             ! Allocate grad(VF) storage
             allocate(dVFdx(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); dVFdx=0.0_WP
             allocate(dVFdy(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); dVFdy=0.0_WP
@@ -480,6 +525,16 @@ contains
             call fs%cfg%sync(dVFdz)
             ! Get fluid stress
             resU=0.0_WP; resV=0.0_WP; resW=0.0_WP; call fs%get_div_stress(resU,resV,resW)
+            ! Get vorticity
+            call fs%get_vorticity(vort)
+            ! Get fluid acceleration
+            call fs%get_ugradu(acc)
+            call fs%interp_vel(Ui,Vi,Wi)
+            if (time%dtold.gt.0.0_WP) then
+               acc(1,:,:,:)=acc(1,:,:,:)+(Ui-Ui_old)/time%dtold
+               acc(2,:,:,:)=acc(2,:,:,:)+(Ui-Ui_old)/time%dtold
+               acc(3,:,:,:)=acc(3,:,:,:)+(Ui-Ui_old)/time%dtold
+            end if
             ! Zero-out LPT source terms
             srcU=0.0_WP; srcV=0.0_WP; srcW=0.0_WP
             ! Sub-iterate
@@ -492,7 +547,12 @@ contains
                ! Inject, collide and advance particles
                call inject_bed(dt=mydt)
                call lp%collide(dt=mydt)
-               call lp%advance(dt=mydt,U=fs%U,V=fs%V,W=fs%W,rho=rho,visc=fs%visc,stress_x=resU,stress_y=resV,stress_z=resW,gradVF_x=dVFdx,gradVF_y=dVFdy,gradVF_z=dVFdz,srcU=tmp1,srcV=tmp2,srcW=tmp3)
+               call lp%advance(dt=mydt,U=fs%U,V=fs%V,W=fs%W,rho=rho,visc=fs%visc,&
+               &               stress_x=resU         ,stress_y=resV         ,stress_z=resW         ,&
+               &               acc_x   =acc (1,:,:,:),acc_y   =acc (2,:,:,:),acc_z   =acc (3,:,:,:),&
+               &               vort_x  =vort(1,:,:,:),vort_y  =vort(2,:,:,:),vort_z  =vort(3,:,:,:),&
+               &               gradVF_x=dVFdx        ,gradVF_y=dVFdy        ,gradVF_z=dVFdz        ,&
+               &               srcU=tmp1,srcV=tmp2,srcW=tmp3)
                srcU=srcU+tmp1
                srcV=srcV+tmp2
                srcW=srcW+tmp3
@@ -515,7 +575,7 @@ contains
             end do; end do; end do
             call fs%cfg%sync(srcM)
             ! Deallocate
-            deallocate(tmp1,tmp2,tmp3,VFold,rho,dVFdx,dVFdy,dVFdz)
+            deallocate(tmp1,tmp2,tmp3,VFold,rho,dVFdx,dVFdy,dVFdz,vort,acc)
          end block lpt_step
          
          ! Apply time-varying Dirichlet conditions
@@ -680,7 +740,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(srcU,srcV,srcW,srcM,resU,resV,resW,Ui,Vi,Wi)
+      deallocate(srcU,srcV,srcW,srcM,resU,resV,resW,Ui,Vi,Wi,Ui_old,Vi_old,Wi_old)
       
    end subroutine simulation_final
    
