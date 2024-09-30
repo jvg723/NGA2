@@ -1,7 +1,7 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,         only: WP
-   use geometry,          only: cfg
+   use geometry,          only: cfg,bedbottom,bedheight,bedwidth
    use lpt_class,         only: lpt,part,MPI_PART_SIZE,MPI_PART
    use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
@@ -51,6 +51,7 @@ module simulation
    integer :: nbed
    type(part), dimension(:), allocatable :: pbed
    real(WP) :: vbed
+   logical :: freebed
    
    
 contains
@@ -131,77 +132,115 @@ contains
       
       
       ! Initialize particles - precalculated bed entry case
-      prepare_bed: block
-         use mpi_f08
-         use messager,  only: die
-         use quicksort, only: quick_sort
-         use string,    only: str_medium
-         use parallel,  only: comm,info_mpiio
-         type(MPI_File) :: ifile
-         type(MPI_Status):: status
-         integer :: ierr,psize,i
-         integer(kind=MPI_OFFSET_KIND) :: offset
-         character(len=str_medium) :: bedfile
-         real(WP), dimension(:), allocatable :: pos
-         integer , dimension(:), allocatable :: id
-         type(part), dimension(:), allocatable :: tmp
-         real(WP) :: maxpos
-         ! Injection parameters
-         call param_read('Bed file to inject',bedfile)
-         call param_read('Bed injection velocity',vbed)
-         ! Read the header of the particle file
-         call MPI_FILE_OPEN(comm,trim(bedfile),MPI_MODE_RDONLY,info_mpiio,ifile,ierr)
-         if (ierr.ne.0) call die('[impinging_particles] Problem encountered while reading bed file: '//trim(bedfile))
-         call MPI_FILE_READ_ALL(ifile,nbed,1,MPI_INTEGER,status,ierr)
-         call MPI_FILE_READ_ALL(ifile,psize,1,MPI_INTEGER,status,ierr)
-         if (psize.ne.MPI_PART_SIZE) call die('[impinging_particles] Particle type unreadable')
-         ! Root reads in the full file and stores the particles
-         if (lp%cfg%amRoot) then
-            allocate(pbed(nbed))
-            call MPI_FILE_GET_POSITION(ifile,offset,ierr)
-            call MPI_FILE_READ_AT(ifile,offset,pbed,nbed,MPI_PART,status,ierr)
-         end if
-         ! Close the bed file
-         call MPI_FILE_CLOSE(ifile,ierr)
-         ! Manipulate the bed particles a bit
-         if (lp%cfg%amRoot) then
-            ! Sort particles
-            allocate(pos(nbed),id(nbed))
-            do i=1,nbed
-               id(i)=i
-               pos(i)=pbed(i)%pos(2)
-            end do
-            ! Flip the bed
-            maxpos=maxval(pos)
-            pos=maxpos-pos
-            ! Apply quicksort
-            call quick_sort(A=pos,B=id)
-            ! Loop through particles and sort them
-            allocate(tmp(nbed))
-            do i=1,nbed
-               tmp(i)=pbed(id(i))
-               tmp(i)%id=i
-               ! Adjust position
-               tmp(i)%pos(2)=pos(i)+lp%cfg%yL
-               ! Adjust velocity
-               tmp(i)%vel=[0.0_WP,-vbed,0.0_WP]
-               ! Zero out collisions
-               tmp(i)%Acol=0.0_WP
-               tmp(i)%Tcol=0.0_WP
-               ! Zero out angular velocity
-               tmp(i)%angVel=0.0_WP
-            end do
-            ! Store the particles
-            pbed=tmp
-            deallocate(tmp,pos,id)
-         end if
-      end block prepare_bed
+      !prepare_bed: block
+      !   use mpi_f08
+      !   use messager,  only: die
+      !   use quicksort, only: quick_sort
+      !   use string,    only: str_medium
+      !  use parallel,  only: comm,info_mpiio
+      !   type(MPI_File) :: ifile
+      !   type(MPI_Status):: status
+      !   integer :: ierr,psize,i
+      !   integer(kind=MPI_OFFSET_KIND) :: offset
+      !   character(len=str_medium) :: bedfile
+      !   real(WP), dimension(:), allocatable :: pos
+      !   integer , dimension(:), allocatable :: id
+      !   type(part), dimension(:), allocatable :: tmp
+      !   real(WP) :: maxpos
+      !   ! Injection parameters
+      !   call param_read('Bed file to inject',bedfile)
+      !   call param_read('Bed injection velocity',vbed)
+      !   call param_read('Bed is free',freebed)
+      !   ! Read the header of the particle file
+      !   call MPI_FILE_OPEN(comm,trim(bedfile),MPI_MODE_RDONLY,info_mpiio,ifile,ierr)
+      !   if (ierr.ne.0) call die('[impinging_particles] Problem encountered while reading bed file: '//trim(bedfile))
+      !   call MPI_FILE_READ_ALL(ifile,nbed,1,MPI_INTEGER,status,ierr)
+      !   call MPI_FILE_READ_ALL(ifile,psize,1,MPI_INTEGER,status,ierr)
+      !   if (psize.ne.MPI_PART_SIZE) call die('[impinging_particles] Particle type unreadable')
+      !   ! Root reads in the full file and stores the particles
+      !   if (lp%cfg%amRoot) then
+      !      allocate(pbed(nbed))
+      !      call MPI_FILE_GET_POSITION(ifile,offset,ierr)
+      !      call MPI_FILE_READ_AT(ifile,offset,pbed,nbed,MPI_PART,status,ierr)
+      !   end if
+      !   ! Close the bed file
+      !   call MPI_FILE_CLOSE(ifile,ierr)
+      !   ! Manipulate the bed particles a bit
+      !   if (lp%cfg%amRoot) then
+      !      ! Sort particles
+      !      allocate(pos(nbed),id(nbed))
+      !      do i=1,nbed
+      !         id(i)=i
+      !         pos(i)=pbed(i)%pos(2)
+      !      end do
+      !      ! Flip the bed
+      !      maxpos=maxval(pos)
+      !      pos=maxpos-pos
+      !      ! Apply quicksort
+      !      call quick_sort(A=pos,B=id)
+      !      ! Loop through particles and sort them
+      !      allocate(tmp(nbed))
+      !      do i=1,nbed
+      !         tmp(i)=pbed(id(i))
+      !         if (freebed) then
+      !            tmp(i)%id=i
+      !         else
+      !            tmp(i)%id=-2
+      !         end if
+      !         ! Adjust position
+      !         tmp(i)%pos(2)=pos(i)+lp%cfg%yL
+      !         ! Adjust velocity
+      !         tmp(i)%vel=[0.0_WP,vbed,0.0_WP]
+      !         ! Zero out collisions
+      !         tmp(i)%Acol=0.0_WP
+      !         tmp(i)%Tcol=0.0_WP
+      !         ! Zero out angular velocity
+      !         tmp(i)%angVel=0.0_WP
+      !      end do
+      !      ! Store the particles
+      !      pbed=tmp
+      !      deallocate(tmp,pos,id)
+      !   end if
+      !end block prepare_bed
       
+      
+      ! Initialize particles using precalculated static bed
+      prepare_bed: block
+         use string, only: str_medium
+         character(len=str_medium) :: bedfile
+         integer :: i
+         ! Bed file to use
+         call param_read('Bed file to read',bedfile)
+         ! Fixed bed
+         call param_read('Bed is free',freebed,default=.true.)
+         if (.not.freebed) call param_read('Bed velocity',vbed)
+         ! Read it in
+         call lp%read(filename=trim(bedfile))
+         ! Loop through particles
+         do i=1,lp%np_
+            ! Shift bed position
+            lp%p(i)%pos(1)=lp%p(i)%pos(1)
+            lp%p(i)%pos(2)=lp%p(i)%pos(2)+bedbottom
+            ! Zero out velocity
+            lp%p(i)%vel=0.0_WP
+            ! Handle fixed bed case
+            if (.not.freebed) then
+               lp%p(i)%ind=-2
+               lp%p(i)%vel=[0.0_WP,-vbed,0.0_WP]
+            end if
+            ! Clip the top
+            if (lp%p(i)%pos(2).gt.bedbottom+bedheight) lp%p(i)%flag=1
+         end do
+         call lp%sync()
+         ! Recalculate VF
+         call lp%update_VF()
+      end block prepare_bed
+
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,VFhi,VFlo,remap
+         use vfs_class, only: lvira,plicnet,VFhi,VFlo,remap
          integer :: i,j,k,n,si,sj,sk
          real(WP), dimension(3,8) :: cube_vertex
          real(WP), dimension(3) :: v_cent,a_cent
@@ -209,6 +248,8 @@ contains
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
          call vf%initialize(cfg=cfg,reconstruction_method=lvira,transport_method=remap,name='VOF')
+         ! TEST THE REMOVAL OF WALL TREATMENT IN VOF TRANSPORT
+         vf%vmask=0
          ! Initialize to a pool
          call param_read('Pool depth',depth)
          do k=vf%cfg%kmino_,vf%cfg%kmaxo_
@@ -259,7 +300,7 @@ contains
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use mathtools,       only: Pi
-         use tpns_class,      only: clipped_neumann
+         use tpns_class,      only: clipped_neumann,dirichlet
          use hypre_str_class, only: pcg_pfmg2
          ! Create flow solver
          fs=tpns(cfg=cfg,name='Two-phase NS')
@@ -474,8 +515,8 @@ contains
             call fs%interp_vel(Ui,Vi,Wi)
             if (time%dtold.gt.0.0_WP) then
                acc(1,:,:,:)=acc(1,:,:,:)+(Ui-Ui_old)/time%dtold
-               acc(2,:,:,:)=acc(2,:,:,:)+(Ui-Ui_old)/time%dtold
-               acc(3,:,:,:)=acc(3,:,:,:)+(Ui-Ui_old)/time%dtold
+               acc(2,:,:,:)=acc(2,:,:,:)+(Vi-Vi_old)/time%dtold
+               acc(3,:,:,:)=acc(3,:,:,:)+(Wi-Wi_old)/time%dtold
             end if
             ! Zero-out LPT source terms
             srcU=0.0_WP; srcV=0.0_WP; srcW=0.0_WP
@@ -487,7 +528,7 @@ contains
                ! Decide the timestep size
                mydt=min(lp_dt,time%dtmid-dt_done)
                ! Inject, collide and advance particles
-               call inject_bed(dt=mydt)
+               !call inject_bed(dt=mydt)
                call lp%collide(dt=mydt)
                call lp%advance(dt=mydt,U=fs%U,V=fs%V,W=fs%W,rho=rho,visc=fs%visc,&
                &               stress_x=resU         ,stress_y=resV         ,stress_z=resW         ,&
@@ -519,9 +560,6 @@ contains
             ! Deallocate
             deallocate(tmp1,tmp2,tmp3,VFold,rho,dVFdx,dVFdy,dVFdz,vort,acc)
          end block lpt_step
-         
-         ! Apply time-varying Dirichlet conditions
-         ! This is where time-dpt Dirichlet would be enforced
          
          ! Prepare old staggered density (at n)
          call fs%get_olddensity(vf=vf)
@@ -650,13 +688,14 @@ contains
             ! Increment counter
             ibed=ibed+1
             ! Test if particle should be injected
-            if (pbed(ibed)%pos(2)-vbed*(tbed+dt).lt.lp%cfg%y(lp%cfg%jmax+1)) then
+            if (pbed(ibed)%pos(2)+vbed*(tbed+dt).lt.lp%cfg%y(lp%cfg%jmax+1)) then
                ! Add the particle
                lp%np_new=lp%np_new+1
                call lp%resize(lp%np_+lp%np_new)
                lp%p(lp%np_+lp%np_new)=pbed(ibed)
-               lp%p(lp%np_+lp%np_new)%pos(2)=pbed(ibed)%pos(2)-vbed*(tbed+dt)
+               lp%p(lp%np_+lp%np_new)%pos(2)=pbed(ibed)%pos(2)+vbed*(tbed+dt)
                lp%p(lp%np_+lp%np_new)%ind=lp%cfg%get_ijk_global(lp%p(lp%np_+lp%np_new)%pos,[lp%cfg%imin,lp%cfg%jmin,lp%cfg%kmin])
+               lp%p(lp%np_+lp%np_new)%vel=[0.0_WP,vbed,0.0_WP]
             else
                ! We went too far, rewind and exit
                ibed=ibed-1
@@ -666,6 +705,8 @@ contains
       end if
       ! Increment injection time
       tbed=tbed+dt
+      ! If bed is in free fall, update vbed
+      vbed=vbed+lp%gravity(2)*dt
       ! Synchronize
       call lp%sync()
    end subroutine inject_bed
@@ -695,7 +736,7 @@ contains
       integer, intent(in) :: i,j,k
       logical :: isIn
       isIn=.false.
-      if (j.eq.pg%jmax+1) isIn=.true.
+      if (j.eq.pg%jmax+1.and.k.ge.pg%kmin.and.k.le.pg%kmax) isIn=.true.
    end function yp_locator
    
    
