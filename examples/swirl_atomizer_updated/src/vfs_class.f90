@@ -6,6 +6,7 @@ module vfs_class
    use string,         only: str_medium
    use config_class,   only: config
    use iterator_class, only: iterator
+   use cclabel_class, only: cclabel
    use irl_fortran_interface
    implicit none
    private
@@ -29,6 +30,10 @@ module vfs_class
    integer, parameter, public :: swartz=6            !< Swartz scheme
    integer, parameter, public :: youngs=7            !< Youngs' scheme
    integer, parameter, public :: lvlset=8            !< Levelset-based scheme
+   integer, parameter, public :: plicnet=9           !< PLICnet
+   integer, parameter, public :: r2pnet=10           !< R2Pnet
+   integer, parameter, public :: r2plig=11           !< PLICnet
+   integer, parameter, public :: r2pnetlig=12           !< R2Pnet
    
    ! List of available interface trasnport schemes for VF
    integer, parameter, public :: flux=1             !< Flux-based geometric transport
@@ -51,7 +56,6 @@ module vfs_class
    real(WP), parameter :: volume_epsilon_factor =1.0e-15_WP       !< Minimum volume  to consider for computational geometry (normalized by min_meshsize**3)
    real(WP), parameter :: surface_epsilon_factor=1.0e-15_WP       !< Minimum surface to consider for computational geometry (normalized by min_meshsize**2)
    real(WP), parameter :: iterative_distfind_tol=1.0e-12_WP       !< Tolerance for iterative plane distance finding
-   real(WP), parameter :: plane_intersect_tol =1.0e-10_WP
    
    !> Boundary conditions for the volume fraction solver
    type :: bcond
@@ -81,15 +85,7 @@ module vfs_class
       ! Volume fraction data
       real(WP), dimension(:,:,:), allocatable :: VF       !< VF array
       real(WP), dimension(:,:,:), allocatable :: VFold    !< VFold array
-
-
-      real(WP), dimension(:,:,:,:), allocatable :: VF2p !< Curvature for each interface
-      real(WP), dimension(:,:,:,:), allocatable :: surf2p !< Curvature for each interface
-      integer, dimension(:,:,:,:), allocatable :: plane_ind !< Curvature for each interface
-
-      type(PlanarSep_type) :: lginterface
-      type(RectCub_type) :: cell
-
+      
       ! Phase barycenter data
       real(WP), dimension(:,:,:,:), allocatable :: Lbary  !< Liquid barycenter
       real(WP), dimension(:,:,:,:), allocatable :: Gbary  !< Gas barycenter
@@ -114,6 +110,11 @@ module vfs_class
       integer, dimension(:,:),   allocatable :: band_map  !< Unstructured band mapping
       integer, dimension(0:nband) :: band_count           !< Number of cells per band value
       
+
+      integer, dimension(:,:,:), allocatable :: lig_ind,film_type
+
+      type(cclabel):: ccl
+
       ! Interface handling methods
       integer :: reconstruction_method                    !< Interface reconstruction method
       integer :: transport_method                         !< Interface transport method
@@ -134,6 +135,7 @@ module vfs_class
       ! Interface sensing variables
       real(WP), dimension(:,:,:), allocatable :: thin_sensor     !< Thin structure sensing (=1 is liquid, =2 is gas)
       real(WP), dimension(:,:,:), allocatable :: thickness       !< Local thickness of thin region
+      real(WP), dimension(:,:,:), allocatable :: thickness_unfilt       !< Local thickness of thin region
       real(WP), dimension(:,:,:), allocatable :: edge_sensor     !< Edge sensing (higher is edge)
       real(WP), dimension(:,:,:,:), allocatable :: edge_normal   !< Edge normal
       
@@ -209,6 +211,17 @@ module vfs_class
       procedure :: build_mof                              !< MOF reconstruction of the interface from VF field
       procedure :: build_wmof                             !< Wide-MOF reconstruction of the interface from VF field
       procedure :: build_r2p                              !< R2P reconstruction of the interface from VF field
+      procedure :: build_plicnet                          !< PLICnet reconstruction of the interface from VF and bary fields
+      procedure :: build_r2pnet                           !< R2Pnet reconstruction of the interface
+
+      procedure :: build_r2plig
+      procedure :: build_r2pnetlig
+      procedure :: get_thickness_unfiltered
+      procedure :: get_localfilmtype
+      procedure :: get_rligament
+      procedure :: get_film
+      procedure :: get_cclstats
+
       procedure :: sense_interface                        !< Calculate various surface sensors
       procedure :: get_thickness                          !< Calculate multiphasic structure thickness
       procedure :: detect_thin_regions                    !< Detect thin regions
@@ -223,14 +236,13 @@ module vfs_class
       procedure :: reset_volume_moments                   !< Reconstruct volume moments from IRL interfaces
       procedure :: reset_moments                          !< Reconstruct first-order moments from IRL interfaces
       procedure :: update_surfmesh                        !< Update a surfmesh object using current polygons
+      procedure :: update_surfmesh_nowall                 !< Update a surfmesh object using current polygons - do not show polygons in walls
       procedure :: get_curvature                          !< Compute curvature from IRL surface polygons
       procedure :: paraboloid_fit                         !< Perform local paraboloid fit of IRL surface using IRL barycenter data
       procedure :: paraboloid_integral_fit                !< Perform local paraboloid fit of IRL surface using surface-integrated IRL data
       procedure :: get_max                                !< Calculate maximum field values
       procedure :: get_cfl                                !< Get CFL for the VF solver
 
-      procedure :: get_twoalpha
-      procedure :: get_curvFace
       procedure :: allocate_supplement                    !< Allocate arrays and initialize objects needed for compressible MAST solver
       procedure :: copy_interface_to_old                  !< Copy interface variables at beginning of timestep
       procedure :: fluxpoly_project_getmoments            !< Project face to get flux volume and output its moments
@@ -295,22 +307,23 @@ contains
       
       ! Set reconstruction method
       select case (reconstruction_method)
-      case (lvira,elvira,swartz,youngs,mof,wmof)
+      case (lvira,elvira,swartz,youngs,mof,wmof,plicnet)
          this%reconstruction_method=reconstruction_method
          this%two_planes=.false.
-      case (r2p)
+      case (r2p,r2pnet,r2plig,r2pnetlig)
+         call this%ccl%initialize(pg=this%cfg%pgrid,name='r2plig')
          this%reconstruction_method=reconstruction_method
          ! Allocate extra curvature storage
          this%two_planes=.true.
-         allocate(this%VF2p(1:2,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%VF2p=0.0_WP
-         allocate(this%surf2p(1:2,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%surf2p=0.0_WP
          allocate(this%curv2p(1:2,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%curv2p=0.0_WP
-         allocate(this%plane_ind(1:2,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%plane_ind=0
          ! Allocate extra sensors
          allocate(this%thin_sensor(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%thin_sensor=0.0_WP
          allocate(this%thickness  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%thickness  =0.0_WP
+         allocate(this%thickness_unfilt(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%thickness_unfilt=0.0_WP
          allocate(this%edge_sensor(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%edge_sensor=0.0_WP
          allocate(this%edge_normal(1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%edge_normal=0.0_WP
+         allocate(this%film_type(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%film_type=0
+         allocate(this%lig_ind(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%lig_ind=0
          ! By default, use thin structure removal
          this%thin_thld_min=1.0e-4_WP !< This removes any thin structure with thickness below dx/1000
          ! By default, use flotsam removal
@@ -568,11 +581,6 @@ contains
          end do
       end do
       
-      ! For two alphas avoid memory issues
-      call new(this%cell)
-      call new(this%lginterface,this%planar_separator_allocation)
-      call setNumberOfPlanes(this%lginterface,1)
-
       ! Prepare byte storage for synchronization
       call new(this%send_byte_buffer)
       call new(this%recv_byte_buffer)
@@ -805,19 +813,22 @@ contains
    end subroutine apply_bcond
    
    
-   !> Calculate the new VF based on U/V/W and dt
-   subroutine advance(this,dt,U,V,W)
+   subroutine advance(this,dt,U,V,W,type_flux)
       implicit none
       class(vfs), intent(inout) :: this
       real(WP), intent(inout) :: dt  !< Timestep size over which to advance
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: U     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: V     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: W     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-      
+      integer, intent(in) :: type_flux
+      ! if (this%cfg%amRoot) print *,"Here1"
       ! First perform transport
       select case (this%transport_method)
       case (flux)
-         call this%transport_flux(dt,U,V,W)
+         if (this%cfg%amRoot) print *,"VFS_Here1"
+         call this%transport_flux(dt,U,V,W,type_flux)
+         if (this%cfg%amRoot) print *,"VFS_Here2"
+         ! if (this%cfg%amRoot) print *,"Here3"
       case (flux_storage)
          call this%transport_flux_storage(dt,U,V,W)
       case (remap)
@@ -826,25 +837,30 @@ contains
          call this%transport_remap_storage(dt,U,V,W)
       end select
       
+      if (this%cfg%amRoot) print *,"VFS_Here4"
       ! Advect interface polygons
       call this%advect_interface(dt,U,V,W)
-
+      
+      ! if (this%cfg%amRoot) print *,"Here4"
       ! Remove flotsams and thin structures if needed
       call this%remove_flotsams()
       call this%remove_thinstruct()
-      
+      ! if (this%cfg%amRoot) print *,"Here5"
       ! Synchronize and clean-up barycenter fields
       call this%sync_and_clean_barycenters()
-      
+      ! if (this%cfg%amRoot) print *,"Here6"
       ! Update the band
       call this%update_band()
       
+      ! if (this%cfg%amRoot) print *,"Here7"
+      if (this%cfg%amRoot) print *,"VFS_Here5"
       ! Perform interface reconstruction from transported moments
       call this%build_interface()
-      
+      if (this%cfg%amRoot) print *,"VFS_Here6"
+      ! if (this%cfg%amRoot) print *,"Here8"
       ! Create discontinuous polygon mesh from IRL interface
       call this%polygonalize_interface()
-
+      
       ! Perform interface sensing
       if (this%two_planes) call this%sense_interface()
       
@@ -1165,14 +1181,15 @@ contains
    end subroutine transport_remap_storage
    
    
-   !> Perform flux-based transport of VF based on U/V/W and dt
-   subroutine transport_flux(this,dt,U,V,W)
+  !> Perform flux-based transport of VF based on U/V/W and dt
+   subroutine transport_flux(this,dt,U,V,W,type_flux)
       implicit none
       class(vfs), intent(inout) :: this
       real(WP), intent(inout) :: dt  !< Timestep size over which to advance
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: U     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: V     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: W     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
+      integer, intent(in) :: type_flux
       integer :: i,j,k,index
       real(IRL_double), dimension(3,9) :: face
       type(CapDod_type) :: flux_polyhedron
@@ -1326,9 +1343,13 @@ contains
          Gvolnew=Gvolold+Gvolinc
          
          ! Compute new liquid volume fraction
-         ! this%VF(i,j,k)=Lvolnew/(Lvolnew+Gvolnew)
-         this%VF(i,j,k)=Lvolnew/this%cfg%vol(i,j,k)
+         if(type_flux.eq.1) then
+           this%VF(i,j,k)=Lvolnew/(Lvolnew+Gvolnew)
+         else
+           this%VF(i,j,k)=Lvolnew/this%cfg%vol(i,j,k)
+         end if
          
+         ! print *, " I am here"
          ! Only work on higher order moments if VF is in [VFlo,VFhi]
          if (this%VF(i,j,k).lt.VFlo) then
             this%VF(i,j,k)=0.0_WP
@@ -1344,9 +1365,11 @@ contains
             &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),1)+getCentroidPtr(this%face_flux(3,i,j,k),1))/Gvolnew
             ! Project forward in time
             this%Lbary(:,i,j,k)=this%project(this%Lbary(:,i,j,k),i,j,k,dt,U,V,W)
-            ! this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
-            this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))            
-
+            if(type_flux.eq.1) then
+              this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
+            else
+              this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
+            end if
          end if
       end do
       
@@ -2213,6 +2236,11 @@ contains
          call this%smooth_interface()
       case (youngs); call this%build_youngs()
       !case (lvlset); call this%build_lvlset()
+      case (plicnet); call this%build_plicnet()
+      ! case (r2pnet); call this%build_r2pnet()
+
+      case (r2plig); call this%build_r2plig() 
+      ! case (r2pnetlig); call this%build_r2pnetlig() 
       case default; call die('[vfs build interface] Unknown interface reconstruction scheme')
       end select
    end subroutine build_interface
@@ -2869,7 +2897,7 @@ contains
       real(IRL_double) :: initial_dist
       logical :: is_wall
       
-      ! Get storage for voluem moments and normal
+      ! Get storage for volume moments and normal
       call new(volume_moments_and_normal)
 
       ! Get r2p object for optimization weights
@@ -3060,8 +3088,1757 @@ contains
       deallocate(surf_norm_mag)
       
    end subroutine build_r2p
+
+
+   !> Machine learning reconstruction of a planar interface in mixed cells
+   subroutine build_plicnet(this)
+      use mathtools, only: normalize
+      use plicnet,   only: get_normal,reflect_moments
+      implicit none
+      class(vfs), intent(inout) :: this
+      integer(IRL_SignedIndex_t) :: i,j,k
+      integer :: ind,ii,jj,kk,icenter
+      real(IRL_double), dimension(0:2) :: normal
+      real(IRL_double), dimension(0:188) :: moments
+      integer :: direction
+      logical :: flip
+      real(IRL_double) :: m000,m100,m010,m001
+      real(IRL_double), dimension(0:2) :: center
+      real(IRL_double) :: initial_dist
+      type(RectCub_type) :: cell
+      ! Get a cell
+      call new(cell)
+      ! Traverse domain and reconstruct interface
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Skip wall/bcond cells - bconds need to be provided elsewhere directly!
+               if (this%mask(i,j,k).ne.0) cycle
+               ! Handle full cells differently
+               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) then
+                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+                  call setPlane(this%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],sign(1.0_WP,this%VF(i,j,k)-0.5_WP))
+                  cycle
+               end if
+               ! Liquid-gas symmetry
+               flip=.false.
+               if (this%VF(i,j,k).ge.0.5_WP) flip=.true.
+               m000=0; m100=0; m010=0; m001=0
+               ! Construct neighborhood of volume moments
+               if (flip) then
+                  do kk=k-1,k+1
+                     do jj=j-1,j+1
+                        do ii=i-1,i+1
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=1.0_WP-this%VF(ii,jj,kk)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                           ! Calculate geometric moments of neighborhood
+                           m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                           m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                           m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                           m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                        end do
+                     end do
+                  end do
+               else
+                  do kk=k-1,k+1
+                     do jj=j-1,j+1
+                        do ii=i-1,i+1
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=this%VF(ii,jj,kk)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                           moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                           ! Calculate geometric moments of neighborhood
+                           m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                           m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                           m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                           m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                        end do
+                     end do
+                  end do
+               end if
+               ! Calculate geometric center of neighborhood
+               center=[m100,m010,m001]/m000
+               ! Symmetry about Cartesian planes
+               call reflect_moments(moments,center,direction)
+               ! Get PLIC normal vector from neural network
+               call get_normal(moments,normal)
+               normal=normalize(normal)
+               ! Rotate normal vector to original octant
+               if (direction.eq.1) then
+                  normal(0)=-normal(0)
+               else if (direction.eq.2) then
+                  normal(1)=-normal(1)
+               else if (direction.eq.3) then
+                  normal(2)=-normal(2)
+               else if (direction.eq.4) then
+                  normal(0)=-normal(0)
+                  normal(1)=-normal(1)
+               else if (direction.eq.5) then
+                  normal(0)=-normal(0)
+                  normal(2)=-normal(2)
+               else if (direction.eq.6) then
+                  normal(1)=-normal(1)
+                  normal(2)=-normal(2)
+               else if (direction.eq.7) then
+                  normal(0)=-normal(0)
+                  normal(1)=-normal(1)
+                  normal(2)=-normal(2)
+               end if
+               if (.not.flip) then
+                  normal(0)=-normal(0)
+                  normal(1)=-normal(1)
+                  normal(2)=-normal(2)
+               end if
+               ! Locate PLIC plane in cell
+               call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
+               initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+               call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+               call setPlane(this%liquid_gas_interface(i,j,k),0,normal,initial_dist)
+               call matchVolumeFraction(cell,this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+            end do
+         end do
+      end do
+      ! Synchronize across boundaries
+      call this%sync_interface()
+   end subroutine build_plicnet
    
-   
+
+   !> Hybrid PLICnet-R2P reconstruction of a planar interface in mixed cells
+   subroutine build_r2pnet(this)
+      use mathtools, only: normalize
+      use plicnet,   only: get_normal,reflect_moments
+      implicit none
+      class(vfs), intent(inout) :: this
+      integer(IRL_SignedIndex_t) :: i,j,k
+      integer :: ind,ii,jj,kk,icenter
+      type(R2PNeigh_RectCub_type)   :: nh_r2p
+      type(RectCub_type), dimension(0:26) :: neighborhood_cells
+      real(IRL_double)  , dimension(0:26) :: liquid_volume_fraction
+      type(SepVM_type)  , dimension(0:26) :: separated_volume_moments
+      type(VMAN_type) :: volume_moments_and_normal
+      
+      real(WP) :: surface_area,area
+      real(WP), dimension(3) :: surface_norm
+      real(WP), dimension(:,:,:), allocatable :: surf_norm_mag,tmp
+      
+      real(IRL_double), dimension(3) :: initial_norm
+      real(IRL_double) :: initial_dist
+      logical :: is_wall
+
+      real(IRL_double), dimension(0:2) :: normal
+      real(IRL_double), dimension(0:188) :: moments
+      integer :: direction
+      logical :: flip
+      real(IRL_double) :: m000,m100,m010,m001
+      real(IRL_double), dimension(0:2) :: center
+      type(RectCub_type) :: cell
+      
+      ! Get storage for volume moments and normal
+      call new(volume_moments_and_normal)
+      call new(cell)
+      
+      ! Give ourselves an R2P neighborhood of 27 cells along with separated volume moments
+      call new(nh_r2p)
+      do i=0,26
+         call new(neighborhood_cells(i))
+         call new(separated_volume_moments(i))
+      end do
+      
+      ! Compute magnitude of the surface-averaged normal vector
+      allocate(surf_norm_mag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); surf_norm_mag=0.0_WP
+      do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
+         ! Skip wall/bcond/full cells
+         if (this%mask(i,j,k).ne.0) cycle
+         if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+         ! Extract average normal magnitude from neighborhood surface moments
+         surface_area=0.0_WP; surface_norm=0.0_WP
+         do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+            do ind=0,getSize(this%triangle_moments_storage(ii,jj,kk))-1
+               call getMoments(this%triangle_moments_storage(ii,jj,kk),ind,volume_moments_and_normal)
+               surface_area=surface_area+getVolume(volume_moments_and_normal)
+               surface_norm=surface_norm+getNormal(volume_moments_and_normal)
+            end do
+         end do; end do; end do
+         if (surface_area.gt.0.0_WP) surf_norm_mag(i,j,k)=norm2(surface_norm/surface_area)
+      end do; end do; end do
+      call this%cfg%sync(surf_norm_mag)
+      
+      ! Apply an extra step of surface smoothing to our normal magnitude
+      allocate(tmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); tmp=0.0_WP
+      do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
+         ! Skip wall/bcond/full cells
+         if (this%mask(i,j,k).ne.0) cycle
+         if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+         ! Surface-averaged normal magnitude
+         surface_area=0.0_WP
+         do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+            surface_area=surface_area+this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)
+            tmp(i,j,k)  =tmp(i,j,k)  +this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)*surf_norm_mag(ii,jj,kk)
+         end do; end do; end do
+         if (surface_area.gt.0.0_WP) tmp(i,j,k)=tmp(i,j,k)/surface_area
+      end do; end do; end do
+      call this%cfg%sync(tmp); surf_norm_mag=tmp; deallocate(tmp)
+      
+      ! Traverse domain and reconstruct interface
+      do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
+         
+         ! Skip wall/bcond cells - bconds need to be provided elsewhere directly!
+         if (this%mask(i,j,k).ne.0) cycle
+         
+         ! Handle full cells differently
+         if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) then
+            call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+            call setPlane(this%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],sign(1.0_WP,this%VF(i,j,k)-0.5_WP))
+            cycle
+         end if
+         
+         ! If a wall is in our neighborhood, apply PLICNET
+         !!! ALSO FORCING PLICNET IN MY NOZZLE HERE
+         is_wall=.false.
+         do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+            if (this%mask(ii,jj,kk).eq.1) is_wall=.true.
+         end do; end do; end do
+         if (is_wall.or.this%cfg%xm(i).lt.0.0001_WP) then
+            ! PLICNET
+            ! Liquid-gas symmetry
+            flip=.false.; if (this%VF(i,j,k).ge.0.5_WP) flip=.true.
+            m000=0; m100=0; m010=0; m001=0
+            ! Construct neighborhood of volume moments
+            if (flip) then
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=1.0_WP-this%VF(ii,jj,kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  ! Calculate geometric moments of neighborhood
+                  m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               end do; end do; end do
+            else
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=this%VF(ii,jj,kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  ! Calculate geometric moments of neighborhood
+                  m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               end do; end do; end do
+            end if
+            ! Calculate geometric center of neighborhood
+            center=[m100,m010,m001]/m000
+            ! Symmetry about Cartesian planes
+            call reflect_moments(moments,center,direction)
+            ! Get PLIC normal vector from neural network
+            call get_normal(moments,normal); normal=normalize(normal)
+            ! Rotate normal vector to original octant
+            if (direction.eq.1) then
+               normal(0)=-normal(0)
+            else if (direction.eq.2) then
+               normal(1)=-normal(1)
+            else if (direction.eq.3) then
+               normal(2)=-normal(2)
+            else if (direction.eq.4) then
+               normal(0)=-normal(0)
+               normal(1)=-normal(1)
+            else if (direction.eq.5) then
+               normal(0)=-normal(0)
+               normal(2)=-normal(2)
+            else if (direction.eq.6) then
+               normal(1)=-normal(1)
+               normal(2)=-normal(2)
+            else if (direction.eq.7) then
+               normal(0)=-normal(0)
+               normal(1)=-normal(1)
+               normal(2)=-normal(2)
+            end if
+            if (.not.flip) then
+               normal(0)=-normal(0)
+               normal(1)=-normal(1)
+               normal(2)=-normal(2)
+            end if
+            ! Locate PLIC plane in cell
+            call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
+            initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+            call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+            call setPlane(this%liquid_gas_interface(i,j,k),0,normal,initial_dist)
+            call matchVolumeFraction(cell,this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+            ! Done with that cell
+            cycle
+         end if
+         
+         ! If the neighborhood normals are sufficiently consistent, just use PLICNET
+         if (surf_norm_mag(i,j,k).gt.this%twoplane_thld2) then
+            ! PLICNET
+            ! Liquid-gas symmetry
+            flip=.false.; if (this%VF(i,j,k).ge.0.5_WP) flip=.true.
+            m000=0; m100=0; m010=0; m001=0
+            ! Construct neighborhood of volume moments
+            if (flip) then
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=1.0_WP-this%VF(ii,jj,kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  ! Calculate geometric moments of neighborhood
+                  m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               end do; end do; end do
+            else
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=this%VF(ii,jj,kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                  moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                  ! Calculate geometric moments of neighborhood
+                  m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                  m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               end do; end do; end do
+            end if
+            ! Calculate geometric center of neighborhood
+            center=[m100,m010,m001]/m000
+            ! Symmetry about Cartesian planes
+            call reflect_moments(moments,center,direction)
+            ! Get PLIC normal vector from neural network
+            call get_normal(moments,normal); normal=normalize(normal)
+            ! Rotate normal vector to original octant
+            if (direction.eq.1) then
+               normal(0)=-normal(0)
+            else if (direction.eq.2) then
+               normal(1)=-normal(1)
+            else if (direction.eq.3) then
+               normal(2)=-normal(2)
+            else if (direction.eq.4) then
+               normal(0)=-normal(0)
+               normal(1)=-normal(1)
+            else if (direction.eq.5) then
+               normal(0)=-normal(0)
+               normal(2)=-normal(2)
+            else if (direction.eq.6) then
+               normal(1)=-normal(1)
+               normal(2)=-normal(2)
+            else if (direction.eq.7) then
+               normal(0)=-normal(0)
+               normal(1)=-normal(1)
+               normal(2)=-normal(2)
+            end if
+            if (.not.flip) then
+               normal(0)=-normal(0)
+               normal(1)=-normal(1)
+               normal(2)=-normal(2)
+            end if
+            ! Locate PLIC plane in cell
+            call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
+            initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+            call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+            call setPlane(this%liquid_gas_interface(i,j,k),0,normal,initial_dist)
+            call matchVolumeFraction(cell,this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+            ! Done with that cell
+            cycle
+         end if
+         
+         ! Prepare R2P data
+         ind=0; call emptyNeighborhood(nh_r2p)
+         do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+            call addMember(nh_r2p,neighborhood_cells(ind),separated_volume_moments(ind))
+            call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+            call construct(separated_volume_moments(ind),[this%VF(ii,jj,kk)*this%cfg%vol(ii,jj,kk),this%Lbary(:,ii,jj,kk),(1.0_WP-this%VF(ii,jj,kk))*this%cfg%vol(ii,jj,kk),this%Gbary(:,ii,jj,kk)])
+            if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+               icenter=ind
+               call setCenterOfStencil(nh_r2p,icenter)
+            end if
+            ind=ind+1
+         end do; end do; end do
+         
+         ! Generate initial guess for R2P based on availability of in-cell surface data
+         surface_area=0.0_WP
+         do ind=0,getSize(this%triangle_moments_storage(i,j,k))-1
+            call getMoments(this%triangle_moments_storage(i,j,k),ind,volume_moments_and_normal)
+            surface_area=surface_area+getVolume(volume_moments_and_normal)
+         end do
+         if (surface_area.gt.surface_epsilon_factor*this%cfg%meshsize(i,j,k)**2) then
+            ! Local normals are available, reconstruction from surface data
+            call reconstructAdvectedNormals(this%triangle_moments_storage(i,j,k),nh_r2p,this%twoplane_thld1,this%liquid_gas_interface(i,j,k))
+            if (getNumberOfPlanes(this%liquid_gas_interface(i,j,k)).eq.1) then
+               call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+               initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+               initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+               call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+               call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+            end if
+            call setSurfaceArea(nh_r2p,surface_area)
+         else
+            ! No interface was advected in our cell, use MoF
+            call reconstructMOF3D(neighborhood_cells(icenter),separated_volume_moments(icenter),this%liquid_gas_interface(i,j,k))
+            call setSurfaceArea(nh_r2p,getSA(neighborhood_cells(icenter),this%liquid_gas_interface(i,j,k)))
+         end if
+         
+         ! Perform R2P reconstruction
+         call reconstructR2P3D(nh_r2p,this%liquid_gas_interface(i,j,k))
+         
+      end do; end do; end do
+      
+      ! Synchronize across boundaries
+      call this%sync_interface()
+      
+      ! Deallocate
+      deallocate(surf_norm_mag)
+      
+   end subroutine build_r2pnet
+
+
+!    !> R2P reconstruction of a planar interface in mixed cells
+!    subroutine build_r2plig(this)
+     
+!      use mathtools, only: normalize
+!      implicit none
+!      class(vfs), intent(inout) :: this
+!      integer(IRL_SignedIndex_t) :: i,j,k
+!      integer :: ind,ii,jj,kk,icenter
+!      type(LVIRANeigh_RectCub_type) :: nh_lvr
+!      type(R2PNeigh_RectCub_type)   :: nh_r2p
+!      type(RectCub_type), dimension(0:26) :: neighborhood_cells
+!      real(IRL_double)  , dimension(0:26) :: liquid_volume_fraction
+!      type(SepVM_type)  , dimension(0:26) :: separated_volume_moments
+!      type(VMAN_type) :: volume_moments_and_normal
+!      !type(R2PWeighting_type) :: r2p_weight
+!      real(WP) :: surface_area,area!,l2g_weight
+!      real(WP), dimension(3) :: surface_norm
+!      real(WP), dimension(:,:,:), allocatable :: surf_norm_mag,tmp
+     
+!      real(IRL_double), dimension(3) :: initial_norm
+!      real(IRL_double) :: initial_dist
+!      logical :: is_wall
+!    !   integer, dimension(:,:,:),allocatable:: lig_ind
+!    !   allocate(lig_ind(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); lig_ind=0
+!    !   if(this%cfg%amRoot) print *,"Here9"
+!      if (this%cfg%amRoot) print *,"R2pLig_Here1"
+!      call this%get_film()
+!      if (this%cfg%amRoot) print *,"R2pLig_Here2"
+!    !   if(this%cfg%amRoot) print *,"Here10"
+!      ! Get storage for volume moments and normal
+!      call new(volume_moments_and_normal)
+
+!      ! Get r2p object for optimization weights
+!      !call new(r2p_weight)
+     
+!      ! Give ourselves an R2P and an LVIRA neighborhood of 27 cells along with separated volume moments
+!      call new(nh_r2p)
+!      call new(nh_lvr)
+!      do i=0,26
+!         call new(neighborhood_cells(i))
+!         call new(separated_volume_moments(i))
+!      end do
+     
+!      ! Compute magnitude of the surface-averaged normal vector
+!      allocate(surf_norm_mag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); surf_norm_mag=0.0_WP
+!      do k=this%cfg%kmin_,this%cfg%kmax_
+!         do j=this%cfg%jmin_,this%cfg%jmax_
+!            do i=this%cfg%imin_,this%cfg%imax_
+!               ! Skip wall/bcond/full cells
+!               if (this%mask(i,j,k).ne.0) cycle
+!               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+!               ! Extract average normal magnitude from neighborhood surface moments
+!               surface_area=0.0_WP; surface_norm=0.0_WP
+!               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                  do ind=0,getSize(this%triangle_moments_storage(ii,jj,kk))-1
+!                     call getMoments(this%triangle_moments_storage(ii,jj,kk),ind,volume_moments_and_normal)
+!                     surface_area=surface_area+getVolume(volume_moments_and_normal)
+!                     surface_norm=surface_norm+getNormal(volume_moments_and_normal)
+!                  end do
+!               end do; end do; end do
+!               if (surface_area.gt.0.0_WP) surf_norm_mag(i,j,k)=norm2(surface_norm/surface_area)
+!            end do
+!         end do
+!      end do
+!      call this%cfg%sync(surf_norm_mag)
+     
+!      ! Apply an extra step of surface smoothing to our normal magnitude
+!      allocate(tmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); tmp=0.0_WP
+!      do k=this%cfg%kmin_,this%cfg%kmax_
+!         do j=this%cfg%jmin_,this%cfg%jmax_
+!            do i=this%cfg%imin_,this%cfg%imax_
+!               ! Skip wall/bcond/full cells
+!               if (this%mask(i,j,k).ne.0) cycle
+!               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+!               ! Surface-averaged normal magnitude
+!               surface_area=0.0_WP
+!               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                  surface_area=surface_area+this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)
+!                  tmp(i,j,k)  =tmp(i,j,k)  +this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)*surf_norm_mag(ii,jj,kk)
+!               end do; end do; end do
+!               if (surface_area.gt.0.0_WP) tmp(i,j,k)=tmp(i,j,k)/surface_area
+!            end do
+!         end do
+!      end do
+!      call this%cfg%sync(tmp); surf_norm_mag=tmp; deallocate(tmp)
+     
+!      ! Traverse domain and reconstruct interface
+!      do k=this%cfg%kmin_,this%cfg%kmax_
+!         do j=this%cfg%jmin_,this%cfg%jmax_
+!            do i=this%cfg%imin_,this%cfg%imax_
+              
+!               ! Skip wall/bcond cells - bconds need to be provided elsewhere directly!
+!               if (this%mask(i,j,k).ne.0) cycle
+              
+!               ! Handle full cells differently
+!               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) then
+!                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+!                  call setPlane(this%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],sign(1.0_WP,this%VF(i,j,k)-0.5_WP))
+!                  cycle
+!               end if
+              
+!               ! If it is not a film, use LVIRA
+!               if (this%lig_ind(i,j,k).ne.1) then
+!                ! Build LVIRA neighborhood
+!                ind=0; call emptyNeighborhood(nh_lvr)
+!                do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                   call addMember(nh_lvr,neighborhood_cells(ind),liquid_volume_fraction(ind))
+!                   call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+!                   liquid_volume_fraction(ind)=this%VF(ii,jj,kk)
+!                   if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+!                      icenter=ind
+!                      call setCenterOfStencil(nh_lvr,icenter)
+!                   end if
+!                   ind=ind+1
+!                end do; end do; end do
+!                ! Formulate initial guess
+!                call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+!                initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+!                initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+!                call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+!                call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+!                ! Perform the reconstruction
+!                call reconstructLVIRA3D(nh_lvr,this%liquid_gas_interface(i,j,k))
+!                ! Done with that cell
+!                cycle
+!             end if
+
+!               ! If a wall is in our neighborhood, apply LVIRA
+!               is_wall=.false.
+!               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                  if (this%mask(ii,jj,kk).eq.1) is_wall=.true.
+!               end do; end do; end do
+!               if (is_wall) then
+!                  ! Set neighborhood_cells and liquid_volume_fraction to current correct values
+!                  ind=0; call emptyNeighborhood(nh_lvr)
+!                  do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                     ! Skip true wall cells - bconds can be used here
+!                     if (this%mask(ii,jj,kk).eq.1) cycle
+!                     ! Add cell to neighborhood
+!                     call addMember(nh_lvr,neighborhood_cells(ind),liquid_volume_fraction(ind))
+!                     ! Build the cell
+!                     call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+!                     ! Assign volume fraction
+!                     liquid_volume_fraction(ind)=this%VF(ii,jj,kk)
+!                     ! Trap and set stencil center
+!                     if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+!                        icenter=ind
+!                        call setCenterOfStencil(nh_lvr,icenter)
+!                     end if
+!                     ! Increment counter
+!                     ind=ind+1
+!                  end do; end do; end do
+!                  ! Formulate initial guess
+!                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+!                  initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+!                  initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+!                  call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+!                  call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+!                  ! Perform the reconstruction
+!                  call reconstructLVIRA3D(nh_lvr,this%liquid_gas_interface(i,j,k))
+!                  ! Done with that cell
+!                  cycle
+!               end if
+              
+!               ! If the neighborhood normals are sufficiently consistent, just use LVIRA
+!               if (surf_norm_mag(i,j,k).gt.this%twoplane_thld2) then
+!                  ! Build LVIRA neighborhood
+!                  ind=0; call emptyNeighborhood(nh_lvr)
+!                  do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                     call addMember(nh_lvr,neighborhood_cells(ind),liquid_volume_fraction(ind))
+!                     call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+!                     liquid_volume_fraction(ind)=this%VF(ii,jj,kk)
+!                     if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+!                        icenter=ind
+!                        call setCenterOfStencil(nh_lvr,icenter)
+!                     end if
+!                     ind=ind+1
+!                  end do; end do; end do
+!                  ! Formulate initial guess
+!                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+!                  initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+!                  initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+!                  call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+!                  call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+!                  ! Perform the reconstruction
+!                  call reconstructLVIRA3D(nh_lvr,this%liquid_gas_interface(i,j,k))
+!                  ! Done with that cell
+!                  cycle
+!               end if
+              
+              
+!               ! Prepare R2P data
+!               ind=0; call emptyNeighborhood(nh_r2p)
+!               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+!                  call addMember(nh_r2p,neighborhood_cells(ind),separated_volume_moments(ind))
+!                  call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+!                  call construct(separated_volume_moments(ind),[this%VF(ii,jj,kk)*this%cfg%vol(ii,jj,kk),this%Lbary(:,ii,jj,kk),(1.0_WP-this%VF(ii,jj,kk))*this%cfg%vol(ii,jj,kk),this%Gbary(:,ii,jj,kk)])
+!                  if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+!                     icenter=ind
+!                     call setCenterOfStencil(nh_r2p,icenter)
+!                  end if
+!                  ind=ind+1
+!               end do; end do; end do
+              
+!               ! Generate initial guess for R2P based on availability of in-cell surface data
+!               surface_area=0.0_WP
+!               do ind=0,getSize(this%triangle_moments_storage(i,j,k))-1
+!                  call getMoments(this%triangle_moments_storage(i,j,k),ind,volume_moments_and_normal)
+!                  surface_area=surface_area+getVolume(volume_moments_and_normal)
+!               end do
+!               if (surface_area.gt.surface_epsilon_factor*this%cfg%meshsize(i,j,k)**2) then
+!                  ! Local normals are available, reconstruction from surface data
+!                  call reconstructAdvectedNormals(this%triangle_moments_storage(i,j,k),nh_r2p,this%twoplane_thld1,this%liquid_gas_interface(i,j,k))
+!                  if (getNumberOfPlanes(this%liquid_gas_interface(i,j,k)).eq.1) then
+!                     call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+!                     initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+!                     initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+!                     call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+!                     call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+!                  end if
+!                  call setSurfaceArea(nh_r2p,surface_area)
+!               else
+!                  ! No interface was advected in our cell, use MoF
+!                  call reconstructMOF3D(neighborhood_cells(icenter),separated_volume_moments(icenter),this%liquid_gas_interface(i,j,k))
+!                  call setSurfaceArea(nh_r2p,getSA(neighborhood_cells(icenter),this%liquid_gas_interface(i,j,k)))
+!               end if
+              
+!               ! Perform R2P reconstruction
+!               !l2g_weight=0.5_WP
+!               !if (this%VF(i,j,k).lt.0.1_WP) l2g_weight=1.0_WP
+!               !if (this%VF(i,j,k).gt.0.9_WP) l2g_weight=0.0_WP
+!               !l2g_weight=min(max(0.5_WP+1.25_WP*(0.5_WP-vf_nbr),0.0_WP),1.0_WP)
+!               !call setImportances(r2p_weight,[0.0_WP,l2g_weight,1.0_WP,-1.0_WP])
+!               !call setImportances(r2p_weight,[0.0_WP,l2g_weight,1.0_WP,0.0_WP])
+!               call reconstructR2P3D(nh_r2p,this%liquid_gas_interface(i,j,k))!,r2p_weight)
+              
+!            end do
+!         end do
+!      end do
+     
+!      ! Synchronize across boundaries
+!      call this%sync_interface()
+
+!      ! Deallocate
+!      deallocate(surf_norm_mag)
+!   end subroutine build_r2plig
+   !> R2P reconstruction of a planar interface in mixed cells
+   subroutine build_r2plig(this)
+     
+      use mathtools, only: normalize
+      implicit none
+      class(vfs), intent(inout) :: this
+      integer(IRL_SignedIndex_t) :: i,j,k
+      integer :: ind,ii,jj,kk,icenter
+      type(LVIRANeigh_RectCub_type) :: nh_lvr
+      type(R2PNeigh_RectCub_type)   :: nh_r2p
+      type(RectCub_type), dimension(0:26) :: neighborhood_cells
+      real(IRL_double)  , dimension(0:26) :: liquid_volume_fraction
+      type(SepVM_type)  , dimension(0:26) :: separated_volume_moments
+      type(VMAN_type) :: volume_moments_and_normal
+      !type(R2PWeighting_type) :: r2p_weight
+      real(WP) :: surface_area,area!,l2g_weight
+      real(WP), dimension(3) :: surface_norm
+      real(WP), dimension(:,:,:), allocatable :: surf_norm_mag,tmp
+      
+      real(IRL_double), dimension(3) :: initial_norm
+      real(IRL_double) :: initial_dist
+      logical :: is_wall
+    !   integer, dimension(:,:,:),allocatable:: lig_ind
+    !   allocate(lig_ind(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); lig_ind=0
+      call this%get_rligament()
+      ! Get storage for volume moments and normal
+      call new(volume_moments_and_normal)
+ 
+      ! Get r2p object for optimization weights
+      !call new(r2p_weight)
+      
+      ! Give ourselves an R2P and an LVIRA neighborhood of 27 cells along with separated volume moments
+      call new(nh_r2p)
+      call new(nh_lvr)
+      do i=0,26
+         call new(neighborhood_cells(i))
+         call new(separated_volume_moments(i))
+      end do
+      
+      ! Compute magnitude of the surface-averaged normal vector
+      allocate(surf_norm_mag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); surf_norm_mag=0.0_WP
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Skip wall/bcond/full cells
+               if (this%mask(i,j,k).ne.0) cycle
+               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+               ! Extract average normal magnitude from neighborhood surface moments
+               surface_area=0.0_WP; surface_norm=0.0_WP
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  do ind=0,getSize(this%triangle_moments_storage(ii,jj,kk))-1
+                     call getMoments(this%triangle_moments_storage(ii,jj,kk),ind,volume_moments_and_normal)
+                     surface_area=surface_area+getVolume(volume_moments_and_normal)
+                     surface_norm=surface_norm+getNormal(volume_moments_and_normal)
+                  end do
+               end do; end do; end do
+               if (surface_area.gt.0.0_WP) surf_norm_mag(i,j,k)=norm2(surface_norm/surface_area)
+            end do
+         end do
+      end do
+      call this%cfg%sync(surf_norm_mag)
+      
+      ! Apply an extra step of surface smoothing to our normal magnitude
+      allocate(tmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); tmp=0.0_WP
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! Skip wall/bcond/full cells
+               if (this%mask(i,j,k).ne.0) cycle
+               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+               ! Surface-averaged normal magnitude
+               surface_area=0.0_WP
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  surface_area=surface_area+this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)
+                  tmp(i,j,k)  =tmp(i,j,k)  +this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)*surf_norm_mag(ii,jj,kk)
+               end do; end do; end do
+               if (surface_area.gt.0.0_WP) tmp(i,j,k)=tmp(i,j,k)/surface_area
+            end do
+         end do
+      end do
+      call this%cfg%sync(tmp); surf_norm_mag=tmp; deallocate(tmp)
+      
+      ! Traverse domain and reconstruct interface
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               
+               ! Skip wall/bcond cells - bconds need to be provided elsewhere directly!
+               if (this%mask(i,j,k).ne.0) cycle
+               
+               ! Handle full cells differently
+               if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) then
+                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+                  call setPlane(this%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],sign(1.0_WP,this%VF(i,j,k)-0.5_WP))
+                  cycle
+               end if
+               
+               ! If a wall is in our neighborhood, apply LVIRA
+               is_wall=.false.
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  if (this%mask(ii,jj,kk).eq.1) is_wall=.true.
+               end do; end do; end do
+               if (is_wall) then
+                  ! Set neighborhood_cells and liquid_volume_fraction to current correct values
+                  ind=0; call emptyNeighborhood(nh_lvr)
+                  do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                     ! Skip true wall cells - bconds can be used here
+                     if (this%mask(ii,jj,kk).eq.1) cycle
+                     ! Add cell to neighborhood
+                     call addMember(nh_lvr,neighborhood_cells(ind),liquid_volume_fraction(ind))
+                     ! Build the cell
+                     call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+                     ! Assign volume fraction
+                     liquid_volume_fraction(ind)=this%VF(ii,jj,kk)
+                     ! Trap and set stencil center
+                     if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+                        icenter=ind
+                        call setCenterOfStencil(nh_lvr,icenter)
+                     end if
+                     ! Increment counter
+                     ind=ind+1
+                  end do; end do; end do
+                  ! Formulate initial guess
+                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+                  initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+                  initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+                  call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+                  call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+                  ! Perform the reconstruction
+                  call reconstructLVIRA3D(nh_lvr,this%liquid_gas_interface(i,j,k))
+                  ! Done with that cell
+                  cycle
+               end if
+               
+               ! If the neighborhood normals are sufficiently consistent, just use LVIRA
+               if (surf_norm_mag(i,j,k).gt.this%twoplane_thld2) then
+                  ! Build LVIRA neighborhood
+                  ind=0; call emptyNeighborhood(nh_lvr)
+                  do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                     call addMember(nh_lvr,neighborhood_cells(ind),liquid_volume_fraction(ind))
+                     call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+                     liquid_volume_fraction(ind)=this%VF(ii,jj,kk)
+                     if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+                        icenter=ind
+                        call setCenterOfStencil(nh_lvr,icenter)
+                     end if
+                     ind=ind+1
+                  end do; end do; end do
+                  ! Formulate initial guess
+                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+                  initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+                  initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+                  call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+                  call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+                  ! Perform the reconstruction
+                  call reconstructLVIRA3D(nh_lvr,this%liquid_gas_interface(i,j,k))
+                  ! Done with that cell
+                  cycle
+               end if
+               
+               ! If it is a resolved ligament, use LVIRA
+               if (this%lig_ind(i,j,k).eq.1) then
+                  ! Build LVIRA neighborhood
+                  ind=0; call emptyNeighborhood(nh_lvr)
+                  do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                     call addMember(nh_lvr,neighborhood_cells(ind),liquid_volume_fraction(ind))
+                     call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+                     liquid_volume_fraction(ind)=this%VF(ii,jj,kk)
+                     if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+                        icenter=ind
+                        call setCenterOfStencil(nh_lvr,icenter)
+                     end if
+                     ind=ind+1
+                  end do; end do; end do
+                  ! Formulate initial guess
+                  call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+                  initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+                  initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+                  call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+                  call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+                  ! Perform the reconstruction
+                  call reconstructLVIRA3D(nh_lvr,this%liquid_gas_interface(i,j,k))
+                  ! Done with that cell
+                  cycle
+               end if
+               
+               ! Prepare R2P data
+               ind=0; call emptyNeighborhood(nh_r2p)
+               do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                  call addMember(nh_r2p,neighborhood_cells(ind),separated_volume_moments(ind))
+                  call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+                  call construct(separated_volume_moments(ind),[this%VF(ii,jj,kk)*this%cfg%vol(ii,jj,kk),this%Lbary(:,ii,jj,kk),(1.0_WP-this%VF(ii,jj,kk))*this%cfg%vol(ii,jj,kk),this%Gbary(:,ii,jj,kk)])
+                  if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+                     icenter=ind
+                     call setCenterOfStencil(nh_r2p,icenter)
+                  end if
+                  ind=ind+1
+               end do; end do; end do
+               
+               ! Generate initial guess for R2P based on availability of in-cell surface data
+               surface_area=0.0_WP
+               do ind=0,getSize(this%triangle_moments_storage(i,j,k))-1
+                  call getMoments(this%triangle_moments_storage(i,j,k),ind,volume_moments_and_normal)
+                  surface_area=surface_area+getVolume(volume_moments_and_normal)
+               end do
+               if (surface_area.gt.surface_epsilon_factor*this%cfg%meshsize(i,j,k)**2) then
+                  ! Local normals are available, reconstruction from surface data
+                  call reconstructAdvectedNormals(this%triangle_moments_storage(i,j,k),nh_r2p,this%twoplane_thld1,this%liquid_gas_interface(i,j,k))
+                  if (getNumberOfPlanes(this%liquid_gas_interface(i,j,k)).eq.1) then
+                     call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+                     initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+                     initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+                     call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+                     call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+                  end if
+                  call setSurfaceArea(nh_r2p,surface_area)
+               else
+                  ! No interface was advected in our cell, use MoF
+                  call reconstructMOF3D(neighborhood_cells(icenter),separated_volume_moments(icenter),this%liquid_gas_interface(i,j,k))
+                  call setSurfaceArea(nh_r2p,getSA(neighborhood_cells(icenter),this%liquid_gas_interface(i,j,k)))
+               end if
+               
+               ! Perform R2P reconstruction
+               !l2g_weight=0.5_WP
+               !if (this%VF(i,j,k).lt.0.1_WP) l2g_weight=1.0_WP
+               !if (this%VF(i,j,k).gt.0.9_WP) l2g_weight=0.0_WP
+               !l2g_weight=min(max(0.5_WP+1.25_WP*(0.5_WP-vf_nbr),0.0_WP),1.0_WP)
+               !call setImportances(r2p_weight,[0.0_WP,l2g_weight,1.0_WP,-1.0_WP])
+               !call setImportances(r2p_weight,[0.0_WP,l2g_weight,1.0_WP,0.0_WP])
+               call reconstructR2P3D(nh_r2p,this%liquid_gas_interface(i,j,k))!,r2p_weight)
+               
+            end do
+         end do
+      end do
+      
+      ! Synchronize across boundaries
+      call this%sync_interface()
+ 
+      ! Deallocate
+      deallocate(surf_norm_mag)
+   end subroutine build_r2plig
+
+  !> Hybrid PLICnet-R2P reconstruction of a planar interface in mixed cells
+  subroutine build_r2pnetlig(this)
+     use mathtools, only: normalize
+     use plicnet,   only: get_normal,reflect_moments
+     implicit none
+     class(vfs), intent(inout) :: this
+     integer(IRL_SignedIndex_t) :: i,j,k
+     integer :: ind,ii,jj,kk,icenter
+     type(R2PNeigh_RectCub_type)   :: nh_r2p
+     type(RectCub_type), dimension(0:26) :: neighborhood_cells
+     real(IRL_double)  , dimension(0:26) :: liquid_volume_fraction
+     type(SepVM_type)  , dimension(0:26) :: separated_volume_moments
+     type(VMAN_type) :: volume_moments_and_normal
+     
+     real(WP) :: surface_area,area
+     real(WP), dimension(3) :: surface_norm
+     real(WP), dimension(:,:,:), allocatable :: surf_norm_mag,tmp
+     
+     real(IRL_double), dimension(3) :: initial_norm
+     real(IRL_double) :: initial_dist
+     logical :: is_wall
+
+     real(IRL_double), dimension(0:2) :: normal
+     real(IRL_double), dimension(0:188) :: moments
+     integer :: direction
+     logical :: flip
+     real(IRL_double) :: m000,m100,m010,m001
+     real(IRL_double), dimension(0:2) :: center
+     type(RectCub_type) :: cell
+
+   !   integer, dimension(:,:,:),allocatable:: lig_ind
+   !   allocate(lig_ind(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); lig_ind=0
+     call this%get_rligament()
+     
+     ! Get storage for volume moments and normal
+     call new(volume_moments_and_normal)
+     call new(cell)
+     
+     ! Give ourselves an R2P neighborhood of 27 cells along with separated volume moments
+     call new(nh_r2p)
+     do i=0,26
+        call new(neighborhood_cells(i))
+        call new(separated_volume_moments(i))
+     end do
+     
+     ! Compute magnitude of the surface-averaged normal vector
+     allocate(surf_norm_mag(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); surf_norm_mag=0.0_WP
+     do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
+        ! Skip wall/bcond/full cells
+        if (this%mask(i,j,k).ne.0) cycle
+        if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+        ! Extract average normal magnitude from neighborhood surface moments
+        surface_area=0.0_WP; surface_norm=0.0_WP
+        do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+           do ind=0,getSize(this%triangle_moments_storage(ii,jj,kk))-1
+              call getMoments(this%triangle_moments_storage(ii,jj,kk),ind,volume_moments_and_normal)
+              surface_area=surface_area+getVolume(volume_moments_and_normal)
+              surface_norm=surface_norm+getNormal(volume_moments_and_normal)
+           end do
+        end do; end do; end do
+        if (surface_area.gt.0.0_WP) surf_norm_mag(i,j,k)=norm2(surface_norm/surface_area)
+     end do; end do; end do
+     call this%cfg%sync(surf_norm_mag)
+     
+     ! Apply an extra step of surface smoothing to our normal magnitude
+     allocate(tmp(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); tmp=0.0_WP
+     do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
+        ! Skip wall/bcond/full cells
+        if (this%mask(i,j,k).ne.0) cycle
+        if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) cycle
+        ! Surface-averaged normal magnitude
+        surface_area=0.0_WP
+        do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+           surface_area=surface_area+this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)
+           tmp(i,j,k)  =tmp(i,j,k)  +this%SD(ii,jj,kk)*this%cfg%vol(ii,jj,kk)*surf_norm_mag(ii,jj,kk)
+        end do; end do; end do
+        if (surface_area.gt.0.0_WP) tmp(i,j,k)=tmp(i,j,k)/surface_area
+     end do; end do; end do
+     call this%cfg%sync(tmp); surf_norm_mag=tmp; deallocate(tmp)
+     
+     ! Traverse domain and reconstruct interface
+     do k=this%cfg%kmin_,this%cfg%kmax_; do j=this%cfg%jmin_,this%cfg%jmax_; do i=this%cfg%imin_,this%cfg%imax_
+        
+        ! Skip wall/bcond cells - bconds need to be provided elsewhere directly!
+        if (this%mask(i,j,k).ne.0) cycle
+        
+        ! Handle full cells differently
+        if (this%VF(i,j,k).lt.VFlo.or.this%VF(i,j,k).gt.VFhi) then
+           call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+           call setPlane(this%liquid_gas_interface(i,j,k),0,[0.0_WP,0.0_WP,0.0_WP],sign(1.0_WP,this%VF(i,j,k)-0.5_WP))
+           cycle
+        end if
+        
+        ! If a wall is in our neighborhood, apply PLICNET
+        !!! ALSO FORCING PLICNET IN MY NOZZLE HERE
+        is_wall=.false.
+        do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+           if (this%mask(ii,jj,kk).eq.1) is_wall=.true.
+        end do; end do; end do
+        if (is_wall.or.this%cfg%xm(i).lt.0.0001_WP) then
+           ! PLICNET
+           ! Liquid-gas symmetry
+           flip=.false.; if (this%VF(i,j,k).ge.0.5_WP) flip=.true.
+           m000=0; m100=0; m010=0; m001=0
+           ! Construct neighborhood of volume moments
+           if (flip) then
+              do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=1.0_WP-this%VF(ii,jj,kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 ! Calculate geometric moments of neighborhood
+                 m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+              end do; end do; end do
+           else
+              do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=this%VF(ii,jj,kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 ! Calculate geometric moments of neighborhood
+                 m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+              end do; end do; end do
+           end if
+           ! Calculate geometric center of neighborhood
+           center=[m100,m010,m001]/m000
+           ! Symmetry about Cartesian planes
+           call reflect_moments(moments,center,direction)
+           ! Get PLIC normal vector from neural network
+           call get_normal(moments,normal); normal=normalize(normal)
+           ! Rotate normal vector to original octant
+           if (direction.eq.1) then
+              normal(0)=-normal(0)
+           else if (direction.eq.2) then
+              normal(1)=-normal(1)
+           else if (direction.eq.3) then
+              normal(2)=-normal(2)
+           else if (direction.eq.4) then
+              normal(0)=-normal(0)
+              normal(1)=-normal(1)
+           else if (direction.eq.5) then
+              normal(0)=-normal(0)
+              normal(2)=-normal(2)
+           else if (direction.eq.6) then
+              normal(1)=-normal(1)
+              normal(2)=-normal(2)
+           else if (direction.eq.7) then
+              normal(0)=-normal(0)
+              normal(1)=-normal(1)
+              normal(2)=-normal(2)
+           end if
+           if (.not.flip) then
+              normal(0)=-normal(0)
+              normal(1)=-normal(1)
+              normal(2)=-normal(2)
+           end if
+           ! Locate PLIC plane in cell
+           call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
+           initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+           call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+           call setPlane(this%liquid_gas_interface(i,j,k),0,normal,initial_dist)
+           call matchVolumeFraction(cell,this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+           ! Done with that cell
+           cycle
+        end if
+        
+        ! If the neighborhood normals are sufficiently consistent, just use PLICNET
+        if (surf_norm_mag(i,j,k).gt.this%twoplane_thld2) then
+           ! PLICNET
+           ! Liquid-gas symmetry
+           flip=.false.; if (this%VF(i,j,k).ge.0.5_WP) flip=.true.
+           m000=0; m100=0; m010=0; m001=0
+           ! Construct neighborhood of volume moments
+           if (flip) then
+              do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=1.0_WP-this%VF(ii,jj,kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 ! Calculate geometric moments of neighborhood
+                 m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+              end do; end do; end do
+           else
+              do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=this%VF(ii,jj,kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+                 moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+                 ! Calculate geometric moments of neighborhood
+                 m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+                 m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+              end do; end do; end do
+           end if
+           ! Calculate geometric center of neighborhood
+           center=[m100,m010,m001]/m000
+           ! Symmetry about Cartesian planes
+           call reflect_moments(moments,center,direction)
+           ! Get PLIC normal vector from neural network
+           call get_normal(moments,normal); normal=normalize(normal)
+           ! Rotate normal vector to original octant
+           if (direction.eq.1) then
+              normal(0)=-normal(0)
+           else if (direction.eq.2) then
+              normal(1)=-normal(1)
+           else if (direction.eq.3) then
+              normal(2)=-normal(2)
+           else if (direction.eq.4) then
+              normal(0)=-normal(0)
+              normal(1)=-normal(1)
+           else if (direction.eq.5) then
+              normal(0)=-normal(0)
+              normal(2)=-normal(2)
+           else if (direction.eq.6) then
+              normal(1)=-normal(1)
+              normal(2)=-normal(2)
+           else if (direction.eq.7) then
+              normal(0)=-normal(0)
+              normal(1)=-normal(1)
+              normal(2)=-normal(2)
+           end if
+           if (.not.flip) then
+              normal(0)=-normal(0)
+              normal(1)=-normal(1)
+              normal(2)=-normal(2)
+           end if
+           ! Locate PLIC plane in cell
+           call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
+           initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+           call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+           call setPlane(this%liquid_gas_interface(i,j,k),0,normal,initial_dist)
+           call matchVolumeFraction(cell,this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+           ! Done with that cell
+           cycle
+        end if
+
+
+        ! If it is a resolved ligament, use PLICNET
+        if (this%lig_ind(i,j,k).eq.1) then
+         ! PLICNET
+         ! Liquid-gas symmetry
+         flip=.false.; if (this%VF(i,j,k).ge.0.5_WP) flip=.true.
+         m000=0; m100=0; m010=0; m001=0
+         ! Construct neighborhood of volume moments
+         if (flip) then
+            do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=1.0_WP-this%VF(ii,jj,kk)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+               ! Calculate geometric moments of neighborhood
+               m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+            end do; end do; end do
+         else
+            do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k)))=this%VF(ii,jj,kk)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)=(this%Lbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)=(this%Lbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)=(this%Lbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+4)=(this%Gbary(1,ii,jj,kk)-this%cfg%xm(ii))/this%cfg%dx(ii)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+5)=(this%Gbary(2,ii,jj,kk)-this%cfg%ym(jj))/this%cfg%dy(jj)
+               moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+6)=(this%Gbary(3,ii,jj,kk)-this%cfg%zm(kk))/this%cfg%dz(kk)
+               ! Calculate geometric moments of neighborhood
+               m000=m000+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               m100=m100+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+1)+(ii-i))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               m010=m010+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+2)+(jj-j))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+               m001=m001+(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))+3)+(kk-k))*(moments(7*((ii+1-i)*9+(jj+1-j)*3+(kk+1-k))))
+            end do; end do; end do
+         end if
+         ! Calculate geometric center of neighborhood
+         center=[m100,m010,m001]/m000
+         ! Symmetry about Cartesian planes
+         call reflect_moments(moments,center,direction)
+         ! Get PLIC normal vector from neural network
+         call get_normal(moments,normal); normal=normalize(normal)
+         ! Rotate normal vector to original octant
+         if (direction.eq.1) then
+            normal(0)=-normal(0)
+         else if (direction.eq.2) then
+            normal(1)=-normal(1)
+         else if (direction.eq.3) then
+            normal(2)=-normal(2)
+         else if (direction.eq.4) then
+            normal(0)=-normal(0)
+            normal(1)=-normal(1)
+         else if (direction.eq.5) then
+            normal(0)=-normal(0)
+            normal(2)=-normal(2)
+         else if (direction.eq.6) then
+            normal(1)=-normal(1)
+            normal(2)=-normal(2)
+         else if (direction.eq.7) then
+            normal(0)=-normal(0)
+            normal(1)=-normal(1)
+            normal(2)=-normal(2)
+         end if
+         if (.not.flip) then
+            normal(0)=-normal(0)
+            normal(1)=-normal(1)
+            normal(2)=-normal(2)
+         end if
+         ! Locate PLIC plane in cell
+         call construct_2pt(cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
+         initial_dist=dot_product(normal,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+         call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+         call setPlane(this%liquid_gas_interface(i,j,k),0,normal,initial_dist)
+         call matchVolumeFraction(cell,this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+         ! Done with that cell
+         cycle
+      end if
+        
+        ! Prepare R2P data
+        ind=0; call emptyNeighborhood(nh_r2p)
+        do kk=k-1,k+1; do jj=j-1,j+1; do ii=i-1,i+1
+           call addMember(nh_r2p,neighborhood_cells(ind),separated_volume_moments(ind))
+           call construct_2pt(neighborhood_cells(ind),[this%cfg%x(ii),this%cfg%y(jj),this%cfg%z(kk)],[this%cfg%x(ii+1),this%cfg%y(jj+1),this%cfg%z(kk+1)])
+           call construct(separated_volume_moments(ind),[this%VF(ii,jj,kk)*this%cfg%vol(ii,jj,kk),this%Lbary(:,ii,jj,kk),(1.0_WP-this%VF(ii,jj,kk))*this%cfg%vol(ii,jj,kk),this%Gbary(:,ii,jj,kk)])
+           if (ii.eq.i.and.jj.eq.j.and.kk.eq.k) then
+              icenter=ind
+              call setCenterOfStencil(nh_r2p,icenter)
+           end if
+           ind=ind+1
+        end do; end do; end do
+        
+        ! Generate initial guess for R2P based on availability of in-cell surface data
+        surface_area=0.0_WP
+        do ind=0,getSize(this%triangle_moments_storage(i,j,k))-1
+           call getMoments(this%triangle_moments_storage(i,j,k),ind,volume_moments_and_normal)
+           surface_area=surface_area+getVolume(volume_moments_and_normal)
+        end do
+        if (surface_area.gt.surface_epsilon_factor*this%cfg%meshsize(i,j,k)**2) then
+           ! Local normals are available, reconstruction from surface data
+           call reconstructAdvectedNormals(this%triangle_moments_storage(i,j,k),nh_r2p,this%twoplane_thld1,this%liquid_gas_interface(i,j,k))
+           if (getNumberOfPlanes(this%liquid_gas_interface(i,j,k)).eq.1) then
+              call setNumberOfPlanes(this%liquid_gas_interface(i,j,k),1)
+              initial_norm=normalize(this%Gbary(:,i,j,k)-this%Lbary(:,i,j,k))
+              initial_dist=dot_product(initial_norm,[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)])
+              call setPlane(this%liquid_gas_interface(i,j,k),0,initial_norm,initial_dist)
+              call matchVolumeFraction(neighborhood_cells(icenter),this%VF(i,j,k),this%liquid_gas_interface(i,j,k))
+           end if
+           call setSurfaceArea(nh_r2p,surface_area)
+        else
+           ! No interface was advected in our cell, use MoF
+           call reconstructMOF3D(neighborhood_cells(icenter),separated_volume_moments(icenter),this%liquid_gas_interface(i,j,k))
+           call setSurfaceArea(nh_r2p,getSA(neighborhood_cells(icenter),this%liquid_gas_interface(i,j,k)))
+        end if
+        
+        ! Perform R2P reconstruction
+        call reconstructR2P3D(nh_r2p,this%liquid_gas_interface(i,j,k))
+        
+     end do; end do; end do
+     
+     ! Synchronize across boundaries
+     call this%sync_interface()
+     
+     ! Deallocate
+     deallocate(surf_norm_mag)
+     
+  end subroutine build_r2pnetlig
+
+  !> Measure local thickness of multiphasic structure
+  subroutine get_thickness_unfiltered(this)
+     implicit none
+     class(vfs), intent(inout) :: this
+     integer :: i,j,k,ii,jj,kk,nneigh
+     real(WP) :: lvol,gvol,area
+     ! Reset thickness
+     this%thickness=1.0_WP;nneigh=5!nneigh=1
+     ! First compute thickness based on current surface and volume moments (SD and VF)
+     do k=this%cfg%kmin_,this%cfg%kmax_
+        do j=this%cfg%jmin_,this%cfg%jmax_
+           do i=this%cfg%imin_,this%cfg%imax_
+              lvol=0.0_WP; area=0.0_WP
+
+              do kk = k-nneigh,k+nneigh
+                 do jj = j-nneigh,j+nneigh
+                    do ii = i-nneigh,i+nneigh
+                       lvol = lvol + this%VF(ii,jj,kk)
+                       area = area + this%SD(ii,jj,kk)
+                    end do
+                 end do
+              end do
+              if (this%VF(i,j,k).lt.VFlo) then
+                 this%thickness(i,j,k) = 0.0_WP
+              else if (area .gt. 0.0_WP) then    
+                 this%thickness(i,j,k) = 2.0_WP*lvol/(area+tiny(1.0_WP))
+              else
+                 this%thickness(i,j,k) = 3.0_WP*this%cfg%min_meshsize
+              end if
+           end do
+        end do
+     end do
+     call this%cfg%sync(this%thickness)
+     this%thickness_unfilt = this%thickness
+  end subroutine get_thickness_unfiltered
+
+   !> Detect edge-like regions of the interface
+  subroutine get_localfilmtype(this,film_type)
+     implicit none
+     class(vfs), intent(inout) :: this
+     integer, dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: film_type
+     integer , parameter        :: order = 3
+     integer :: ii,jj,kk,i,j,k,lwork,info
+     real(WP) :: lvol,ratio
+     real(WP), dimension(:), allocatable :: work
+     real(WP), dimension(1)   :: lwork_query
+     real(WP), dimension(3) :: lx_vol, Ltmp,d
+     real(WP), dimension(3,3) :: Imom
+     film_type=0; ratio=1.5_WP
+     call dsyev('V','U',order,Imom,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+     ! Traverse domain and compute sensors
+     do k=this%cfg%kmin_,this%cfg%kmax_
+        do j=this%cfg%jmin_,this%cfg%jmax_
+           do i=this%cfg%imin_,this%cfg%imax_
+              Imom = 0.0_WP; lvol = 0.0_WP; lx_vol=0.0_WP
+              do kk = k-2,k+2
+                 do jj = j-2,j+2
+                    do ii = i-2,i+2
+                       ! Volume
+                       lvol = lvol + this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                       ! Center of gravity
+                       lx_vol = lx_vol + this%Lbary(:,ii,jj,kk)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                    end do
+                 end do
+              end do
+
+              lx_vol = lx_vol/lvol
+              do kk = k-2,k+2
+                 do jj = j-2,j+2
+                    do ii = i-2,i+2
+                       ! Location of film node
+                       Ltmp = this%Lbary(:,ii,jj,kk) - lx_vol
+                       Imom(1,1) = Imom(1,1) + (Ltmp(2)**2 + Ltmp(3)**2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                       Imom(2,2) = Imom(2,2) + (Ltmp(1)**2 + Ltmp(3)**2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                       Imom(3,3) = Imom(3,3) + (Ltmp(1)**2 + Ltmp(2)**2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                       
+                       Imom(1,2) = Imom(1,2) - Ltmp(1)*Ltmp(2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                       Imom(1,3) = Imom(1,3) - Ltmp(1)*Ltmp(3)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+                       Imom(2,3) = Imom(2,3) - Ltmp(2)*Ltmp(3)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)   
+                    end do
+                 end do
+              end do
+              call dsyev('V','U',order,Imom,order,d,work,lwork,info)
+              d = max(0.0_WP,d)
+              if (d(3).gt.(ratio*d(1))) film_type(i,j,k) = film_type(i,j,k) + 1
+              if (d(3).gt.(ratio*d(2))) film_type(i,j,k) = film_type(i,j,k) + 1
+           end do 
+        end do 
+     end do 
+     deallocate(work)
+     call this%cfg%sync(film_type)
+     this%film_type = film_type
+  end subroutine get_localfilmtype
+
+
+
+  !> Detect edge-like regions of the interface
+  subroutine get_rligament(this)
+     implicit none
+     class(vfs), intent(inout) :: this
+   !   integer, dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: lig_ind
+     integer, dimension(:,:,:), allocatable :: film_type 
+     real(WP) :: ligament_detectratio,ligament_ratio
+     real(WP), dimension(:), allocatable :: vol,maxlength
+     real(WP), dimension(:,:), allocatable :: lengths
+     real(WP), dimension(:), allocatable :: min_thickness,f_ligament
+     integer :: n,nn,i,j,k
+     allocate(film_type(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); film_type=0
+     ligament_detectratio =3.5_WP;ligament_ratio=0.8_WP;
+
+     call this%get_thickness_unfiltered()
+
+     this%lig_ind = 0
+     call this%ccl%build(make_label,same_label)
+     
+     if (this%ccl%nstruct .ge.1) then
+        call this%get_localfilmtype(film_type)
+        allocate(maxlength(1:this%ccl%nstruct),lengths(1:this%ccl%nstruct,1:3));maxlength=0.0_WP;lengths=0.0_WP
+        allocate(vol(1:this%ccl%nstruct));vol=0.0_WP
+        allocate(min_thickness(1:this%ccl%nstruct),f_ligament(1:this%ccl%nstruct)); min_thickness = this%cfg%min_meshsize; f_ligament=0.0_WP
+        call this%get_cclstats(film_type,vol,lengths,maxlength,f_ligament)
+        ! call this%get_structminthickness(ccl,min_thickness)
+        do n=1,this%ccl%nstruct
+           ! if (min_thickness(n) .gt. this%min_ligamentthickness*min_meshsize) cycle
+           ! if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) cycle
+         if (this%cfg%amRoot) print *, "This is id:", n ,"f_ligament is:", f_ligament(n)  
+         if (f_ligament(n).lt.ligament_ratio) cycle
+         ! Mark the cells with ligament detected to 1 for reconstruction with lvira or plicnet
+           do nn=1,this%ccl%struct(n)%n_
+              i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+              this%lig_ind(i,j,k) = 1
+           end do
+        end do
+     end if
+     call this%cfg%sync(this%lig_ind)
+     contains 
+        logical function make_label(i,j,k)
+           implicit none
+           integer, intent(in) :: i,j,k
+           if ((this%VF(i,j,k).gt.VFlo).and.(this%thickness(i,j,k).lt.ligament_detectratio*this%cfg%min_meshsize))then
+              make_label=.true.
+           else
+              make_label=.false.
+           end if
+        end function make_label
+
+        !> Function that identifies if cell pairs have same label
+        logical function same_label(i1,j1,k1,i2,j2,k2)
+           implicit none
+           integer, intent(in) :: i1,j1,k1,i2,j2,k2
+           same_label=.true.
+        end function same_label
+  end subroutine get_rligament
+
+
+  !> Detect edge-like regions of the interface
+  subroutine get_film(this)
+      implicit none
+      class(vfs), intent(inout) :: this
+   !   integer, dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: lig_ind
+      integer, dimension(:,:,:), allocatable :: film_type 
+      real(WP) :: ligament_detectratio,ligament_ratio
+      real(WP), dimension(:), allocatable :: vol,maxlength
+      real(WP), dimension(:,:), allocatable :: lengths
+      real(WP), dimension(:), allocatable :: min_thickness,f_ligament
+      integer :: n,nn,i,j,k
+      allocate(film_type(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); film_type=0
+      ligament_detectratio =3.0_WP;ligament_ratio=0.8_WP;
+
+      if(this%cfg%amRoot) print *,"get_filmhere1"
+      call this%get_thickness_unfiltered()
+      if(this%cfg%amRoot) print *,"get_filmhere2"
+   ! if(this%cfg%amRoot) print *,"Here16"
+      this%lig_ind = 0
+      call this%ccl%build(make_label,same_label)
+      if(this%cfg%amRoot) print *,"get_filmhere3"
+      ! if(this%cfg%amRoot) print *,"Here17"
+      if (this%ccl%nstruct .ge.1) then
+         ! if(this%cfg%amRoot) print *,"Here18"
+         if(this%cfg%amRoot) print *,"get_filmhere4"
+         call this%get_localfilmtype(film_type)
+         ! if(this%cfg%amRoot) print *,"Here19"
+         allocate(maxlength(1:this%ccl%nstruct),lengths(1:this%ccl%nstruct,1:3));maxlength=0.0_WP;lengths=0.0_WP
+         allocate(vol(1:this%ccl%nstruct));vol=0.0_WP
+         allocate(min_thickness(1:this%ccl%nstruct),f_ligament(1:this%ccl%nstruct)); min_thickness = this%cfg%min_meshsize; f_ligament=0.0_WP
+         ! if(this%cfg%amRoot) print *,"Here20"
+         if(this%cfg%amRoot) print *,"get_filmhere5"
+         call this%get_cclstats(film_type,vol,lengths,maxlength,f_ligament)
+         ! if(this%cfg%amRoot) print *,"Here21"
+         ! call this%get_structminthickness(ccl,min_thickness)
+         if(this%cfg%amRoot) print *,"get_filmhere6"
+         do n=1,this%ccl%nstruct
+            ! if (min_thickness(n) .gt. this%min_ligamentthickness*min_meshsize) cycle
+            ! if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) cycle
+         if (this%cfg%amRoot) print *, "This is id:", n ,"f_film is:", f_ligament(n)  
+         if (f_ligament(n).lt.ligament_ratio) cycle
+         ! Mark the cells with ligament detected to 1 for reconstruction with lvira or plicnet
+            do nn=1,this%ccl%struct(n)%n_
+               i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+               this%lig_ind(i,j,k) = 1
+            end do
+         end do
+      end if
+      call this%cfg%sync(this%lig_ind)
+      contains 
+         logical function make_label(i,j,k)
+            implicit none
+            integer, intent(in) :: i,j,k
+            if ((this%VF(i,j,k).gt.VFlo).and.(this%thickness(i,j,k).lt.ligament_detectratio*this%cfg%min_meshsize))then
+               make_label=.true.
+            else
+               make_label=.false.
+            end if
+         end function make_label
+
+         !> Function that identifies if cell pairs have same label
+         logical function same_label(i1,j1,k1,i2,j2,k2)
+            implicit none
+            integer, intent(in) :: i1,j1,k1,i2,j2,k2
+            same_label=.true.
+         end function same_label
+   end subroutine get_film
+
+
+   ! subroutine get_neighbortype(this)
+   !    implicit none
+   !    class(ligament), intent(inout) :: this
+   !    integer :: i,j,k,ii,jj,kk,nneigh,sumfilm,sumlig,sumnothin
+   !    do k=vf%cfg%kmin_,vf%cfg%kmax_
+   !       do j=vf%cfg%jmin_,vf%cfg%jmax_
+   !          do i=vf%cfg%imin_,vf%cfg%imax_
+   !             nneigh = 2; sumfilm=0;sumlig=0;sumnothin=0
+   !             do kk = k-nneigh,k+nneigh
+   !                do jj = j-nneigh,j+nneigh
+   !                   do ii = i-nneigh,i+nneigh
+   !                      if (vf%film_type(ii,jj,kk).eq.2) then
+   !                         sumfilm = sumfilm + 1
+   !                      end if
+   !                      if (vf%film_type(ii,jj,kk).eq.1) then
+   !                         sumlig = sumlig + 1
+   !                      end if
+   !                      if (vf%thin_sensor(ii,jj,kk).eq.0.0_WP .and. vf%VF(ii,jj,kk).ge.VFlolim) then
+   !                         sumnothin = sumnothin + 1
+   !                      end if
+   !                   end do
+   !                end do 
+   !             end do
+   !             n_film_2(i,j,k)=sumfilm
+   !             n_ligament_2(i,j,k)=sumlig
+   !             n_notthin_2(i,j,k)=sumnothin
+
+   !             nneigh = 3; sumfilm=0;sumlig=0;sumnothin=0
+   !             do kk = k-nneigh,k+nneigh
+   !                do jj = j-nneigh,j+nneigh
+   !                   do ii = i-nneigh,i+nneigh
+   !                      if (vf%film_type(ii,jj,kk).eq.2) then
+   !                         sumfilm = sumfilm + 1
+   !                      end if
+   !                      if (vf%film_type(ii,jj,kk).eq.1) then
+   !                         sumlig = sumlig + 1
+   !                      end if
+   !                      if (vf%thin_sensor(ii,jj,kk).eq.0.0_WP .and. vf%VF(ii,jj,kk).ge.VFlolim) then
+   !                         sumnothin = sumnothin + 1
+   !                      end if
+   !                   end do
+   !                end do 
+   !             end do
+   !             n_film_3(i,j,k)=sumfilm
+   !             n_ligament_3(i,j,k)=sumlig
+   !             n_notthin_3(i,j,k)=sumnothin
+
+   !          end do
+   !       end do
+   !    end do
+   ! end subroutine get_neighbortype
+
+  subroutine get_cclstats(this,film_type,vol,lengths,maxlength,f_ligament)
+     use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX,MPI_INTEGER
+     use parallel,  only: MPI_REAL_WP
+     use irl_fortran_interface
+     implicit none
+     class(vfs), intent(inout) :: this
+     integer, dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(in) :: film_type
+     real(WP), dimension(1:), intent(inout) :: vol,maxlength,f_ligament
+     real(WP), dimension(1:,1:), intent(inout) :: lengths
+     integer :: n,nn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,per_x,per_y,per_z
+     ! Allocate variables to get stats
+     real(WP), dimension(:), allocatable :: vol_,x_vol_,y_vol_,z_vol_,x,y,z
+     real(WP), dimension(:), allocatable :: x_min_,x_min,x_max_,x_max
+     real(WP), dimension(:), allocatable :: y_min_,y_min,y_max_,y_max
+     real(WP), dimension(:), allocatable :: z_min_,z_min,z_max_,z_max
+     real(WP), dimension(:,:,:), allocatable :: Imom_,Imom
+     ! For ligament type
+     real(WP), dimension(:), allocatable :: ncell_,ncell,n_ligament_,n_ligament
+     real(WP) :: xtmp,ytmp,ztmp
+     ! Moment of inertia variable
+     real(WP), dimension(:), allocatable :: work
+     real(WP), dimension(1)   :: lwork_query
+     real(WP), dimension(3) :: d
+     real(WP), dimension(3,3) :: A
+     integer , parameter :: order = 3
+     integer  :: lwork,info
+
+     allocate(vol_(1:this%ccl%nstruct));vol_=0.0_WP
+     allocate(x(1:this%ccl%nstruct),y(1:this%ccl%nstruct),z(1:this%ccl%nstruct));x=0.0_WP;y=0.0_WP;z=0.0_WP
+     allocate(x_min(1:this%ccl%nstruct),x_min_(1:this%ccl%nstruct));x_min=0.0_WP;x_min_= 10000.0_WP
+     allocate(x_max(1:this%ccl%nstruct),x_max_(1:this%ccl%nstruct));x_max=0.0_WP;x_max_=-10000.0_WP
+     allocate(y_min(1:this%ccl%nstruct),y_min_(1:this%ccl%nstruct));y_min=0.0_WP;y_min_= 10000.0_WP
+     allocate(y_max(1:this%ccl%nstruct),y_max_(1:this%ccl%nstruct));y_max=0.0_WP;y_max_=-10000.0_WP
+     allocate(z_min(1:this%ccl%nstruct),z_min_(1:this%ccl%nstruct));z_min=0.0_WP;z_min_= 10000.0_WP
+     allocate(z_max(1:this%ccl%nstruct),z_max_(1:this%ccl%nstruct));z_max=0.0_WP;z_max_=-10000.0_WP
+     allocate(x_vol_(1:this%ccl%nstruct),y_vol_(1:this%ccl%nstruct),z_vol_(1:this%ccl%nstruct));x_vol_=0.0_WP;y_vol_=0.0_WP;z_vol_=0.0_WP
+     allocate(Imom(1:this%ccl%nstruct,3,3),Imom_(1:this%ccl%nstruct,3,3));Imom=0.0_WP;Imom_=0.0_WP
+     allocate(ncell(1:this%ccl%nstruct),ncell_(1:this%ccl%nstruct),n_ligament_(1:this%ccl%nstruct),n_ligament(1:this%ccl%nstruct))
+     ncell=0;ncell_=0;n_ligament=0;n_ligament_=0
+     ! Query optimal work array size
+     call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+
+     call this%detect_edge_regions()
+
+     do i=1,this%ccl%nstruct
+        ! Periodicity
+        per_x = this%ccl%struct(i)%per(1); per_y = this%ccl%struct(i)%per(2); per_z = this%ccl%struct(i)%per(3)
+        ! get number of local cells
+        ncell_(i) = 1.0_WP*this%ccl%struct(i)%n_
+        do j=1,this%ccl%struct(i)%n_
+           ii=this%ccl%struct(i)%map(1,j); jj=this%ccl%struct(i)%map(2,j); kk=this%ccl%struct(i)%map(3,j)
+           ! Location of struct node
+           xtmp = this%cfg%xm(ii)-per_x*this%cfg%xL
+           ytmp = this%cfg%ym(jj)-per_y*this%cfg%yL
+           ztmp = this%cfg%zm(kk)-per_z*this%cfg%zL
+           ! Volume
+           vol_(i) = vol_(i) + this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           ! Center of gravity
+           x_vol_(i) = x_vol_(i) + xtmp*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           y_vol_(i) = y_vol_(i) + ytmp*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           z_vol_(i) = z_vol_(i) + ztmp*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+
+           ! Film_Test criteria
+         !   if(film_type(ii,jj,kk).eq.2 .or. (film_type(ii,jj,kk).eq.1.and.this%edge_sensor(ii,jj,kk).gt.0.3_WP)) n_ligament_(i)=n_ligament_(i)+1.0_WP
+           ! Ligament test criteria
+           if(film_type(ii,jj,kk).eq.1)  n_ligament_(i)=n_ligament_(i)+1.0_WP 
+        end do
+     end do
+     ! Sum parallel stats
+     call MPI_ALLREDUCE(vol_,vol,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(x_vol_,x,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(y_vol_,y,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(z_vol_,z,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+
+     call MPI_ALLREDUCE(ncell_,ncell,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(n_ligament_,n_ligament,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+     do i=1,this%ccl%nstruct
+        ! Periodicity
+        per_x = this%ccl%struct(i)%per(1); per_y = this%ccl%struct(i)%per(2); per_z = this%ccl%struct(i)%per(3)
+        do j=1,this%ccl%struct(i)%n_
+           ! Indices of struct node
+           ii=this%ccl%struct(i)%map(1,j); jj=this%ccl%struct(i)%map(2,j); kk=this%ccl%struct(i)%map(3,j)
+           xtmp = this%cfg%xm(ii)-per_x*this%cfg%xL-x(i)/vol(i)
+           ytmp = this%cfg%ym(jj)-per_y*this%cfg%yL-y(i)/vol(i)
+           ztmp = this%cfg%zm(kk)-per_z*this%cfg%zL-z(i)/vol(i)
+           ! Moment of Inertia
+           Imom_(i,1,1) = Imom_(i,1,1) + (ytmp**2 + ztmp**2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           Imom_(i,2,2) = Imom_(i,2,2) + (xtmp**2 + ztmp**2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           Imom_(i,3,3) = Imom_(i,3,3) + (xtmp**2 + ytmp**2)*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           Imom_(i,1,2) = Imom_(i,1,2) - xtmp*ytmp*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           Imom_(i,1,3) = Imom_(i,1,3) - xtmp*ztmp*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           Imom_(i,2,3) = Imom_(i,2,3) - ytmp*ztmp*this%cfg%vol(ii,jj,kk)*this%VF(ii,jj,kk)
+           do n=1,2
+              if (getNumberOfVertices(this%interface_polygon(n,ii,jj,kk)).gt.0) then
+                 d = calculateCentroid(this%interface_polygon(n,ii,jj,kk))
+                 x_min_(i) = min(x_min_(i),d(1)); x_max_(i) = max(x_max_(i),d(1))
+                 y_min_(i) = min(y_min_(i),d(2)); y_max_(i) = max(y_max_(i),d(2))
+                 z_min_(i) = min(z_min_(i),d(3)); z_max_(i) = max(z_max_(i),d(3))
+              end if
+           end do
+        end do 
+     end do
+     ! Sum parallel stat on Imom
+     do i=1,3
+        do j=1,3
+           call MPI_ALLREDUCE(Imom_(:,i,j),Imom(:,i,j),this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+        end do
+     end do
+     ! Get extents
+     call MPI_ALLREDUCE(x_min_,x_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(x_max_,x_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(y_min_,y_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(y_max_,y_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(z_min_,z_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+     call MPI_ALLREDUCE(z_max_,z_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%cfg%comm,ierr)
+     !!  Get min thickness
+     !  call MPI_ALLREDUCE(min_thickness_,min_thickness,this%ccl_ligament%nstruct,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+     ! Store data
+     do i=1,this%ccl%nstruct
+        maxlength(i) = hypot(hypot(x_max(i)-x_min(i),y_max(i)-y_min(i))**2,z_max(i)-z_min(i))
+        ! Eigenvalues/eigenvectors of moments of inertia tensor
+        A = Imom(i,:,:); n = 3
+        ! On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
+        call dsyev('V','U',n,A,n,d,work,lwork,info)
+        ! Get rid of very small negative values (due to machine accuracy)
+        d = max(0.0_WP,d)
+        ! Store characteristic lengths
+        lengths(i,1) = sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/vol(i))
+        lengths(i,2) = sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/vol(i))
+        lengths(i,3) = sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/vol(i))
+        ! Zero out length in 3rd dimension if 2D
+        if (this%cfg%nx.eq.1.or.this%cfg%ny.eq.1.or.this%cfg%nz.eq.1) lengths(i,3)=0.0_WP
+        ! Use max of bounding box and MoI-derived lengths as length
+        maxlength(i) = max(maxlength(i),lengths(i,1))
+        
+        if (ncell(i).eq.0) then 
+           f_ligament(i) = 0.0_WP
+        else 
+           f_ligament(i) = 1.0_WP*n_ligament(i)/(1.0_WP*ncell(i)) 
+        end if
+
+     end do
+     ! Deallocate arrays
+     deallocate(vol_,x_vol_,y_vol_,z_vol_,Imom_,Imom)
+     deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
+     deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
+     deallocate(ncell,ncell_,n_ligament,n_ligament_)
+  end subroutine get_cclstats
+
+
+
+  subroutine get_structminthickness(this,min_thickness)
+     use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX
+     use parallel,  only: MPI_REAL_WP
+     implicit none
+     class(vfs), intent(inout) :: this 
+     real(WP) , dimension(1:), intent(inout) :: min_thickness
+     integer :: n,nn,i,j,k,ierr
+     real(WP), dimension(:), allocatable :: min_thickness_
+     allocate(min_thickness_(1:this%ccl%nstruct)); min_thickness_ = 5.0_WP*this%cfg%min_meshsize
+     do n=1,this%ccl%nstruct
+        do nn=1,this%ccl%struct(n)%n_
+           i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+           min_thickness_(n) = min(min_thickness_(n),this%thickness(i,j,k))
+        end do
+     end do
+     call MPI_ALLREDUCE(min_thickness_,min_thickness,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+     deallocate(min_thickness_)
+  end subroutine get_structminthickness
+
+
+
    !> Set all domain boundaries to full liquid/gas based on VOF value
    subroutine set_full_bcond(this)
       implicit none
@@ -3324,6 +5101,89 @@ contains
       end if
       
    end subroutine update_surfmesh
+
+
+   !> Update a surfmesh object from our current polygons - near-empty cells are not shown
+   subroutine update_surfmesh_nowall(this,smesh,threshold)
+      use surfmesh_class, only: surfmesh
+      implicit none
+      class(vfs), intent(inout) :: this
+      class(surfmesh), intent(inout) :: smesh
+      real(WP), optional :: threshold
+      real(WP) :: VFclip
+      integer :: i,j,k,n,shape,nv,np,nplane
+      real(WP), dimension(3) :: tmp_vert
+      
+      ! Handle VF threshold
+      if (present(threshold)) then
+         VFclip=threshold
+      else
+         VFclip=2.0_WP*epsilon(1.0_WP)
+      end if
+
+      ! Reset surface mesh storage
+      call smesh%reset()
+      
+      ! First pass to count how many vertices and polygons are inside our processor
+      nv=0; np=0
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               if (this%cfg%VF(i,j,k).lt.VFclip) cycle ! Skip cells below VF threshold
+               do nplane=1,getNumberOfPlanes(this%liquid_gas_interface(i,j,k))
+                  shape=getNumberOfVertices(this%interface_polygon(nplane,i,j,k))
+                  if (shape.gt.0) then
+                     nv=nv+shape
+                     np=np+1
+                  end if
+               end do
+            end do
+         end do
+      end do
+      
+      ! Reallocate storage and fill out arrays
+      if (np.gt.0) then
+         call smesh%set_size(nvert=nv,npoly=np)
+         allocate(smesh%polyConn(smesh%nVert)) ! Also allocate naive connectivity
+         nv=0; np=0
+         do k=this%cfg%kmin_,this%cfg%kmax_
+            do j=this%cfg%jmin_,this%cfg%jmax_
+               do i=this%cfg%imin_,this%cfg%imax_
+                  if (this%cfg%VF(i,j,k).lt.VFclip) cycle ! Skip cells below VF threshold
+                  do nplane=1,getNumberOfPlanes(this%liquid_gas_interface(i,j,k))
+                     shape=getNumberOfVertices(this%interface_polygon(nplane,i,j,k))
+                     if (shape.gt.0) then
+                        ! Increment polygon counter
+                        np=np+1
+                        smesh%polySize(np)=shape
+                        ! Loop over its vertices and add them
+                        do n=1,shape
+                           tmp_vert=getPt(this%interface_polygon(nplane,i,j,k),n-1)
+                           ! Increment node counter
+                           nv=nv+1
+                           smesh%xVert(nv)=tmp_vert(1)
+                           smesh%yVert(nv)=tmp_vert(2)
+                           smesh%zVert(nv)=tmp_vert(3)
+                           smesh%polyConn(nv)=nv
+                        end do
+                     end if
+                  end do
+               end do
+            end do
+         end do
+      else
+         ! Add a zero-area triangle if this proc doesn't have one
+         np=1; nv=3
+         call smesh%set_size(nvert=nv,npoly=np)
+         allocate(smesh%polyConn(smesh%nVert)) ! Also allocate naive connectivity
+         smesh%xVert(1:3)=this%cfg%x(this%cfg%imin)
+         smesh%yVert(1:3)=this%cfg%y(this%cfg%jmin)
+         smesh%zVert(1:3)=this%cfg%z(this%cfg%kmin)
+         smesh%polySize(1)=3
+         smesh%polyConn(1:3)=[1,2,3]
+      end if
+      
+   end subroutine update_surfmesh_nowall
    
    
    !> Calculate distance from polygonalized interface inside the band
@@ -3531,86 +5391,17 @@ contains
    end subroutine reset_moments
    
    
-   ! !> Compute curvature from a least squares fit of the IRL surface
-   ! subroutine get_curvature(this)
-   !    implicit none
-   !    class(vfs), intent(inout) :: this
-   !    integer :: i,j,k,n
-   !    real(WP), dimension(max_interface_planes) :: mycurv,mysurf
-   !    real(WP), dimension(max_interface_planes,3) :: mynorm
-   !    real(WP), dimension(3) :: csn,sn
-   !    ! Reset curvature
-   !    this%curv=0.0_WP
-   !    if (this%two_planes) this%curv2p=0.0_WP
-   !    ! Traverse interior domain and compute curvature in cells with polygons
-   !    do k=this%cfg%kmin_,this%cfg%kmax_
-   !       do j=this%cfg%jmin_,this%cfg%jmax_
-   !          do i=this%cfg%imin_,this%cfg%imax_
-   !             ! Zero out curvature and surface storage
-   !             mycurv=0.0_WP; mysurf=0.0_WP; mynorm=0.0_WP
-   !             ! Get a curvature for each plane
-   !             do n=1,getNumberOfPlanes(this%liquid_gas_interface(i,j,k))
-   !                ! Skip empty polygon
-   !                if (getNumberOfVertices(this%interface_polygon(n,i,j,k)).eq.0) cycle
-   !                ! Perform LSQ PLIC barycenter fitting to get curvature
-   !                !call this%paraboloid_fit(i,j,k,n,mycurv(n))
-   !                ! Perform PLIC surface fitting to get curvature
-   !                call this%paraboloid_integral_fit(i,j,k,n,mycurv(n))
-   !                ! Also store surface and normal
-   !                mysurf(n)  =abs(calculateVolume(this%interface_polygon(n,i,j,k)))
-   !                mynorm(n,:)=    calculateNormal(this%interface_polygon(n,i,j,k))
-   !             end do
-   !             ! Oriented-surface-average curvature
-   !             !csn=0.0_WP; sn=0.0_WP
-   !             !do n=1,getNumberOfPlanes(this%liquid_gas_interface(i,j,k))
-   !             !   csn=csn+mysurf(n)*mynorm(n,:)*mycurv(n)
-   !             !   sn = sn+mysurf(n)*mynorm(n,:)
-   !             !end do
-   !             !if (dot_product(sn,sn).gt.10.0_WP*tiny(1.0_WP)) this%curv(i,j,k)=dot_product(csn,sn)/dot_product(sn,sn)
-   !             ! Surface-averaged curvature
-   !             if (sum(mysurf).gt.0.0_WP) this%curv(i,j,k)=sum(mysurf*mycurv)/sum(mysurf)
-   !             ! Curvature of largest surface
-   !             !if (mysurf(maxloc(mysurf,1)).gt.0.0_WP) this%curv(i,j,k)=mycurv(maxloc(mysurf,1))
-   !             ! Largest curvature
-   !             !this%curv(i,j,k)=mycurv(maxloc(abs(mycurv),1))
-   !             ! Smallest curvature
-   !             !if (getNumberOfPlanes(this%liquid_gas_interface(i,j,k)).eq.2) then
-   !             !   this%curv(i,j,k)=mycurv(minloc(abs(mycurv),1))
-   !             !else
-   !             !   this%curv(i,j,k)=mycurv(1)
-   !             !end if
-   !             ! Clip curvature - may not be needed if we select polygons carefully
-   !             this%curv(i,j,k)=max(min(this%curv(i,j,k),this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k)),-this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k))
-   !             ! Also store 2-plane curvature if needed
-   !             if (this%two_planes) this%curv2p(:,i,j,k)=max(min(mycurv,this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k)),-this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k))
-   !             ! Model edge curvature at 1/thickness
-   !             !if (this%two_planes.and.this%edge_sensor(i,j,k).gt.this%edge_thld) this%curv2p(:,i,j,k)=sign(1.0_WP/this%thickness(i,j,k),0.5_WP-this%VF(i,j,k))
-   !          end do
-   !       end do
-   !    end do
-   !    ! Synchronize boundaries
-   !    call this%cfg%sync(this%curv)
-   !    if (this%two_planes) call this%cfg%sync(this%curv2p)
-   ! end subroutine get_curvature
-   
+   !> Compute curvature from a least squares fit of the IRL surface
    subroutine get_curvature(this)
-      use mathtools, only: normalize
       implicit none
       class(vfs), intent(inout) :: this
       integer :: i,j,k,n
       real(WP), dimension(max_interface_planes) :: mycurv,mysurf
       real(WP), dimension(max_interface_planes,3) :: mynorm
-      real(WP), dimension(3) :: csn,sn,norm
-      real(WP), dimension(4) :: plane
-      real(WP) :: myvol
+      real(WP), dimension(3) :: csn,sn
       ! Reset curvature
       this%curv=0.0_WP
-      if (this%two_planes) then
-         this%curv2p=0.0_WP
-         this%plane_ind=0
-         this%VF2p=0.0_WP
-         this%surf2p=0.0_WP
-      end if
+      if (this%two_planes) this%curv2p=0.0_WP
       ! Traverse interior domain and compute curvature in cells with polygons
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
@@ -3628,797 +5419,40 @@ contains
                   ! Also store surface and normal
                   mysurf(n)  =abs(calculateVolume(this%interface_polygon(n,i,j,k)))
                   mynorm(n,:)=    calculateNormal(this%interface_polygon(n,i,j,k))
-
-                  ! plane = getPlane(this%liquid_gas_interface(i,j,k),n-1)
-                  ! norm=normalize([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%center)
-                  
-                  if (this%two_planes) then
-                     this%plane_ind(n,i,j,k) = 1
-                     plane=getPlane(this%liquid_gas_interface(i,j,k),n-1)
-                     call setPlane(this%lginterface,0,plane(1:3),plane(4))                           
-                     call construct_2pt(this%cell,[this%cfg%x(i),this%cfg%y(j),this%cfg%z(k)],[this%cfg%x(i+1),this%cfg%y(j+1),this%cfg%z(k+1)])
-                     call getNormMoments(this%cell,this%lginterface,myvol)
-                     this%VF2p(n,i,j,k) = myvol/this%cfg%vol(i,j,k)
-                     this%surf2p(n,i,j,k) = mysurf(n)
-                  end if
                end do
+               ! Oriented-surface-average curvature
+               !csn=0.0_WP; sn=0.0_WP
+               !do n=1,getNumberOfPlanes(this%liquid_gas_interface(i,j,k))
+               !   csn=csn+mysurf(n)*mynorm(n,:)*mycurv(n)
+               !   sn = sn+mysurf(n)*mynorm(n,:)
+               !end do
+               !if (dot_product(sn,sn).gt.10.0_WP*tiny(1.0_WP)) this%curv(i,j,k)=dot_product(csn,sn)/dot_product(sn,sn)
                ! Surface-averaged curvature
                if (sum(mysurf).gt.0.0_WP) this%curv(i,j,k)=sum(mysurf*mycurv)/sum(mysurf)
+               ! Curvature of largest surface
+               !if (mysurf(maxloc(mysurf,1)).gt.0.0_WP) this%curv(i,j,k)=mycurv(maxloc(mysurf,1))
+               ! Largest curvature
+               !this%curv(i,j,k)=mycurv(maxloc(abs(mycurv),1))
+               ! Smallest curvature
+               !if (getNumberOfPlanes(this%liquid_gas_interface(i,j,k)).eq.2) then
+               !   this%curv(i,j,k)=mycurv(minloc(abs(mycurv),1))
+               !else
+               !   this%curv(i,j,k)=mycurv(1)
+               !end if
                ! Clip curvature - may not be needed if we select polygons carefully
                this%curv(i,j,k)=max(min(this%curv(i,j,k),this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k)),-this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k))
                ! Also store 2-plane curvature if needed
                if (this%two_planes) this%curv2p(:,i,j,k)=max(min(mycurv,this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k)),-this%maxcurv_times_mesh/this%cfg%meshsize(i,j,k))
+               ! Model edge curvature at 1/thickness
+               !if (this%two_planes.and.this%edge_sensor(i,j,k).gt.this%edge_thld) this%curv2p(:,i,j,k)=sign(1.0_WP/this%thickness(i,j,k),0.5_WP-this%VF(i,j,k))
             end do
          end do
       end do
       ! Synchronize boundaries
       call this%cfg%sync(this%curv)
-      if (this%two_planes) then
-          call this%cfg%sync(this%curv2p)
-          call this%cfg%sync(this%plane_ind)
-          call this%cfg%sync(this%VF2p)
-          call this%cfg%sync(this%surf2p)
-      end if
-   
+      if (this%two_planes) call this%cfg%sync(this%curv2p)
    end subroutine get_curvature
-
-
-   subroutine get_twoalpha(this,i,j,k,dir,VF)
-      use mathtools, only: normalize
-      implicit none
-      class(vfs), intent(inout) :: this
-      integer, intent(in) :: i,j,k
-      character(len=1), intent(in) :: dir   
-      real(WP), dimension(:), intent(inout) :: VF  
-      ! real(WP), dimension(:), intent(inout) :: curv 
-      real(WP), dimension(2,2) :: VF2p,curv2p,surf2p
-      real(WP), dimension(3) :: pos
-      ! real(WP), dimension(4) :: plane
-      real(WP), dimension(4,2,2) :: normals
-      real(WP) :: surfsum,a,b,c,d,dist
-      integer, dimension(2,2) :: plane_ind,plane_check,error_check
-      integer :: np1,np2,c1,c2,p1,p2,ii,jj,flag,i1,j1,k1
-      
-      ! Store all the necessary information locally for later calculation
-      prepare_twoalpha: block
-         normals = 0.0_WP
-         select case(trim(dir))
-         case('x')
-            np1 = sum(this%plane_ind(:,i-1,j,k))
-            VF2p(:,1)=this%VF2p(:,i-1,j,k)
-            curv2p(:,1)=this%curv2p(:,i-1,j,k)
-            surf2p(:,1)=this%surf2p(:,i-1,j,k)
-            plane_ind(:,1)=this%plane_ind(:,i-1,j,k)
-            if (plane_ind(1,1).eq.1) normals(:,1,1)=getPlane(this%liquid_gas_interface(i-1,j,k),0)
-            if (plane_ind(2,1).eq.1) normals(:,2,1)=getPlane(this%liquid_gas_interface(i-1,j,k),1)
-            ! if (plane_ind(1,1).eq.1) normals(:,1,1)=calculateNormal(this%interface_polygon(1,i-1,j,k)) 
-            ! if (plane_ind(2,1).eq.1) normals(:,2,1)=calculateNormal(this%interface_polygon(2,i-1,j,k)) 
-            i1 = i-1; j1 = j; k1 = k
-         case('y')
-            np1 = sum(this%plane_ind(:,i,j-1,k))
-            VF2p(:,1)=this%VF2p(:,i,j-1,k)
-            curv2p(:,1)=this%curv2p(:,i,j-1,k)
-            surf2p(:,1)=this%surf2p(:,i,j-1,k)
-            plane_ind(:,1)=this%plane_ind(:,i,j-1,k)
-            if (plane_ind(1,1).eq.1) normals(:,1,1)=getPlane(this%liquid_gas_interface(i,j-1,k),0)
-            if (plane_ind(2,1).eq.1) normals(:,2,1)=getPlane(this%liquid_gas_interface(i,j-1,k),1)
-            ! if (plane_ind(1,1).eq.1) normals(:,1,1)=calculateNormal(this%interface_polygon(1,i,j-1,k)) 
-            ! if (plane_ind(2,1).eq.1) normals(:,2,1)=calculateNormal(this%interface_polygon(2,i,j-1,k))
-            i1 = i; j1 = j-1; k1 = k
-         case('z')
-            np1 = sum(this%plane_ind(:,i,j,k-1))
-            VF2p(:,1)=this%VF2p(:,i,j,k-1)
-            curv2p(:,1)=this%curv2p(:,i,j,k-1)
-            surf2p(:,1)=this%surf2p(:,i,j,k-1)
-            plane_ind(:,1)=this%plane_ind(:,i,j,k-1)
-            if (plane_ind(1,1).eq.1) normals(:,1,1)=getPlane(this%liquid_gas_interface(i,j,k-1),0)
-            if (plane_ind(2,1).eq.1) normals(:,2,1)=getPlane(this%liquid_gas_interface(i,j,k-1),1)
-            ! if (plane_ind(1,1).eq.1) normals(:,1,1)=calculateNormal(this%interface_polygon(1,i,j,k-1)) 
-            ! if (plane_ind(2,1).eq.1) normals(:,2,1)=calculateNormal(this%interface_polygon(2,i,j,k-1))
-            i1 = i; j1 = j; k1 = k-1
-         end select
-         VF2p(:,2)=this%VF2p(:,i,j,k)
-         curv2p(:,2)=this%curv2p(:,i,j,k)
-         surf2p(:,2)=this%surf2p(:,i,j,k)
-         plane_ind(:,2)=this%plane_ind(:,i,j,k)
-         np2 = sum(this%plane_ind(:,i,j,k))
-         if (plane_ind(1,2).eq.1) normals(:,1,2)=getPlane(this%liquid_gas_interface(i,j,k),0)
-         if (plane_ind(2,2).eq.1) normals(:,2,2)=getPlane(this%liquid_gas_interface(i,j,k),1)
-         ! if (plane_ind(1,2).eq.1) normals(:,1,2)=calculateNormal(this%interface_polygon(1,i,j,k)) 
-         ! if (plane_ind(2,2).eq.1) normals(:,2,2)=calculateNormal(this%interface_polygon(2,i,j,k))
-      end block prepare_twoalpha
-
-
-      if ((np1.gt.0).or.(np2.gt.0)) then
-
-         merging_planes: block
-            ! MERGE C1 if needed
-            if(dot_product(normals(1:3,1,1),normals(1:3,2,1)).gt.0.0_WP) then
-               surfsum=sum(surf2p(:,1))
-               normals(:,1,1)=(surf2p(1,1)*normals(:,1,1)+surf2p(2,1)*normals(:,2,1))/surfsum
-               normals(:,1,1)=normals(:,1,1)/(norm2(normals(1:3,1,1))+tiny(1.0_WP))
-               normals(:,2,1)=0.0_WP
-               VF2p(:,1)=[sum(surf2p(:,1)*VF2p(:,1))/surfsum,0.0_WP]
-               curv2p(:,1)=[sum(surf2p(:,1)*curv2p(:,1))/surfsum,0.0_WP]
-               surf2p(:,1)=[surfsum,0.0_WP]
-               plane_ind(:,1)=[1,0]
-            end if
-            ! MERGE C2 if needed
-            if(dot_product(normals(1:3,1,2),normals(1:3,2,2)).gt.0.0_WP) then
-               surfsum = sum(surf2p(:,2))
-               normals(:,1,2)=(surf2p(1,2)*normals(:,1,2)+surf2p(2,2)*normals(:,2,2))/surfsum
-               normals(:,1,2)=normals(:,1,2)/(norm2(normals(1:3,1,2))+tiny(1.0_WP))
-               normals(:,2,2)=0.0_WP
-               VF2p(:,2)=[sum(surf2p(:,2)*VF2p(:,2))/surfsum,0.0_WP]
-               curv2p(:,2)=[sum(surf2p(:,2)*curv2p(:,2))/surfsum,0.0_WP]
-               surf2p(:,2)=[surfsum,0.0_WP]
-               plane_ind(:,2) = [1,0]
-            end if
-         end block merging_planes
-
-         pair_twoalpha: block
-            plane_check = 0; error_check = 0
-            ! First loop over all the planes from cell1
-            do ii = 1,2
-               if (plane_ind(ii,1).eq.0) cycle    !If a plane doesn't exist, move on
-               flag = 0
-               do jj = 1,2
-                  if (plane_ind(jj,2).eq.0) cycle !If a plane doesn't exist, move on
-                  if (dot_product(normals(1:3,ii,1),normals(1:3,jj,2)).gt.0.0_WP) then 
-                     ! IF two plane aligns, both planes get the surface area weighted curvature
-                     flag = 1
-                     curv2p(ii,1) = (curv2p(ii,1)*surf2p(ii,1)+curv2p(jj,2)*surf2p(jj,2))/(surf2p(ii,1)+surf2p(jj,2)) 
-                     curv2p(jj,2) = curv2p(ii,1) 
-                     plane_check(ii,1) = 1; plane_check(jj,2) = 1 
-                  end if
-               end do
-               if (flag.eq.0) then ! NO PLANE with the same orientation is found
-                  pos = [this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]
-                  dist = -dot_product(normals(1:3,ii,1),pos)+normals(4,ii,1)
-                  pos = normalize(-dist*normals(1:3,ii,1))
-                  if (plane_ind(1,2).ne.1.and.plane_ind(2,2).eq.1) then      ! Set first volume of cell2
-                     if (dot_product(pos,normals(1:3,ii,1)).le.0.0_WP) then
-                        VF2p(1,2) = 1.0_WP
-                     else
-                        VF2p(1,2) = 0.0_WP
-                     end if
-                     curv2p(1,2) = curv2p(ii,1)
-                     plane_check(ii,1) = 1; plane_check(1,2) = 1 
-                  else if (plane_ind(2,2).ne.1.and.plane_ind(1,2).eq.1) then ! Set second volume of cell2
-                     if (dot_product(pos,normals(1:3,ii,1)).le.0.0_WP) then
-                        VF2p(2,2) = 1.0_WP
-                     else
-                        VF2p(2,2) = 0.0_WP
-                     end if
-                     curv2p(2,2) = curv2p(ii,1)
-                     plane_check(ii,1) = 1; plane_check(2,2) = 1 
-                  else if (plane_ind(2,2).ne.1.and.plane_ind(1,2).ne.1) then ! Pick firs volume of cell1 as it doesn't matter
-                     if(plane_check(1,2).eq.0) then
-                        if (dot_product(pos,normals(1:3,ii,1)).le.0.0_WP) then
-                           VF2p(1,2) = 1.0_WP
-                        else
-                           VF2p(1,2) = 0.0_WP
-                        end if
-                        curv2p(1,2) = curv2p(ii,1)
-                        plane_check(ii,1) = 1; plane_check(1,2) = 1
-                     else if (plane_check(2,2).eq.0) then
-                        if (dot_product(pos,normals(1:3,ii,1)).le.0.0_WP) then
-                           VF2p(2,2) = 1.0_WP
-                        else
-                           VF2p(2,2) = 0.0_WP
-                        end if
-                        curv2p(2,2) = curv2p(ii,1)
-                        plane_check(ii,1) = 1; plane_check(2,2) = 1 
-                     end if
-                  else ! don't know what to do, record an error deal with it later or simply do nothing
-                     ! error_check(ii,1) = 1 ! or not not sure
-                  end if
-               end if
-            end do
-            ! Next loop over all the planes from cell2 
-            do ii = 1,2
-               if ((plane_ind(ii,2).eq.0).or.(plane_check(ii,2).eq.1)) cycle   !If a plane doesn't exist or has been already accounted for.
-               pos = [this%cfg%xm(i1),this%cfg%ym(j1),this%cfg%zm(k1)]
-               dist = -dot_product(normals(1:3,ii,2),pos)+normals(4,ii,2)
-               pos = normalize(-dist*normals(1:3,ii,2))
-               if (plane_ind(1,1).ne.1.and.plane_ind(2,1).eq.1) then      ! Set first volume of cell2
-                  if (dot_product(pos,normals(1:3,ii,2)).le.0.0_WP) then
-                     VF2p(1,1) = 1.0_WP
-                  else
-                     VF2p(1,1) = 0.0_WP
-                  end if
-                  curv2p(1,1) = curv2p(ii,2)
-                  plane_check(ii,2) = 1; plane_check(1,1) = 1 
-               else if (plane_ind(2,1).ne.1.and.plane_ind(1,1).eq.1) then ! Set second volume of cell2
-                  if (dot_product(pos,normals(1:3,ii,2)).le.0.0_WP) then
-                     VF2p(2,1) = 1.0_WP
-                  else
-                     VF2p(2,1) = 0.0_WP
-                  end if
-                  curv2p(2,1) = curv2p(ii,2)
-                  plane_check(ii,2) = 1; plane_check(2,1) = 1 
-               else if (plane_ind(1,1).ne.1.and.plane_ind(2,1).ne.1) then ! Pick firs volume of cell1 as it doesn't matter
-                  if(plane_check(1,1).eq.0) then
-                     if (dot_product(pos,normals(1:3,ii,2)).le.0.0_WP) then
-                        VF2p(1,1) = 1.0_WP
-                     else
-                        VF2p(1,1) = 0.0_WP
-                     end if
-                     curv2p(1,1) = curv2p(ii,2)
-                     plane_check(ii,2) = 1; plane_check(1,1) = 1 
-                  else if(plane_check(2,1).eq.0) then
-                     if (dot_product(pos,normals(1:3,ii,2)).le.0.0_WP) then
-                        VF2p(2,1) = 1.0_WP
-                     else
-                        VF2p(2,1) = 0.0_WP
-                     end if
-                     curv2p(2,1) = curv2p(ii,2)
-                     plane_check(ii,2) = 1; plane_check(2,1) = 1 
-                  end if
-               else ! don't know what to do, record an error deal with it later or simply do nothing
-                  ! error_check(ii,1) = 1 ! or not not sure
-               end if
-                  
-            end do
-         end block pair_twoalpha
-         VF=[sum(VF2p(:,1)*curv2p(:,1)),sum(VF2p(:,2)*curv2p(:,2))]
-         
-         ! if (i.eq.14.and.j.eq.25.and.k.eq.1) then
-         !    print*, "VFCELL1", VF2p(:,1),"VFCELL2", VF2p(:,2)
-         !    print*, "CURVCELL1", curv2p(:,1),"CURVCELL1", curv2p(:,2)
-         ! end if
-      else
-         ! No plane in either cell
-         VF=0.0_WP
-      end if
-   end subroutine get_twoalpha
-
-   subroutine get_curvFace(this,i,j,k,dir,VF,curv)
-      use mathtools, only: normalize
-      implicit none
-      class(vfs), intent(inout) :: this
-      integer, intent(in) :: i,j,k
-      character(len=1), intent(in) :: dir      !< Orientation of current face
-      real(WP), dimension(:,:), intent(inout) :: VF   ! it should be 2 by 2. First index is alpha1 or alpha2, second is left or right face
-      real(WP), dimension(:), intent(inout) :: curv ! it should be 2 by 2. First index is alpha1 or alpha2, second is left or right face
-      integer :: nplane1,nplane2,iplane,cell1,cell2,plane1,plane2, rand_int,n,p2_ind,p_ext,intersect1,intersect2
-      integer :: i1,i2,j1,j2,k1,k2,done,flip,merge1,merge2
-      ! integer, dimension(2) :: intersect
-      ! integer, dimension(2) :: rand_int
-      real(WP), dimension(2) :: alpha1,alpha2!,mysurf,mycurv!,random_real
-      real(WP), dimension(2,2) :: mysurf,mycurv
-      real(WP), dimension(3) :: nref,nloc,pos,n1,n2
-      real(WP), dimension(4) :: plane
-      real(WP) :: myvol,rand_real,a,b,c,d,dist
-      real(WP) :: mycurv_sin,mysurf_sin
-      mysurf=0.0_WP;mycurv=0.0_WP;intersect1=0;intersect2=0;done=0;flip=1;merge1=0;merge2=0 
-      ! Deal with cases of not thin region or not near a thin region and count how many planes I have for each cell
-      select case(trim(dir))
-      case('x')
-         if (this%thin_sensor(i-1,j,k).eq.0.0_WP.and.this%thin_sensor(i,j,k).eq.0.0_WP) then 
-            mysurf_sin=sum(this%SD(i-1:i,j,k)*this%cfg%vol(i-1:i,j,k))
-            if (mysurf_sin.gt.0.0_WP) then
-               mycurv_sin=sum(this%SD(i-1:i,j,k)*this%curv(i-1:i,j,k)*this%cfg%vol(i-1:i,j,k))/mysurf_sin
-            else
-               mycurv_sin=0.0_WP
-            end if
-            VF(:,1) = [this%VF(i-1,j,k),this%VF(i,j,k)]
-            curv(1) = mycurv_sin
-            done =1
-         end if
-         nplane1 = sum(this%plane_ind(:,i-1,j,k))
-         nplane2 = sum(this%plane_ind(:,i  ,j,k))
-      case('y')
-         if (this%thin_sensor(i,j-1,k).eq.0.0_WP.and.this%thin_sensor(i,j,k).eq.0.0_WP) then 
-            mysurf_sin=sum(this%SD(i,j-1:j,k)*this%cfg%vol(i,j-1:j,k))
-            if (mysurf_sin.gt.0.0_WP) then
-               mycurv_sin=sum(this%SD(i,j-1:j,k)*this%curv(i,j-1:j,k)*this%cfg%vol(i,j-1:j,k))/mysurf_sin
-            else
-               mycurv_sin=0.0_WP
-            end if
-            VF(:,1) = [this%VF(i,j-1,k),this%VF(i,j,k)]
-            curv(1) = mycurv_sin
-            done =1
-         end if
-         nplane1 = sum(this%plane_ind(:,i,j-1,k))
-         nplane2 = sum(this%plane_ind(:,i,j  ,k))
-      case('z')
-         if (this%thin_sensor(i,j,k-1).eq.0.0_WP.and.this%thin_sensor(i,j,k).eq.0.0_WP) then 
-            mysurf_sin=sum(this%SD(i,j,k-1:k)*this%cfg%vol(i,j,k-1:k))
-            if (mysurf_sin.gt.0.0_WP) then
-               mycurv_sin=sum(this%SD(i,j,k-1:k)*this%curv(i,j,k-1:k)*this%cfg%vol(i,j,k-1:k))/mysurf_sin
-            else
-               mycurv_sin=0.0_WP
-            end if
-            VF(:,1) = [this%VF(i,j,k-1),this%VF(i,j,k)]
-            curv(1) = mycurv_sin
-            done =1
-         end if
-         nplane1 = sum(this%plane_ind(:,i,j,k-1))
-         nplane2 = sum(this%plane_ind(:,i,j,k  ))
-      end select
-      ! Move on to modified SF if we have planes in adjacent cells and they are thin regions 
-      if((nplane1.gt.0.or.nplane2.gt.0).and.done.eq.0)then 
-         ! Identifying the cell that has two plane intersection based on volume under each plane. Criterion set for thin liquid for now
-         select case(trim(dir))
-         case('x')
-            if (abs(this%VF2p(1,i-1,j,k)-(this%VF(i-1,j,k)+1.0_WP-this%VF2p(2,i-1,j,k))).gt.plane_intersect_tol.and.nplane1.eq.2) then
-               intersect1 =1
-               n1 = calculateNormal(this%interface_polygon(1,i-1,j,k))
-               n2 = calculateNormal(this%interface_polygon(2,i-1,j,k))
-               if(dot_product(n1,n2).gt.0.0_WP) merge1 =1
-            end if
-         case('y')
-            if (abs(this%VF2p(1,i,j-1,k)-(this%VF(i,j-1,k)+1.0_WP-this%VF2p(2,i,j-1,k))).gt.plane_intersect_tol.and.nplane1.eq.2) then 
-               intersect1 =1
-               n1 = calculateNormal(this%interface_polygon(1,i,j-1,k))
-               n2 = calculateNormal(this%interface_polygon(2,i,j-1,k))
-               if(dot_product(n1,n2).gt.0.0_WP) merge1 =1
-            end if
-         case('z')
-            if (abs(this%VF2p(1,i,j,k-1)-(this%VF(i,j,k-1)+1.0_WP-this%VF2p(2,i,j,k-1))).gt.plane_intersect_tol.and.nplane1.eq.2) then
-               intersect1 =1
-               n1 = calculateNormal(this%interface_polygon(1,i,j,k-1))
-               n2 = calculateNormal(this%interface_polygon(2,i,j,k-1))
-               if(dot_product(n1,n2).gt.0.0_WP) merge1 =1
-            end if
-         end select
-         
-         if (abs(this%VF2p(1,i,j,k)-(this%VF(i,j,k)+1.0_WP-this%VF2p(2,i,j,k))).gt.plane_intersect_tol.and.nplane2.eq.2) then 
-            intersect2 =1
-            n1 = calculateNormal(this%interface_polygon(1,i,j,k))
-            n2 = calculateNormal(this%interface_polygon(2,i,j,k))
-            if(dot_product(n1,n2).gt.0.0_WP) merge2 =1
-         end if
-
-         ! If both planes have intersections
-         if(intersect1.eq.1.and.intersect2.eq.1) then
-            ! CELL 1 GET THE PROPER PLANE
-            cell1 = -1
-            select case(trim(dir))
-            case('x')
-               if (this%surf2p(1,i-1,j,k).gt.this%surf2p(2,i-1,j,k))then
-                  plane1 =1
-               else
-                  plane1 =2
-               end if
-            case('y')
-               if (this%surf2p(1,i,j-1,k).gt.this%surf2p(2,i,j-1,k))then
-                  plane1 =1
-               else
-                  plane1 =2
-               end if
-            case('z')
-               if (this%surf2p(1,i,j,k-1).gt.this%surf2p(2,i,j,k-1))then
-                  plane1 =1
-               else
-                  plane1 =2
-               end if
-            end select
-            ! CELL 2 GET THE PROPER PLANE
-            if (this%surf2p(1,i,j,k).gt.this%surf2p(2,i,j,k))then
-               plane2 =1
-            else
-               plane2 =2
-            end if
-         ! If left cell has intersection
-         else if (intersect1.eq.1) then
-            cell1 = -1
-            select case(trim(dir))
-            case('x')
-               if (this%surf2p(1,i-1,j,k).gt.this%surf2p(2,i-1,j,k))then
-                  plane1 =1
-               else
-                  plane1 =2
-               end if
-            case('y')
-               if (this%surf2p(1,i,j-1,k).gt.this%surf2p(2,i,j-1,k))then
-                  plane1 =1
-               else
-                  plane1 =2
-               end if
-            case('z')
-               if (this%surf2p(1,i,j,k-1).gt.this%surf2p(2,i,j,k-1))then
-                  plane1 =1
-               else
-                  plane1 =2
-               end if
-            end select
-         ! If right cell has intersection
-         else if (intersect2.eq.1) then
-            cell1 = 0
-            if (this%surf2p(1,i,j,k).gt.this%surf2p(2,i,j,k))then
-               plane1 =1
-            else
-               plane1 =2
-            end if
-         ! Both cells have two planes
-         else if(nplane1.eq.2 .and. nplane2.eq.2) then
-            cell1 = -1
-            plane1 = 1
-         ! Either cell has two planes
-         else if (nplane1.eq.2) then
-            cell1 = -1
-            plane1 = 1
-         else if (nplane2.eq.2) then
-            cell1 = 0
-            plane1 = 1
-         ! Both cells have 1 plane
-         else if (nplane1.eq.1 .and. nplane2.eq.1) then
-            cell1 = -1
-            select case(trim(dir))
-            case('x')
-               if (this%plane_ind(1,i+cell1,j,k).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            case('y')
-               if (this%plane_ind(1,i,j+cell1,k).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            case('z')
-               if (this%plane_ind(1,i,j,k+cell1).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            end select
-         ! Either cell has 1 plane
-         else if (nplane1.eq.1) then
-            cell1 = -1
-            select case(trim(dir))
-            case('x')
-               if (this%plane_ind(1,i+cell1,j,k).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            case('y')
-               if (this%plane_ind(1,i,j+cell1,k).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            case('z')
-               if (this%plane_ind(1,i,j,k+cell1).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            end select
-         else if (nplane2.eq.1) then
-            cell1 = 0
-            select case(trim(dir))
-            case('x')
-               if (this%plane_ind(1,i+cell1,j,k).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            case('y')
-               if (this%plane_ind(1,i,j+cell1,k).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            case('z')
-               if (this%plane_ind(1,i,j,k+cell1).eq.1) then
-                  plane1=1
-               else
-                  plane1=2
-               end if
-            end select
-         end if
-         ! Get the proper index for CELL1 and CELL2 based on face direction
-         select case(trim(dir))
-         case('x')
-            i1 = i+cell1; i2 = i-1-cell1
-            j1 = j;       j2 = j
-            k1 = k;       k2 = k
-         case('y')
-            i1 = i;       i2 = i
-            j1 = j+cell1; j2 = j-1-cell1
-            k1 = k;       k2 = k
-         case('z')
-            i1 = i;       i2 = i
-            j1 = j;       j2 = j
-            k1 = k+cell1; k2 = k-1-cell1
-         end select
-         ! GET alpha1,CURV,SURF of cell1, plane1
-         VF(cell1+2,1) = this%VF2p(plane1,i1,j1,k1)
-         mycurv(cell1+2,1) = this%curv2p(plane1,i1,j1,k1)
-         mysurf(cell1+2,1) = this%surf2p(plane1,i1,j1,k1)
-         if (sum(this%plane_ind(:,i1,j1,k1)).eq.1) then
-         else
-            ! GET CURV,SURF of cell1, plane2
-            mycurv(cell1+2,2) = this%curv2p(3-plane1,i1,j1,k1)
-            mysurf(cell1+2,2) = this%surf2p(3-plane1,i1,j1,k1)
-         end if
-         ! Get my reference normal of CELL1 plane1
-         nref=calculateNormal(this%interface_polygon(plane1,i1,j1,k1))
-         p2_ind = 0; p_ext = 0
-         ! Loop two planes in CELL2
-         do n = 1,2
-            if (this%plane_ind(n,i2,j2,k2).eq.0) cycle
-            nloc=calculateNormal(this%interface_polygon(n,i2,j2,k2))
-            ! If two normals don't align, record the plane index. Otherwise, get alpha1 of CELL2
-            if (dot_product(nloc,nref).le.0.0_WP) then
-               p_ext = n
-            else
-               ! If both cell have intersections, only not fix things when cell1 picked plane aligns with cell2 picked plane
-               if(intersect1.eq.1.and.intersect2.eq.1) then
-                  if (n.eq.plane2) flip = 0
-               end if
-               p2_ind = 1
-               VF(1-cell1,1) = this%VF2p(n,i2,j2,k2)
-               mycurv(1-cell1,1) = this%curv2p(n,i2,j2,k2)
-               mysurf(1-cell1,1) = this%surf2p(n,i2,j2,k2)
-            end if
-         end do
-         ! If doesn't have the plane for the other curvature, CURV SURF are 0, otherwise get CURV SURF
-         if (p_ext.eq.0) then
-         else
-            mycurv(1-cell1,2) = this%curv2p(p_ext,i2,j2,k2)
-            mysurf(1-cell1,2) = this%surf2p(p_ext,i2,j2,k2)
-         end if
-         ! If no planes were found to be aligned with plane1
-         if (p2_ind.eq.0) then
-            ! Get plane of the first cell
-            plane=getPlane(this%liquid_gas_interface(i1,j1,k1),plane1-1)
-            a = plane(1)
-            b = plane(2)
-            c = plane(3)
-            d = -plane(4)
-            ! Project centroid from the second cell
-            pos = [this%cfg%xm(i2),this%cfg%ym(j2),this%cfg%zm(k2)]
-            dist = -pos(1)*a-pos(2)*b-pos(3)*c-d
-            pos = normalize(-dist*plane(1:3))
-            if (dot_product(pos,nref).le.0.0_WP) then
-               VF(1-cell1,1) = 1.0_WP
-            else
-               VF(1-cell1,1) = 0.0_WP
-            end if
-         end if
-         ! If the cell has two planes and the first seleceted plane doesn't have another plane that orients the same way
-         ! Do it a again with the other plane
-         if (p2_ind.eq.0 .and. sum(this%plane_ind(:,i1,j1,k1)).eq.2.and.p_ext.ne.0.and.intersect1.eq.0.and.intersect2.eq.0) then
-            VF = 0.0_WP
-            mycurv = 0.0_WP
-            mysurf = 0.0_WP
-            plane1 = 3-plane1
-            VF(cell1+2,1) = this%VF2p(plane1,i1,j1,k1)
-            mycurv(cell1+2,1) = this%curv2p(plane1,i1,j1,k1)
-            mysurf(cell1+2,1) = this%surf2p(plane1,i1,j1,k1)
-            if (sum(this%plane_ind(:,i1,j1,k1)).eq.1) then
-            else
-               ! GET CURV,SURF of cell1, plane2
-               mycurv(cell1+2,2) = this%curv2p(3-plane1,i1,j1,k1)
-               mysurf(cell1+2,2) = this%surf2p(3-plane1,i1,j1,k1)
-            end if
-            ! Get my reference normal of CELL1 plane1
-            nref=calculateNormal(this%interface_polygon(plane1,i1,j1,k1))
-            p2_ind = 0; p_ext = 0
-            ! Loop two planes in CELL2
-            do n = 1,2
-               if (this%plane_ind(n,i2,j2,k2).eq.0) cycle
-               nloc=calculateNormal(this%interface_polygon(n,i2,j2,k2))
-               ! If two normals don't align, record the plane index. Otherwise, get alpha1 of CELL2
-               if (dot_product(nloc,nref).le.0.0_WP) then
-                  p_ext = n
-               else
-                  ! If both cell have intersections, only not fix things when cell1 picked plane aligns with cell2 picked plane
-                  if(intersect1.eq.1.and.intersect2.eq.1) then
-                     if (n.eq.plane2) flip = 0
-                  end if
-                  p2_ind = 1
-                  VF(1-cell1,1) = this%VF2p(n,i2,j2,k2)
-                  mycurv(1-cell1,1) = this%curv2p(n,i2,j2,k2)
-                  mysurf(1-cell1,1) = this%surf2p(n,i2,j2,k2)
-               end if
-            end do
-            ! If doesn't have the plane for the other curvature, CURV SURF are 0, otherwise get CURV SURF
-            if (p_ext.eq.0) then
-            else
-               mycurv(1-cell1,2) = this%curv2p(p_ext,i2,j2,k2)
-               mysurf(1-cell1,2) = this%surf2p(p_ext,i2,j2,k2)
-            end if
-            ! If no planes were found to be aligned with plane1
-            if (p2_ind.eq.0) then
-               ! print *, "This is very unexpected"
-               ! Get plane of the first cell
-               plane=getPlane(this%liquid_gas_interface(i1,j1,k1),plane1-1)
-               a = plane(1)
-               b = plane(2)
-               c = plane(3)
-               d = -plane(4)
-               ! Project centroid from the second cell
-               pos = [this%cfg%xm(i2),this%cfg%ym(j2),this%cfg%zm(k2)]
-               dist = -pos(1)*a-pos(2)*b-pos(3)*c-d
-               pos = normalize(-dist*plane(1:3))
-               if (dot_product(pos,nref).le.0.0_WP) then
-                  VF(1-cell1,1) = 1.0_WP
-               else
-                  VF(1-cell1,1) = 0.0_WP
-               end if
-            end if
-         end if
-
-         select case(trim(dir))
-         case('x')
-            ! Get alpha2 for both cell
-            if (this%thin_sensor(i-1,j,k).eq.1.0_WP.or.this%thin_sensor(i,j,k).eq.1.0_WP) then ! Use liquid rule
-               VF(1,2) = this%VF(i-1,j,k) +1.0_WP - VF(1,1)
-               VF(2,2) = this%VF(i  ,j,k) +1.0_WP - VF(2,1)
-            else if (this%thin_sensor(i-1,j,k).eq.2.0_WP.or.this%thin_sensor(i,j,k).eq.2.0_WP) then  ! Use gas rule
-               VF(1,2) = this%VF(i-1,j,k) - VF(1,1)
-               VF(2,2) = this%VF(i  ,j,k) - VF(2,1)
-            end if
-         case('y')
-            ! Get alpha2 for both cell
-            if (this%thin_sensor(i,j-1,k).eq.1.0_WP.or.this%thin_sensor(i,j,k).eq.1.0_WP) then ! Use liquid rule
-               ! print *, VF(1,1), VF(2,1)
-               VF(1,2) = this%VF(i,j-1,k) +1.0_WP - VF(1,1)
-               VF(2,2) = this%VF(i,j  ,k) +1.0_WP - VF(2,1)
-            else if   (this%thin_sensor(i,j-1,k).eq.2.0_WP.or.this%thin_sensor(i,j,k).eq.2.0_WP) then  ! Use gas rule
-               VF(1,2) = this%VF(i,j-1,k) - VF(1,1)
-               VF(2,2) = this%VF(i,j  ,k) - VF(2,1)
-            end if
-         case('z')
-            if (this%thin_sensor(i,j,k-1).eq.1.0_WP.or.this%thin_sensor(i,j,k).eq.1.0_WP) then ! Use liquid rule
-               VF(1,2) = this%VF(i,j,k-1) +1.0_WP - VF(1,1)
-               VF(2,2) = this%VF(i,j,k  ) +1.0_WP - VF(2,1)
-            else if (this%thin_sensor(i,j,k-1).eq.2.0_WP.or.this%thin_sensor(i,j,k).eq.2.0_WP) then  ! Use gas rule
-               VF(1,2) = this%VF(i,j,k-1) - VF(1,1)
-               VF(2,2) = this%VF(i,j,k  ) - VF(2,1)
-            end if
-         end select
-
-         if(intersect1.eq.1.and.intersect2.eq.1) then
-            ! If both cell have intersection, the second cell gets volume based on the plane selected. 
-            if (flip.eq.1) then
-               plane = getPlane(this%liquid_gas_interface(i2,j2,k2),plane2-1)
-               call setPlane(this%lginterface,0,plane(1:3),plane(4))                           
-               call construct_2pt(this%cell,[this%cfg%x(i2),this%cfg%y(j2),this%cfg%z(k2)],[this%cfg%x(i2+1),this%cfg%y(j2+1),this%cfg%z(k2+1)])
-               call getNormMoments(this%cell,this%lginterface,myvol)
-               ! Get CELL2 selected plane
-               VF(1-cell1,2) = this%VF2p(plane2,i2,j2,k2)
-               mycurv(1-cell1,2) = this%curv2p(plane2,i2,j2,k2)
-               mysurf(1-cell1,2) = this%surf2p(plane2,i2,j2,k2)
-               ! Get CELL2 the other plane
-               mycurv(1-cell1,1) = this%curv2p(3-plane2,i2,j2,k2)
-               mysurf(1-cell1,1) = this%surf2p(3-plane2,i2,j2,k2)
-               ! Get the volume of the other plane based on rules
-               select case(trim(dir))
-               case('x')
-                  ! Get alpha2 for both cell
-                  if (this%thin_sensor(i-1,j,k).eq.1.0_WP.or.this%thin_sensor(i,j,k).eq.1.0_WP) then ! Use liquid rule
-                     VF(1-cell1,1) = this%VF(i2,j2,k2) +1.0_WP - VF(1-cell1,2)
-                  else if (this%thin_sensor(i-1,j,k).eq.2.0_WP.or.this%thin_sensor(i,j,k).eq.2.0_WP) then  ! Use gas rule
-                     VF(1-cell1,1) = this%VF(i2,j2,k2) - VF(1-cell1,2)
-                  end if
-               case('y')
-                  ! Get alpha2 for both cell
-                  if (this%thin_sensor(i,j-1,k).eq.1.0_WP.or.this%thin_sensor(i,j,k).eq.1.0_WP) then ! Use liquid rule
-                     VF(1-cell1,1) = this%VF(i2,j2,k2) +1.0_WP - VF(1-cell1,2)
-                  else if   (this%thin_sensor(i,j-1,k).eq.2.0_WP.or.this%thin_sensor(i,j,k).eq.2.0_WP) then  ! Use gas rule
-                     VF(1-cell1,1) = this%VF(i2,j2,k2) - VF(1-cell1,2)
-                  end if
-               case('z')
-                  if (this%thin_sensor(i,j,k-1).eq.1.0_WP.or.this%thin_sensor(i,j,k).eq.1.0_WP) then ! Use liquid rule
-                     VF(1-cell1,1) = this%VF(i2,j2,k2) +1.0_WP - VF(1-cell1,2)
-                  else if (this%thin_sensor(i,j,k-1).eq.2.0_WP.or.this%thin_sensor(i,j,k).eq.2.0_WP) then  ! Use gas rule
-                     VF(1-cell1,1) = this%VF(i2,j2,k2) - VF(1-cell1,2)
-                  end if
-               end select
-            end if
-         end if
-         if (merge1 .eq.1 .and. merge2.eq.0) then
-            ! Only thin liquid for now, if the left cell needs merging, take the volume alpha
-            ! fill the other volume, take over the other plane's curvature and surface area 
-            ! print *, "Merge1:::",i,j,k,dir
-            select case(trim(dir))
-            case('x')
-               VF(1,1) = this%VF(i-1,j,k)
-               if (sum(this%surf2p(:,i-1,j,k)).gt.0.0_WP) then
-                  mysurf(1,1) = sum(this%surf2p(:,i-1,j,k))
-                  mycurv(1,1) = sum(this%curv2p(:,i-1,j,k)*this%surf2p(:,i-1,j,k))/mysurf(1,1)
-               end if
-            case('y')
-               VF(1,1) = this%VF(i,j-1,k)
-               if (sum(this%surf2p(:,i,j-1,k)).gt.0.0_WP) then
-                  mysurf(1,1) = sum(this%surf2p(:,i,j-1,k))
-                  mycurv(1,1) = sum(this%curv2p(:,i,j-1,k)*this%surf2p(:,i,j-1,k))/mysurf(1,1)
-               end if
-            case('z')
-               VF(1,1) = this%VF(i,j,k-1)
-               if (sum(this%surf2p(:,i,j,k-1)).gt.0.0_WP) then
-                  mysurf(1,1) = sum(this%surf2p(:,i,j,k-1))
-                  mycurv(1,1) = sum(this%curv2p(:,i,j,k-1)*this%surf2p(:,i,j,k-1))/mysurf(1,1)
-               end if
-            end select
-            VF(1,2) = 1.0_WP
-            mycurv(1,2) = 0.0_WP
-            mysurf(1,2) = 0.0_WP
-         else if(merge1 .eq.0 .and. merge2.eq.1) then
-            ! print *, "Merge2:::",i,j,k,dir
-            ! The right cell needs merging
-            VF(2,1) = this%VF(i,j,k)
-            VF(2,2) = 1.0_WP
-            mycurv(2,2) = 0.0_WP
-            mysurf(2,2) = 0.0_WP
-            if (sum(this%surf2p(:,i,j,k)).gt.0.0_WP) then
-               mysurf(2,1) = sum(this%surf2p(:,i,j,k))
-               mycurv(2,1) = sum(this%curv2p(:,i,j,k)*this%surf2p(:,i,j,k))/mysurf(2,1)
-            end if
-         else if(merge1.eq.1 .and.merge2.eq.1) then
-            ! print *, "This is trueBOTH!!",i,j,k,dir
-            ! print *,i,j,k,dir
-            ! If both needs merging
-            select case(trim(dir))
-            case('x')
-               VF(1,1) = this%VF(i-1,j,k)
-               if (sum(this%surf2p(:,i-1,j,k)).gt.0.0_WP) then
-                  mysurf(1,1) = sum(this%surf2p(:,i-1,j,k))
-                  mycurv(1,1) = sum(this%curv2p(:,i-1,j,k)*this%surf2p(:,i-1,j,k))/mysurf(1,1)
-               end if
-            case('y')
-               VF(1,1) = this%VF(i,j-1,k)
-               if (sum(this%surf2p(:,i,j-1,k)).gt.0.0_WP) then
-                  mysurf(1,1) = sum(this%surf2p(:,i,j-1,k))
-                  mycurv(1,1) = sum(this%curv2p(:,i,j-1,k)*this%surf2p(:,i,j-1,k))/mysurf(1,1)
-               end if
-            case('z')
-               VF(1,1) = this%VF(i,j,k-1)
-               if (sum(this%surf2p(:,i,j,k-1)).gt.0.0_WP) then
-                  mysurf(1,1) = sum(this%surf2p(:,i,j,k-1))
-                  mycurv(1,1) = sum(this%curv2p(:,i,j,k-1)*this%surf2p(:,i,j,k-1))/mysurf(1,1)
-               end if
-            end select
-            VF(1,2) = 1.0_WP
-            mycurv(1,2) = 0.0_WP
-            mysurf(1,2) = 0.0_WP
-            if (flip.eq.1) then
-               ! If I need to flip, second plane is the one to use to merge
-               VF(2,1) = 1.0_WP
-               VF(2,2) = this%VF(i,j,k)
-               mycurv(2,1) = 0.0_WP
-               mysurf(2,1) = 0.0_WP
-               if (sum(this%surf2p(:,i,j,k)).gt.0.0_WP) then
-                  mysurf(2,2) = sum(this%surf2p(:,i,j,k))
-                  mycurv(2,2) = sum(this%curv2p(:,i,j,k)*this%surf2p(:,i,j,k))/mysurf(2,2)
-               end if
-            else
-               ! If I don't need to flip, First plane is the one to use to merge
-               VF(2,1) = this%VF(i,j,k)
-               VF(2,2) = 1.0_WP
-               mycurv(2,2) = 0.0_WP
-               mysurf(2,2) = 0.0_WP
-               if (sum(this%surf2p(:,i,j,k)).gt.0.0_WP) then
-                  mysurf(2,1) = sum(this%surf2p(:,i,j,k))
-                  mycurv(2,1) = sum(this%curv2p(:,i,j,k)*this%surf2p(:,i,j,k))/mysurf(2,1)
-               end if
-            end if
-         end if
-         ! Get surface area weighted face curvatures 
-         if (sum(mysurf(:,1)).gt.0.0_WP) then
-            curv(1)=sum(mycurv(:,1)*mysurf(:,1))/sum(mysurf(:,1))
-         else
-            curv(1)=0.0_WP
-         end if
-         if (sum(mysurf(:,2)).gt.0.0_WP) then
-            curv(2)=sum(mycurv(:,2)*mysurf(:,2))/sum(mysurf(:,2))
-         else 
-            curv(2)=0.0_WP
-         end if
-      else if (done.eq.1) then
-      else
-         VF = 0.0_WP
-         curv = 0.0_WP
-      end if
-   end subroutine get_curvFace
+   
    
    !> Perform local paraboloid fit of IRL surface in pointwise sense
    subroutine paraboloid_fit(this,i,j,k,iplane,mycurv)
@@ -4655,7 +5689,7 @@ contains
       
       ! Query optimal work array size then solve for paraboloid as n=F(t,s)=b1+b2*t+b3*s+b4*t^2+b5*t*s+b6*s^2
       call dsysv('U',6,1,A,6,ipiv,b,6,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      call dsysv('U',6,1,A,6,ipiv,b,6,work,lwork,info); sol=b(1:6)
+      call dsysv('U',6,1,A,6,ipiv,b,6,work,lwork,info); sol=b(1:6); deallocate(work)
       
       ! Get the curvature at (t,s)=(0,0)
       dF_dt=sol(2)+2.0_WP*sol(4)*0.0_WP+sol(5)*0.0_WP; ddF_dtdt=2.0_WP*sol(4)
