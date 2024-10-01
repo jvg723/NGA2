@@ -198,6 +198,7 @@ contains
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
+         real(WP) :: tmp_thnk
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
          call b%vf%initialize(cfg=b%cfg,reconstruction_method=r2plig,transport_method=flux,name='VOF')
@@ -255,7 +256,8 @@ contains
          ! Reset moments to guarantee compatibility with interface reconstruction
          call b%vf%reset_volume_moments()
          ! Min Film thickess
-         call param_read('Minimum local thickness',b%vf%thin_thld_min)
+         call param_read('Minimum local thickness',tmp_thnk)
+         b%vf%thin_thld_min=tmp_thnk
          ! call b%input%read('nx',nx)
          ! min_thickness = b%vf%thin_thld_min*b%cfg%xL/(1.0_WP*nx)
          ! b%vf%puncture = .false.

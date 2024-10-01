@@ -19,8 +19,7 @@
 2 nz : 80
 
 # Break-up thickness
-Minimum local thickness : 6.5e-3_WP
-
+Minimum local thickness : 6.5e-3
 
 
 # Pipe properties
@@ -42,7 +41,7 @@ Surface tension coefficient : 0.001
 2 Max timestep size : 4e-3
 Max cfl number      : 0.5
 Max time            : 200
-Transistion         : 1
+Transistion         : 0.5
 
 # Pressure solver
 Pressure tolerance : 1e-5
