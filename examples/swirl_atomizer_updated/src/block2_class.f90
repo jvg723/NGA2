@@ -34,12 +34,6 @@ module block2_class
       !> Monitoring files
       type(monitor) :: mfile     !< General monitor files
       type(monitor) :: cflfile   !< CFL monitor files
-      type(monitor) :: timerfile !< File for timers
-      real(WP) :: cclabel_thin_timer
-      real(WP) :: cclabel_thin_percent
-      real(WP) :: cclabel_thick_timer
-      real(WP) :: cclabel_thick_percent
-      real(WP) :: step_timer
       !> Private work arrays
       real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
       real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
@@ -163,68 +157,6 @@ contains
       &   k.ge.pg%kmax-nlayer) isIn=.true.
    end function vof_removal_layer_locator
 
-   ! !> Function that identifies cells that need a label
-   ! logical function make_label(i,j,k)
-   !    implicit none
-   !    integer, intent(in) :: i,j,k
-   !    if (tmp_thin_sensor(i,j,k).eq.1.0_WP) then
-   !       make_label=.true.
-   !    else
-   !       make_label=.false.
-   !    end if
-   ! end function make_label
-
-   ! !> Function that identifies if cell pairs have same label
-   ! logical function same_label(i1,j1,k1,i2,j2,k2)
-   !    implicit none
-   !    integer, intent(in) :: i1,j1,k1,i2,j2,k2
-   !    if (tmp_thin_sensor(i1,j1,k1).eq.tmp_thin_sensor(i2,j2,k2)) then
-   !       same_label=.true.
-   !    else
-   !       same_label=.false.
-   !    end if
-   ! end function same_label
-
-   !> Function that identifies cells that need a label to min thickness region 
-   logical function make_label(i,j,k)
-      implicit none
-      integer, intent(in) :: i,j,k
-      if (tmp_thickness(i,j,k).le.min_filmthickness.and.tmp_thickness(i,j,k).gt.0.0_WP) then
-         make_label=.true.
-      else
-         make_label=.false.
-      end if
-   end function make_label
-
-   !> Function that identifies if cell pairs have same label
-   logical function same_label(i1,j1,k1,i2,j2,k2)
-      implicit none
-      integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      same_label=.true.
-   end function same_label
-
-   ! !> Function that identifies cells that need a label to min thickness region 
-   ! logical function make_label_thickness(i,j,k)
-   !    implicit none
-   !    integer, intent(in) :: i,j,k
-   !    if (tmp_thickness(i,j,k).le.min_filmthickness_label) then
-   !       make_label_thickness=.true.
-   !    else
-   !       make_label_thickness=.false.
-   !    end if
-   ! end function make_label_thickness
-
-   ! !> Function that identifies if cell pairs have same label
-   ! logical function same_label_thickness(i1,j1,k1,i2,j2,k2)
-   !    implicit none
-   !    integer, intent(in) :: i1,j1,k1,i2,j2,k2
-   !    if (tmp_thickness(i1,j1,k1).le.min_filmthickness_label.and.tmp_thickness(i2,j2,k2).le.min_filmthickness_label) then
-   !       same_label_thickness=.true.
-   !    else
-   !       same_label_thickness=.false.
-   !    end if
-   ! end function same_label_thickness
-
 
    !> Initialization of problem solver
    subroutine init(b)
@@ -241,8 +173,6 @@ contains
          allocate(b%Ui   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%Vi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%Wi   (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
-         allocate(tmp_thin_sensor(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
-         allocate(tmp_thickness  (b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_))
          allocate(b%Uslip(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_)); b%Uslip=0.0_WP
          allocate(b%Vslip(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_)); b%Vslip=0.0_WP
          allocate(b%Wslip(b%cfg%imino_:b%cfg%imaxo_,b%cfg%jmino_:b%cfg%jmaxo_,b%cfg%kmino_:b%cfg%kmaxo_)); b%Wslip=0.0_WP
@@ -515,17 +445,6 @@ contains
          call b%cflfile%add_column(b%fs%CFLv_y,'Viscous yCFL')
          call b%cflfile%add_column(b%fs%CFLv_z,'Viscous zCFL')
          call b%cflfile%write()
-         ! Create object time tracker monitor
-         b%timerfile=monitor(b%fs%cfg%amRoot,'swirl_atomizer_timers')
-         call b%timerfile%add_column(b%time%n,'Timestep number')
-         call b%timerfile%add_column(b%time%t,'Simulation Time')
-         call b%timerfile%add_column(b%cfg%nproc, 'Num of Proc')
-         call b%timerfile%add_column(b%cclabel_thin_timer,'cclabel thin time')
-         call b%timerfile%add_column(b%cclabel_thick_timer,'cclabel thick time')
-         call b%timerfile%add_column(b%step_timer, 'step time')
-         call b%timerfile%add_column(b%cclabel_thin_percent, 'cclabel thin percent')
-         call b%timerfile%add_column(b%cclabel_thick_percent, 'cclabel thick percent')
-         call b%timerfile%write()
       end block create_monitor
 
       
@@ -544,9 +463,6 @@ contains
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Uinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Vinflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
       real(WP), dimension(b%cfg%imino_:,b%cfg%jmino_:,b%cfg%kmino_:), intent(inout) :: Winflow     !< Needs to be (imino_:imaxo_,jmino_:jmaxo_,kmino_:kmaxo_)
-         
-      ! ! Start time step timer
-      ! starttime_step=mpi_wtime()
 
       ! Increment time
       call b%fs%get_cfl(b%time%dt,b%time%cfl)
@@ -579,30 +495,6 @@ contains
          
       ! Prepare old staggered density (at n)
       call b%fs%get_olddensity(vf=b%vf)
-      
-      ! ! Add in slip velocity at hole edges
-      ! slip_velocity: block
-      !    integer :: i,j,k
-      !    ! Store current velocity field 
-      !    b%Uslip=b%fs%U
-      !    b%Vslip=b%fs%V
-      !    b%Wslip=b%fs%W
-      !    ! Add in retraction velocities
-      !    do k=b%vf%cfg%kmin_,b%vf%cfg%kmax_
-      !       do j=b%vf%cfg%jmin_,b%vf%cfg%jmax_
-      !          do i=b%vf%cfg%imin_,b%vf%cfg%imax_
-      !             if (b%vf%edge_sensor(i,j,k).ge.0.2_WP) then
-      !                b%Uslip(i  ,j,k)=b%Uslip(i  ,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-      !                b%Uslip(i+1,j,k)=b%Uslip(i+1,j,k)+0.5_WP*b%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-      !                b%Vslip(i,j  ,k)=b%Vslip(i,j  ,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-      !                b%Vslip(i,j+1,k)=b%Vslip(i,j+1,k)+0.5_WP*b%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-      !                b%Wslip(i,j,k  )=b%Wslip(i,j,k  )+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-      !                b%Wslip(i,j,k+1)=b%Wslip(i,j,k+1)+0.5_WP*b%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*b%fs%sigma/(b%fs%rho_l*b%vf%thickness(i,j,k)))
-      !             end if
-      !          end do 
-      !       end do 
-      !    end do
-      ! end block slip_velocity
 
          
       ! VOF solver step
@@ -683,41 +575,6 @@ contains
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
 
-
-      ! ! Label thin film based upon min_filmthickness
-      ! label_thin: block
-      !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_WTIME
-      !    use parallel, only: MPI_REAL_WP
-      !    real(WP) :: starttime,endtime,my_time
-      !    integer :: ierr
-      !    ! Copy over thin sensor for label functions
-      !    tmp_thickness=0.0_WP
-      !    tmp_thickness=b%vf%thickness
-      !    my_time=0.0_WP
-      !    ! Label regions and track time
-      !    b%cclabel_thin_timer=0.0_WP
-      !    starttime=MPI_WTIME()
-      !    call b%ccl%build(make_label,same_label)
-      !    endtime=MPI_WTIME()
-      !    my_time=endtime-starttime
-      !    ! Reduce time to get total sum time across all processors
-      !    call MPI_ALLREDUCE(my_time,b%cclabel_thin_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-      !    ! Find average wall time
-      !    b%cclabel_thin_timer=b%cclabel_thin_timer/b%cfg%nproc
-      ! end block label_thin
-
-      
-      ! ! Puncture a hole in the film based upon the thin region label
-      ! puncture_film: block
-      ! integer :: i,j,k,nn,n
-      !    do n=1,b%ccl%nstruct
-      !       do nn=1,b%ccl%struct(n)%n_
-      !          i=b%ccl%struct(n)%map(1,nn); j=b%ccl%struct(n)%map(2,nn); k=b%ccl%struct(n)%map(3,nn)
-      !          b%vf%VF(i,j,k)=0.0_WP
-      !       end do
-      !    end do
-      ! end block puncture_film
-      
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -791,20 +648,6 @@ contains
       call b%vf%get_max()
       call b%mfile%write()
       call b%cflfile%write()
-      call b%timerfile%write()
-
-      ! ! End time steo timer
-      ! endtime_step=mpi_wtime()
-      ! my_time_step=endtime_step-starttime_step
-
-      ! ! Reduce time to get total sum time across all processors
-      ! call MPI_ALLREDUCE(my_time_step,b%step_timer,1,MPI_REAL_WP,MPI_SUM,b%cfg%comm,ierr)
-      ! ! Find average wall time in time step
-      ! b%step_timer=b%step_timer/b%cfg%nproc
-      ! ! Percent of time spent in cclabel for thin sensor
-      ! b%cclabel_thin_percent=b%cclabel_thin_timer/b%step_timer
-      ! ! Percent of time spent in cclabel for thick sensor
-      ! b%cclabel_thick_percent=b%cclabel_thick_timer/b%step_timer
 
    end subroutine step
    
@@ -821,7 +664,6 @@ contains
       
       ! Deallocate work arrays
       deallocate(b%resU,b%resV,b%resW,b%Ui,b%Vi,b%Wi,b%Uslip,b%Vslip,b%Wslip)
-      deallocate(tmp_thin_sensor,tmp_thickness)
       
    end subroutine final
 
