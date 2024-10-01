@@ -8,12 +8,16 @@ module block2_class
    use ddadi_class,        only: ddadi
    use tpns_class,         only: tpns
    use vfs_class,          only: vfs
+   use lpt_class,          only: lpt
+   use stokeslet_class,    only: stokeslet
    use timetracker_class,  only: timetracker
    use ensight_class,      only: ensight
    use surfmesh_class,     only: surfmesh
+   use partmesh_class,     only: partmesh
    use event_class,        only: event
    use cclabel_class,      only: cclabel
    use monitor_class,      only: monitor
+   use breakup_class,      only: breakup
    implicit none
    private
 
@@ -27,10 +31,15 @@ module block2_class
       type(tpns)             :: fs                     !< Two phase incompressible flow solver
       type(vfs)              :: vf                     !< VF solve
       type(timetracker)      :: time                   !< Time tracker
-      type(surfmesh)         :: smesh                  !< Surfmesh              
+      type(surfmesh)         :: smesh                  !< Surfmesh   
+      type(partmesh)         :: pmesh,pmesh_lpt        !< Particle mesh for stokeslets           
       type(ensight)          :: ens_out                !< Ensight output
       type(event)            :: ens_evt                !< Ensight event
       type(cclabel)          :: ccl                    !< Label object for thin regions
+      !> Break-up modeling
+      type(lpt)         :: lp    !< Lagrangian particle solver
+      type(stokeslet)   :: ss
+      type(breakup)     :: bu    !< SGS break-up model
       !> Monitoring files
       type(monitor) :: mfile     !< General monitor files
       type(monitor) :: cflfile   !< CFL monitor files
@@ -49,17 +58,8 @@ module block2_class
    !> Hardcode size of buffer layer for VOF removal
    integer, parameter :: nlayer=4
 
-   !> A temp array for thin region sensor
-   real(WP), dimension(:,:,:), allocatable :: tmp_thin_sensor
+   real(WP) :: VFlolim
 
-   !> A temp array for film thickness
-   real(WP), dimension(:,:,:), allocatable :: tmp_thickness
-
-   !> Min film thickness for puncture
-   real(WP), parameter :: min_filmthickness=6.5e-3_WP
-
-   !> Min film thickness for labeling thin areas
-   real(WP), parameter :: min_filmthickness_label=1.1e-2_WP
 
 contains
    
@@ -193,14 +193,14 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,r2p,VFhi,VFlo
+         use vfs_class, only: VFlo,VFhi,elvira,r2p,lvira,flux,remap,r2plig
          integer :: i,j,k,n,si,sj,sk
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
 			real(WP) :: vol,area
 			integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call b%vf%initialize(cfg=b%cfg,reconstruction_method=r2p,name='VOF')
+         call b%vf%initialize(cfg=b%cfg,reconstruction_method=r2plig,transport_method=flux,name='VOF')
          ! Set full domain to gas
          do k=b%vf%cfg%kmino_,b%vf%cfg%kmaxo_
             do j=b%vf%cfg%jmino_,b%vf%cfg%jmaxo_
@@ -254,6 +254,16 @@ contains
          call b%vf%get_curvature()
          ! Reset moments to guarantee compatibility with interface reconstruction
          call b%vf%reset_volume_moments()
+         ! Min Film thickess
+         call param_read('Minimum local thickness',b%vf%thin_thld_min)
+         ! call b%input%read('nx',nx)
+         ! min_thickness = b%vf%thin_thld_min*b%cfg%xL/(1.0_WP*nx)
+         ! b%vf%puncture = .false.
+         VFlolim = VFlo 
+         ! b%vf%vol_conv = 0.0_WP
+         ! b%vf%vol_loss = 0.0_WP
+         ! b%vf%vol_left = 0.0_WP
+         ! b%vf%punctured = 0.0_WP
       end block create_and_initialize_vof
 
 
@@ -315,11 +325,26 @@ contains
          call b%fs%get_div()
       end block initialize_velocity
 
-      ! Create cclabel object
-      film_label: block
-         call b%ccl%initialize(pg=b%cfg%pgrid,name='film_thickness')
-      end block film_label
+      ! Create lpt solver
+      create_lpt_solver: block
+         ! Create the solver
+         b%lp=lpt(cfg=b%cfg,name='spray')
+         ! Get particle density from the flow solver
+         b%lp%rho=b%fs%rho_l
+         ! Turn off drag
+         b%lp%drag_model='none'         
+         ! Initialize with zero particles
+         call b%lp%resize(0)
+         ! Get initial particle volume fraction
+         call b%lp%update_VF()               
+         ! Get particle statistics
+         call b%lp%get_max()
+      end block create_lpt_solver
 
+      create_breakup_model: block
+         call b%bu%initialize(b%vf,b%fs,b%lp)
+         b%vf%thin_thld_min=b%bu%min_filmthickness/b%vf%cfg%min_meshsize
+      end block create_breakup_model
 
       ! Create surfmesh object for interface polygon output 
       create_smesh: block
@@ -329,17 +354,20 @@ contains
          select case (b%vf%reconstruction_method)
          case (r2p)
             ! Include an extra variable for number of planes
-            b%smesh=surfmesh(nvar=10,name='plic')
+            b%smesh=surfmesh(nvar=13,name='plic')
             b%smesh%varname(1)='nplane'
             b%smesh%varname(2)='curv'
             b%smesh%varname(3)='edge_sensor'
             b%smesh%varname(4)='thin_sensor'
             b%smesh%varname(5)='thickness'
-            b%smesh%varname(6)='id_thickness'
+            b%smesh%varname(6)='id_ccl_film'
             b%smesh%varname(7)='edge_sensor'
             b%smesh%varname(8)='Uslip'
             b%smesh%varname(9)='Vslip'
             b%smesh%varname(10)='Wslip'
+            b%smesh%varname(11)='film_type'
+            b%smesh%varname(12)='id_ccl_edge'
+            b%smesh%varname(13)='lig_ind'
             ! Transfer polygons to smesh
             call b%vf%update_surfmesh(b%smesh)
             ! Also populate nplane variable
@@ -355,11 +383,14 @@ contains
                            b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
                            b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                            b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
-                           b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
+                           b%smesh%var(6,np)=real(b%bu%ccl_film%id(i,j,k),WP)
                            b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
-                           b%smesh%var(7,np)=b%Uslip(i,j,k)
-                           b%smesh%var(8,np)=b%Vslip(i,j,k)
-                           b%smesh%var(9,np)=b%Wslip(i,j,k)
+                           b%smesh%var(8,np)=b%Uslip(i,j,k)
+                           b%smesh%var(9,np)=b%Vslip(i,j,k)
+                           b%smesh%var(10,np)=b%Wslip(i,j,k)
+                           b%smesh%var(11,np)=real(b%vf%film_type(i,j,k),WP)
+                           b%smesh%var(12,np)=real(b%bu%ccl_edge%id(i,j,k),WP)
+                           b%smesh%var(13,np)=real(b%vf%lig_ind(i,j,k),WP)
                         end if
                      end do
                   end do
@@ -388,6 +419,40 @@ contains
          end select
       end block create_smesh
 
+      create_pmesh: block
+         integer :: i
+         call b%ss%initialize(cfg=b%cfg,name='stokeslet')
+         b%pmesh=partmesh(nvar=2,nvec=1,name='stokeslet')
+         ! b%pmesh%varname(1)='id'
+         b%pmesh%varname(1)='fcoeff'
+         b%pmesh%varname(2)='VF'
+         b%pmesh%vecname(1)='nedge'
+         call b%ss%update_partmesh(b%pmesh)
+         do i=1,b%ss%np_
+            ! b%pmesh%var(1,i)=ss%p(i)%id
+            b%pmesh%var(1,i)=b%ss%p(i)%fcoeff
+            b%pmesh%var(1,i)=b%ss%p(i)%VF
+            b%pmesh%vec(:,1,i)=b%ss%p(i)%nedge
+         end do
+      end block create_pmesh
+
+      ! Create partmesh object for Lagrangian particle output
+      create_pmesh_lpt: block
+         integer :: i
+         ! Include an extra variable for droplet diameter
+         b%pmesh_lpt=partmesh(nvar=2,nvec=1,name='lpt')
+         b%pmesh_lpt%varname(1)='diameter'
+         b%pmesh_lpt%varname(2)='id'
+         b%pmesh_lpt%vecname(1)='velocity'
+         ! Transfer particles to pmesh
+         call b%lp%update_partmesh(b%pmesh_lpt)
+         ! Also populate diameter variable
+         do i=1,b%lp%np_
+            b%pmesh_lpt%var(1,i)=b%lp%p(i)%d
+            b%pmesh_lpt%var(2,i)=b%lp%p(i)%id
+            b%pmesh_lpt%vec(:,1,i)=b%lp%p(i)%vel
+         end do
+      end block create_pmesh_lpt
 
       ! Add Ensight output
       create_ensight: block
@@ -399,14 +464,16 @@ contains
          call param_read('Ensight output period',b%ens_evt%tper)
          ! Add variables to output
          call b%ens_out%add_vector('velocity',b%Ui,b%Vi,b%Wi)
+         call b%ens_out%add_vector('SLIPvelocity',b%Uslip,b%Vslip,b%Wslip)
          call b%ens_out%add_scalar('VOF',b%vf%VF)
          call b%ens_out%add_scalar('Pressure',b%fs%P)
          call b%ens_out%add_scalar('thin_sensor',b%vf%thin_sensor)
          call b%ens_out%add_scalar('curvature',b%vf%curv)
          call b%ens_out%add_surface('vofplic',b%smesh)
+         call b%ens_out%add_particle('stokeslets',b%pmesh)
+         call b%ens_out%add_particle('spray',b%pmesh_lpt)
          if (b%ens_evt%occurs()) call b%ens_out%write_data(b%time%t)
       end block create_ensight
-
 
       ! Create a monitor file
       create_monitor: block
