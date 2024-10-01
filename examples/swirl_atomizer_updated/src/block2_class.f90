@@ -741,21 +741,21 @@ contains
 
          update_pmesh: block
             integer :: i
-            call this%ss%update_partmesh(this%pmesh)
-            do i=1,this%ss%np_
-               this%pmesh%var(1,i)=this%ss%p(i)%fcoeff
-               this%pmesh%var(2,i)=this%ss%p(i)%VF
-               this%pmesh%vec(:,1,i)=this%ss%p(i)%nedge
+            call b%ss%update_partmesh(b%pmesh)
+            do i=1,b%ss%np_
+               b%pmesh%var(1,i)=b%ss%p(i)%fcoeff
+               b%pmesh%var(2,i)=b%ss%p(i)%VF
+               b%pmesh%vec(:,1,i)=b%ss%p(i)%nedge
             end do
          end block update_pmesh  
 
          update_pmesh_lpt: block
             integer :: i
-            call this%lp%update_partmesh(this%pmesh_lpt)
-            do i=1,this%lp%np_
-               this%pmesh_lpt%var(1,i)=this%lp%p(i)%d
-               this%pmesh_lpt%var(2,i)=this%lp%p(i)%id
-               this%pmesh_lpt%vec(:,1,i)=this%lp%p(i)%vel
+            call b%lp%update_partmesh(b%pmesh_lpt)
+            do i=1,b%lp%np_
+               b%pmesh_lpt%var(1,i)=b%lp%p(i)%d
+               b%pmesh_lpt%var(2,i)=b%lp%p(i)%id
+               b%pmesh_lpt%vec(:,1,i)=b%lp%p(i)%vel
             end do
          end block update_pmesh_lpt  
    

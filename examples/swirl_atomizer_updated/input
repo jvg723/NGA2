@@ -18,6 +18,10 @@
 2 ny : 80
 2 nz : 80
 
+# Break-up thickness
+Minimum local thickness : 6.5e-3_WP
+
+
 
 # Pipe properties
 Bulk axial velocity : 1
