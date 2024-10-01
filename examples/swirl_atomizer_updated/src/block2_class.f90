@@ -551,6 +551,10 @@ contains
             b%fs%W(i,j,k)=Winflow(i,j,k)
          end do
       end block reapply_dirichlet
+
+      ! Advance our spray
+      b%resU=b%fs%rho_g; b%resV=b%fs%visc_g
+      call b%lp%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W,rho=b%resU,visc=b%resV)   
          
       ! Remember old VOF
       b%vf%VFold=b%vf%VF
@@ -565,8 +569,24 @@ contains
 
          
       ! VOF solver step
-      call b%vf%advance(dt=b%time%dt,U=b%fs%U,V=b%fs%V,W=b%fs%W)
-      ! call b%vf%advance(dt=b%time%dt,U=b%Uslip,V=b%Vslip,W=b%Wslip)
+      if (b%vf%cfg%amRoot) print *,"ligamentclasshere1"
+      call b%fs%add_slipvel(b%vf,b%ss,b%Uslip,b%Vslip,b%Wslip,b%bu%min_filmthickness)
+      ! if (b%vf%cfg%amRoot) print *,"herebefore"
+      if (b%vf%cfg%amRoot) print *,"ligamentclasshere2"
+      b%Uslip =b%fs%U + b%Uslip
+      b%Vslip =b%fs%V + b%Vslip
+      b%Wslip =b%fs%W + b%Wslip
+      if (b%ss%np.gt.0) then
+         if (b%vf%cfg%amRoot) print *,"ligamentclasshere3"
+         call b%vf%advance(dt=b%time%dt,U=b%Uslip,V=b%Vslip,W=b%Wslip,type_flux=2)
+         if (b%vf%cfg%amRoot) print *,"ligamentclasshere4"
+      else 
+         if (b%vf%cfg%amRoot) print *,"ligamentclasshere5"
+         call b%vf%advance(dt=b%time%dt,U=b%Uslip,V=b%Vslip,W=b%Wslip,type_flux=1)
+         if (b%vf%cfg%amRoot) print *,"ligamentclasshere6"
+      end if
+      ! if (b%vf%cfg%amRoot) print *,"here12"
+      ! ! if (b%vf%cfg%amRoot) print *,"after add slip"
       
          
       ! Prepare new staggered viscosity (at n+1)
@@ -615,7 +635,8 @@ contains
             call b%fs%get_div()
             select case (b%vf%reconstruction_method)
             case (r2p)
-               call b%fs%add_surface_tension_jump_thin(dt=b%time%dt,div=b%fs%div,vf=b%vf)
+               ! call b%fs%add_surface_tension_jump_thin(dt=b%time%dt,div=b%fs%div,vf=b%vf)
+               call b%fs%add_surface_tension_jump_twoVF(dt=b%time%dt,div=b%fs%div,vf=b%vf)
             case (lvira)
                call b%fs%add_surface_tension_jump(dt=b%time%dt,div=b%fs%div,vf=b%vf)
             end select
@@ -641,6 +662,15 @@ contains
       ! Recompute interpolated velocity and divergence
       call b%fs%interp_vel(b%Ui,b%Vi,b%Wi)
       call b%fs%get_div()
+
+      ! label film and ligament based on local moment of inertia information
+      label_film_ligament: block
+         if (b%vf%cfg%amRoot) print *,"ligamentclasshere7"
+         ! call b%get_neighbortype()
+         ! if (b%vf%cfg%amRoot) print *,"here4"
+         call b%bu%attempt_breakup_retraction()
+         ! if (b%vf%cfg%amRoot) print *,"here5"
+      end block label_film_ligament
 
       
       ! Remove VOF at edge of domain
@@ -676,11 +706,14 @@ contains
                               b%smesh%var(3,np)=b%vf%edge_sensor(i,j,k)
                               b%smesh%var(4,np)=b%vf%thin_sensor(i,j,k)
                               b%smesh%var(5,np)=b%vf%thickness  (i,j,k)
-                              b%smesh%var(6,np)=real(b%ccl%id(i,j,k),WP)
+                              b%smesh%var(6,np)=real(b%bu%ccl_film%id(i,j,k),WP)
                               b%smesh%var(7,np)=b%vf%edge_sensor(i,j,k)
-                              b%smesh%var(7,np)=b%Uslip(i,j,k)
-                              b%smesh%var(8,np)=b%Vslip(i,j,k)
-                              b%smesh%var(9,np)=b%Wslip(i,j,k)
+                              b%smesh%var(8,np)=b%Uslip(i,j,k)
+                              b%smesh%var(9,np)=b%Vslip(i,j,k)
+                              b%smesh%var(10,np)=b%Wslip(i,j,k)
+                              b%smesh%var(11,np)=real(b%vf%film_type(i,j,k),WP)
+                              b%smesh%var(12,np)=real(b%bu%ccl_edge%id(i,j,k),WP)
+                              b%smesh%var(13,np)=real(b%vf%lig_ind(i,j,k),WP)
                            end if
                         end do
                      end do
@@ -705,6 +738,26 @@ contains
                end do
             end select
          end block update_smesh
+
+         update_pmesh: block
+            integer :: i
+            call this%ss%update_partmesh(this%pmesh)
+            do i=1,this%ss%np_
+               this%pmesh%var(1,i)=this%ss%p(i)%fcoeff
+               this%pmesh%var(2,i)=this%ss%p(i)%VF
+               this%pmesh%vec(:,1,i)=this%ss%p(i)%nedge
+            end do
+         end block update_pmesh  
+
+         update_pmesh_lpt: block
+            integer :: i
+            call this%lp%update_partmesh(this%pmesh_lpt)
+            do i=1,this%lp%np_
+               this%pmesh_lpt%var(1,i)=this%lp%p(i)%d
+               this%pmesh_lpt%var(2,i)=this%lp%p(i)%id
+               this%pmesh_lpt%vec(:,1,i)=this%lp%p(i)%vel
+            end do
+         end block update_pmesh_lpt  
    
          ! Perform ensight output 
          call b%ens_out%write_data(b%time%t)
