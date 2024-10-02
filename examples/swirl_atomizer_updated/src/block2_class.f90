@@ -351,10 +351,10 @@ contains
       ! Create surfmesh object for interface polygon output 
       create_smesh: block
          use irl_fortran_interface
-         use vfs_class, only: lvira,r2p
+         use vfs_class, only: lvira,r2p,r2plig
          integer :: i,j,k,nplane,np
          select case (b%vf%reconstruction_method)
-         case (r2p)
+         case (r2p,r2plig)
             ! Include an extra variable for number of planes
             b%smesh=surfmesh(nvar=13,name='plic')
             b%smesh%varname(1)='nplane'
@@ -689,10 +689,10 @@ contains
          ! Update surfmesh object 
          update_smesh: block
             use irl_fortran_interface
-            use vfs_class, only: lvira,r2p
+            use vfs_class, only: lvira,r2p,r2plig
             integer :: nplane,np,i,j,k
             select case (b%vf%reconstruction_method)
-            case (r2p)
+            case (r2p,r2plig)
                ! Transfer polygons to smesh
                call b%vf%update_surfmesh(b%smesh)
                ! Also populate nplane variable
