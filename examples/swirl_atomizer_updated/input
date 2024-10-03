@@ -1,4 +1,4 @@
-# Parallelization
+ # Parallelization
 1 Partition : 8 1 1
 2 Partition : 8 1 1
 
@@ -19,7 +19,7 @@
 2 nz : 80
 
 # Break-up thickness
-Minimum local thickness : 6.5e-3
+Minimum local thickness : 0.008
 
 
 # Pipe properties
