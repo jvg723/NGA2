@@ -10,20 +10,29 @@ module simulation
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
+   use partmesh_class,    only: partmesh
    use event_class,       only: event
    use cclabel_class,     only: cclabel
    use monitor_class,     only: monitor
+   use breakup_class,     only: breakup
+   use lpt_class,         only: lpt
+   use stokeslet_class,   only: stokeslet
    implicit none
    private
    
    !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
-   type(hypre_str),   public :: ps                     !< Structured hypre pressure solver
-   type(ddadi),       public :: vs                     !< DDAI implicit solver
-   type(tpns),        public :: fs
-   type(vfs),         public :: vf
-   type(cclabel),     public :: ccl                    !< Label object
-   type(timetracker), public :: time
-   type(surfmesh),    public :: smesh                                              
+   type(hypre_str),        public :: ps                     !< Structured hypre pressure solver
+   type(ddadi),            public :: vs                     !< DDAI implicit solver
+   type(tpns),             public :: fs
+   type(vfs),              public :: vf
+   type(cclabel),          public :: ccl                    !< Label object
+   type(timetracker),      public :: time
+   type(surfmesh),         public :: smesh
+   type(partmesh),         public :: pmesh,pmesh_lpt        !< Particle mesh for stokeslets   
+   !> Break-up modeling
+   type(lpt)         :: lp    !< Lagrangian particle solver
+   type(stokeslet)   :: ss
+   type(breakup)     :: bu    !< SGS break-up model                                              
    
    !> Ensight postprocessing
    type(ensight) :: ens_out
@@ -202,7 +211,7 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,r2p,VFhi,VFlo
+         use vfs_class, only: lvira,r2p,VFhi,VFlo,r2plig
          integer :: i,j,k,n,si,sj,sk
 			real(WP), dimension(3,8) :: cube_vertex
 			real(WP), dimension(3) :: v_cent,a_cent
@@ -273,7 +282,7 @@ contains
          vof_removed=0.0_WP
       end block create_iterator
       
-      
+
       ! Create a two-phase flow solver without bconds
       create_and_initialize_flow_solver: block
          use tpns_class, only: dirichlet,clipped_neumann,slip
@@ -349,12 +358,30 @@ contains
          call fs%get_div()
       end block initialize_velocity
 
-      ! Create cclabel object
-      film_label: block
-         call ccl%initialize(pg=cfg%pgrid,name='thin_region_label')
-      end block film_label
-      
+      ! Create lpt solver
+      create_lpt_solver: block
+         ! Create the solver
+         lp=lpt(cfg=cfg,name='spray')
+         ! Get particle density from the flow solver
+         lp%rho=fs%rho_l
+         ! Turn off drag
+         lp%drag_model='none'         
+         ! Initialize with zero particles
+         call lp%resize(0)
+         ! Get initial particle volume fraction
+         call lp%update_VF()               
+         ! Get particle statistics
+         call lp%get_max()
+      end block create_lpt_solver
 
+
+      create_breakup_model: block
+         call bu%initialize(vf,fs,lp)
+         ! vf%thin_thld_min=bu%min_filmthickness/vf%cfg%min_meshsize
+         vf%thin_thld_min=0.64_WP
+         print *,  vf%thin_thld_min
+      end block create_breakup_model
+      
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface
@@ -385,7 +412,7 @@ contains
                         smesh%var(3,np)=vf%edge_sensor(i,j,k)
                         smesh%var(4,np)=vf%thin_sensor(i,j,k)
                         smesh%var(5,np)=vf%thickness  (i,j,k)
-                        smesh%var(6,np)=real(ccl%id(i,j,k),WP)
+                        smesh%var(6,np)=real(bu%ccl_film%id(i,j,k),WP)
                         smesh%var(7,np)=Uslip(i,j,k)
                         smesh%var(8,np)=Vslip(i,j,k)
                         smesh%var(9,np)=Wslip(i,j,k)
@@ -395,8 +422,43 @@ contains
             end do
          end do
       end block create_smesh
+
+      create_pmesh: block
+         integer :: i
+         call ss%initialize(cfg=cfg,name='stokeslet')
+         pmesh=partmesh(nvar=2,nvec=1,name='stokeslet')
+         ! pmesh%varname(1)='id'
+         pmesh%varname(1)='fcoeff'
+         pmesh%varname(2)='VF'
+         pmesh%vecname(1)='nedge'
+         call ss%update_partmesh(pmesh)
+         do i=1,ss%np_
+            ! pmesh%var(1,i)=ss%p(i)%id
+            pmesh%var(1,i)=ss%p(i)%fcoeff
+            pmesh%var(1,i)=ss%p(i)%VF
+            pmesh%vec(:,1,i)=ss%p(i)%nedge
+         end do
+      end block create_pmesh
+
+      ! Create partmesh object for Lagrangian particle output
+      create_pmesh_lpt: block
+         integer :: i
+         ! Include an extra variable for droplet diameter
+         pmesh_lpt=partmesh(nvar=2,nvec=1,name='lpt')
+         pmesh_lpt%varname(1)='diameter'
+         pmesh_lpt%varname(2)='id'
+         pmesh_lpt%vecname(1)='velocity'
+         ! Transfer particles to pmesh
+         call lp%update_partmesh(pmesh_lpt)
+         ! Also populate diameter variable
+         do i=1,lp%np_
+            pmesh_lpt%var(1,i)=lp%p(i)%d
+            pmesh_lpt%var(2,i)=lp%p(i)%id
+            pmesh_lpt%vec(:,1,i)=lp%p(i)%vel
+         end do
+      end block create_pmesh_lpt
       
-      
+
       ! Add Ensight output
       create_ensight: block
          ! Create Ensight output from cfg
@@ -415,7 +477,7 @@ contains
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
       
-      
+
       ! Create a monitor file
       create_monitor: block
          ! Prepare some info about fields
@@ -454,7 +516,6 @@ contains
          call cflfile%write()
       end block create_monitor
       
-      
    end subroutine simulation_init
    
    
@@ -482,35 +543,23 @@ contains
          ! Prepare old staggered density (at n)
          call fs%get_olddensity(vf=vf)
 
-         ! Add in slip velocity at hole edges
-         slip_velocity: block
-            integer :: i,j,k
-            ! Store current velocity field 
-            Uslip=fs%U
-            Vslip=fs%V
-            Wslip=fs%W
-            ! Add in retraction velocities
-            do k=vf%cfg%kmin_,vf%cfg%kmax_
-               do j=vf%cfg%jmin_,vf%cfg%jmax_
-                  do i=vf%cfg%imin_,vf%cfg%imax_
-                     if (vf%edge_sensor(i,j,k).ge.0.10_WP) then
-                     ! if (vf%edge_sensor(i,j,k).ge.0.10_WP) then Local threshold
-                        Uslip(i  ,j,k)=Uslip(i  ,j,k)+0.5_WP*vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
-                        Uslip(i+1,j,k)=Uslip(i+1,j,k)+0.5_WP*vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
-                        Vslip(i,j  ,k)=Vslip(i,j  ,k)+0.5_WP*vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
-                        Vslip(i,j+1,k)=Vslip(i,j+1,k)+0.5_WP*vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
-                        Wslip(i,j,k  )=Wslip(i,j,k  )+0.5_WP*vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
-                        Wslip(i,j,k+1)=Wslip(i,j,k+1)+0.5_WP*vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*fs%sigma/(fs%rho_l*vf%thickness(i,j,k)))
-                     end if
-                  end do 
-               end do 
-            end do
-         end block slip_velocity
-
-         
          ! VOF solver step
-         call vf%advance(dt=time%dt,U=Uslip,V=Vslip,W=Wslip)
-         ! call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+         if (vf%cfg%amRoot) print *,"ligamentclasshere1"
+         call fs%add_slipvel(vf,ss,Uslip,Vslip,Wslip,bu%min_filmthickness)
+         ! if (vf%cfg%amRoot) print *,"herebefore"
+         if (vf%cfg%amRoot) print *,"ligamentclasshere2"
+         Uslip =fs%U + Uslip
+         Vslip =fs%V + Vslip
+         Wslip =fs%W + Wslip
+         if (ss%np.gt.0) then
+            if (vf%cfg%amRoot) print *,"ligamentclasshere3"
+            call vf%advance(dt=time%dt,U=Uslip,V=Vslip,W=Wslip,type_flux=2)
+            if (vf%cfg%amRoot) print *,"ligamentclasshere4"
+         else 
+            if (vf%cfg%amRoot) print *,"ligamentclasshere5"
+            call vf%advance(dt=time%dt,U=Uslip,V=Vslip,W=Wslip,type_flux=1)
+            if (vf%cfg%amRoot) print *,"ligamentclasshere6"
+         end if
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
@@ -552,7 +601,8 @@ contains
             call fs%update_laplacian()
             call fs%correct_mfr()
             call fs%get_div()
-            call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
+            ! call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
+            call fs%add_surface_tension_jump_twoVF(dt=time%dt,div=fs%div,vf=vf)
             fs%psolv%rhs=-fs%cfg%vol*fs%div/time%dt
             fs%psolv%sol=0.0_WP
             call fs%psolv%solve()
@@ -574,22 +624,11 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
 
-         ! Label thin film regions
-         label_thin: block
-            ! Label regions and track time
-            call ccl%build(make_label,same_label)
-         end block label_thin
-
-         ! Puncture a hole in the film based upon the thin region label
-         puncture_film: block
-            integer :: i,j,k,nn,n
-            do n=1,ccl%nstruct
-               do nn=1,ccl%struct(n)%n_
-                  i=ccl%struct(n)%map(1,nn); j=ccl%struct(n)%map(2,nn); k=ccl%struct(n)%map(3,nn)
-                  vf%VF(i,j,k)=0.0_WP
-               end do
-            end do
-         end block puncture_film
+         ! label film and ligament based on local moment of inertia information
+            label_film_ligament: block
+            if (vf%cfg%amRoot) print *,"ligamentclasshere7"
+            call bu%attempt_breakup_retraction()
+         end block label_film_ligament
 
          ! Remove VOF at edge of domain
          remove_vof: block
@@ -629,7 +668,7 @@ contains
                               smesh%var(3,np)=vf%edge_sensor(i,j,k)
                               smesh%var(4,np)=vf%thin_sensor(i,j,k)
                               smesh%var(5,np)=vf%thickness  (i,j,k)
-                              smesh%var(6,np)=real(ccl%id(i,j,k),WP)
+                              smesh%var(6,np)=real(bu%ccl_film%id(i,j,k),WP)
                               smesh%var(7,np)=Uslip(i,j,k)
                               smesh%var(8,np)=Vslip(i,j,k)
                               smesh%var(9,np)=Wslip(i,j,k)
@@ -643,9 +682,28 @@ contains
             resU=vf%edge_normal(1,:,:,:)
             resV=vf%edge_normal(2,:,:,:)
             resW=vf%edge_normal(3,:,:,:)
+            update_pmesh: block
+               integer :: i
+               call ss%update_partmesh(pmesh)
+               do i=1,ss%np_
+                  pmesh%var(1,i)=ss%p(i)%fcoeff
+                  pmesh%var(2,i)=ss%p(i)%VF
+                  pmesh%vec(:,1,i)=ss%p(i)%nedge
+               end do
+            end block update_pmesh
+            update_pmesh_lpt: block
+               integer :: i
+               call lp%update_partmesh(pmesh_lpt)
+               do i=1,lp%np_
+                  pmesh_lpt%var(1,i)=lp%p(i)%d
+                  pmesh_lpt%var(2,i)=lp%p(i)%id
+                  pmesh_lpt%vec(:,1,i)=lp%p(i)%vel
+               end do
+            end block update_pmesh_lpt  
             ! Perform ensight output 
             call ens_out%write_data(time%t)
          end if
+
          
          ! Perform and output monitoring
          call fs%get_max()
