@@ -42,7 +42,6 @@ module simplex_class
       type(tpns)        :: fs    !< Two-phase flow solver
       type(hypre_str)   :: ps    !< HYPRE linear solver for pressure
       type(ddadi)       :: vs    !< DDADI linear solver for velocity
-      type(ddadi)       :: vs    !< DDADI linear solver for velocity
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
       type(cclabel)     :: ccl   !< CCLabel to transfer droplets
@@ -136,7 +135,7 @@ contains
          this%input=inputfile(amRoot=amRoot,filename='simplex.input')
       end block read_input
       
-      
+
       ! Initialize ibconfig object
       create_config: block
          use parallel,    only: group
@@ -190,7 +189,7 @@ contains
          ! Create ibconfig
          this%cfg=ibconfig(grp=group,decomp=partition,grid=grid)
       end block create_config
-      
+
       
       ! Now initialize simplex nozzle geometry
       create_simplex: block
@@ -249,7 +248,7 @@ contains
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
       end block create_simplex
-      
+
       
       ! Initialize flow rate
       set_flow_rate: block
@@ -273,7 +272,7 @@ contains
          end if
          call MPI_ALLREDUCE(MPI_IN_PLACE,Apipe,this%cfg%nproc,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
       end block set_flow_rate
-      
+
       
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
@@ -284,7 +283,7 @@ contains
          this%time%dt=this%time%dtmax
          this%time%itmax=2
       end block initialize_timetracker
-      
+
       
       ! Handle restart/saves here
       restart_and_save: block
@@ -315,7 +314,7 @@ contains
             this%df%varname=['U  ','V  ','W  ','P  ','Pjx','Pjy','Pjz','P11','P12','P13','P14','P21','P22','P23','P24']
          end if
       end block restart_and_save
-      
+
       
       ! Revisit timetracker to adjust time and time step values if this is a restart
       update_timetracker: block
@@ -325,7 +324,7 @@ contains
             this%time%told=this%time%t-this%time%dt
          end if
       end block update_timetracker
-      
+
       
       ! Allocate work arrays
       allocate_work_arrays: block
@@ -337,7 +336,7 @@ contains
          allocate(this%Vi  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wi  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
-      
+
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
@@ -472,14 +471,14 @@ contains
             call this%vf%reset_volume_moments()
          end if
       end block create_and_initialize_vof
-      
+
       
       ! Create an iterator for removing VOF at edges
       create_iterator: block
          this%vof_removal_layer=iterator(this%cfg,'VOF removal',vof_removal_layer_locator)
          this%vof_removed=0.0_WP
       end block create_iterator
-      
+
       
       ! Create a two-phase flow solver with bconds
       create_flow_solver: block
@@ -512,12 +511,10 @@ contains
          call this%input%read('Pressure tolerance',this%ps%rcvg)
          ! Configure velocity solver
          this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
-         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
          call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
-         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
       end block create_flow_solver
-      
+
       
       ! Initialize our velocity field
       initialize_velocity: block
@@ -559,7 +556,7 @@ contains
          ! Compute cell-centered velocity
          call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       end block initialize_velocity
-      
+
       
       ! Create CCL
       !create_ccl: block
@@ -576,7 +573,7 @@ contains
       create_sgs: block
          this%sgs=sgsmodel(cfg=this%fs%cfg,umask=this%fs%umask,vmask=this%fs%vmask,wmask=this%fs%wmask)
       end block create_sgs
-      
+
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -628,7 +625,7 @@ contains
             end do
          end select
       end block create_smesh
-      
+
       
       ! Add Ensight output
       create_ensight: block
@@ -645,7 +642,7 @@ contains
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
-      
+
       
       ! Create a monitor file
       create_monitor: block
@@ -683,7 +680,7 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
       end block create_monitor
-      
+
    contains
       
       !> Function that identifies cells that need a label
