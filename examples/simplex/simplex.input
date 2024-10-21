@@ -24,7 +24,7 @@ Puncture thickness : 1.0e-3
 
 # Flow conditions
 Mass flow rate : 2.95e-3
-Coflow velocity : 1
+Coflow velocity : 0
 
 # Fluid properties
 Gravity :                     9.81 0 0
@@ -48,4 +48,4 @@ Ensight output period : 1e-4
 Restart output period : 1e-3
 
 # Data restart
-Restart from : !data_6.00156E-03
+Restart from : !data_6.00018E-03

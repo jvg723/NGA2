@@ -247,6 +247,8 @@ contains
                this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
             end do
          end if
+         ! Here we're gonna try stair-stepping
+         this%cfg%VF=nint(this%cfg%VF)
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
       end block create_simplex
@@ -342,7 +344,7 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: remap,plicnet,r2p,r2pnet
+         use vfs_class, only: remap,plicnet,r2p,r2pnet,lvira
          use irl_fortran_interface
          integer :: i,j,k
          integer :: reconstruction_method
