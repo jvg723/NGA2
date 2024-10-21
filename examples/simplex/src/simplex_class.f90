@@ -199,14 +199,16 @@ contains
          real(WP) :: r
          ! Create polygon
          call this%poly%initialize(nvert=10,name='simplex')
-         this%poly%vert(:, 1)=[-0.01000_WP,0.00000_WP]
+         this%poly%vert(:, 1)=[-0.01000_WP,0.00000_WP] ! 
          this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
          this%poly%vert(:, 4)=[-0.00385_WP,0.00160_WP]
-         this%poly%vert(:, 5)=[-0.00175_WP,0.00039_WP]
-         this%poly%vert(:, 6)=[-0.00114_WP,0.00039_WP]
+         this%poly%vert(:, 5)=[-0.00175_WP,0.00039_WP] ! Inner office opening (x,y)
+         this%poly%vert(:, 6)=[-0.00114_WP,0.00039_WP] ! Outer office opening (x,y)
+         ! this%poly%vert(:, 5)=[-0.00175_WP,0.0002_WP] ! Inner office opening
+         ! this%poly%vert(:, 6)=[-0.00114_WP,0.0002_WP] ! Outer office opening
          this%poly%vert(:, 7)=[ 0.00000_WP,0.00143_WP]
-         this%poly%vert(:, 8)=[ 0.00000_WP,0.00177_WP]
+         this%poly%vert(:, 8)=[ 0.00000_WP,0.00177_WP] ! Front
          this%poly%vert(:, 9)=[-0.00122_WP,0.00279_WP]
          this%poly%vert(:,10)=[-0.01000_WP,0.00279_WP]
          ! Initialize IB distance field

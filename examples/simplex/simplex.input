@@ -7,13 +7,13 @@ X shift : 0.005
 Lx :  0.01
 Ly :  0.01
 Lz :  0.01
-nx :  88
-ny :  88
-nz :  88
-Stretched cells in x :  32
-Stretched cells in yz : 32
-Stretch ratio in x :    1.07
-Stretch ratio in yz :   1.07
+nx :  128
+ny :  128
+nz :  128
+Stretched cells in x :  0
+Stretched cells in yz : 0
+Stretch ratio in x :    0
+Stretch ratio in yz :   0
 
 # Methods
 # r2p = 5
