@@ -81,7 +81,7 @@ module simplex_class
    real(WP) :: Ucoflow,mfr,Apipe
    
    !> Hardcode size of buffer layer for VOF removal
-   integer, parameter :: nlayer=4
+   integer, parameter :: nlayer=32
    
 
 contains

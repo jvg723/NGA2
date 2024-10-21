@@ -10,17 +10,18 @@ Lz :  0.01
 nx :  128
 ny :  128
 nz :  128
-Stretched cells in x :  0
-Stretched cells in yz : 0
-Stretch ratio in x :    0
-Stretch ratio in yz :   0
+Stretched cells in x :  32
+Stretched cells in yz : 32
+Stretch ratio in x :    1.04
+Stretch ratio in yz :   1.04
 
 # Methods
+# lvira = 1
 # r2p = 5
 # plicnet = 9
 # r2pnet = 10
-Reconstruction method : 10
-Puncture thickness : 1.0e-3
+Reconstruction method : 9
+Puncture thickness : ! 41.0e-3
 
 # Flow conditions
 Mass flow rate : 2.95e-3
@@ -41,7 +42,7 @@ Max time :          0.2
 
 # Pressure solver
 Pressure tolerance : 1e-5
-Pressure iteration : 30
+Pressure iteration : 100
 
 # Data output
 Ensight output period : 1e-4
