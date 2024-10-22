@@ -229,7 +229,7 @@ contains
          integer, parameter :: amr_ref_lvl=4
          character(len=str_long) :: message
          ! Create a VOF solver
-         vf=vfs(cfg=cfg,reconstruction_method=lvira,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=lvira,name='VOF')
          ! Prepare the analytical calculation of a sphere on a wall
          call param_read('Droplet radius',Rdrop)
          call param_read('Initial contact angle',contact); contact=contact*Pi/180.0_WP
