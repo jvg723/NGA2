@@ -15,6 +15,7 @@ Droplet radius :        6e-3
 Initial contact angle : 180
 
 # Pipette information
+Include pipette :           .true.  #<<< Provided in the command line
 Pipette height :            0.012
 Pipette inner radius :      0.70e-3
 Pipette outer radius :      1.46e-3

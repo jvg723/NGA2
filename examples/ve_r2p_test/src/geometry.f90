@@ -73,10 +73,6 @@ contains
          logical :: include_holes
          real(WP) :: hole_size,hole_dist,hole_depth
          integer  :: i,j,k
-         ! Read in wall definitions
-         call param_read('Hole size',hole_size)
-         call param_read('Hole dist',hole_dist)
-         call param_read('Hole depth',hole_depth)
          ! Start from open box
          cfg%VF=1.0_WP
          ! Add plate below y=0
