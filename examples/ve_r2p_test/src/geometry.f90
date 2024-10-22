@@ -42,7 +42,7 @@ contains
             x(i)=real(i-1,WP)/real(nx,WP)*Lx-0.5_WP*Lx
          end do
          do j=1,ny+1
-            y(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly-0.01_WP
+            y(j)=real(j-1,WP)/real(ny,WP)*Ly
          end do
          do k=1,nz+1
             z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
@@ -87,30 +87,6 @@ contains
                end do
             end do
          end do
-         ! Add the perforations if needed
-         call param_read('Include holes',include_holes)
-         if (include_holes) then
-            ! Finite plate thickness
-            do k=cfg%kmino_,cfg%kmaxo_
-               do j=cfg%jmino_,cfg%jmaxo_
-                  do i=cfg%imino_,cfg%imaxo_
-                     if (cfg%ym(j).lt.-hole_depth) cfg%VF(i,j,k)=1.0_WP
-                  end do
-               end do
-            end do
-            ! Open up holes in the plate
-            do k=cfg%kmin_,cfg%kmax_
-               do j=cfg%jmin_,cfg%jmax_
-                  do i=cfg%imin_,cfg%imax_
-                     if (cfg%ym(j).lt.0.0_WP.and.cfg%ym(j).ge.-hole_depth) then
-                        if ((0.5_WP*hole_dist-abs(modulo(cfg%xm(i),hole_dist)-0.5_WP*hole_dist)).lt.0.5_WP*hole_size.and.&
-                        &   (0.5_WP*hole_dist-abs(modulo(cfg%zm(k),hole_dist)-0.5_WP*hole_dist)).lt.0.5_WP*hole_size) cfg%VF(i,j,k)=1.0_WP
-                     end if
-                  end do
-               end do
-            end do
-            call cfg%sync(cfg%VF)
-         end if
          ! Create pipette
          call param_read('Include pipette',include_pipette)
          if (include_pipette) then

@@ -1,26 +1,20 @@
 # Parallelization
-Partition : 1 1 8
+Partition : 8 1 1
 
 # Mesh definition
 Lx : 25e-3
-Ly : 50e-3
+Ly : 25e-3
 Lz : 25e-3
 nx : 100
-ny : 200
+ny : 100
 nz : 100
 
-# Wall geometry
-Include holes : .true.              #<<< Provided in the command line
-Hole size  :    0.001
-Hole dist  :    0.002
-Hole depth :    0.02
 
 # Droplet properties
 Droplet radius :        6e-3
 Initial contact angle : 180
 
 # Pipette information
-Include pipette :           .true.  #<<< Provided in the command line
 Pipette height :            0.012
 Pipette inner radius :      0.70e-3
 Pipette outer radius :      1.46e-3

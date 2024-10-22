@@ -3,6 +3,7 @@ module simulation
    use precision,         only: WP
    use geometry,          only: cfg,include_pipette,ypip,ripip
    use hypre_uns_class,   only: hypre_uns
+   use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
@@ -14,7 +15,8 @@ module simulation
    private
    
    !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
-   type(hypre_uns),   public :: ps
+   type(hypre_str),   public :: ps
+   ! type(hypre_uns),   public :: ps
    type(ddadi),       public :: vs
    type(tpns),        public :: fs
    type(vfs),         public :: vf
@@ -307,6 +309,7 @@ contains
       create_and_initialize_flow_solver: block
          use tpns_class, only: clipped_neumann,dirichlet,bcond
          use hypre_uns_class, only: pcg_amg
+         use hypre_str_class, only: pcg_pfmg2
          use mathtools,  only: Pi
          type(bcond), pointer :: mybc
          real(WP) :: Vpipette
@@ -337,9 +340,14 @@ contains
          call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          if (include_pipette) call fs%add_bcond(name='pipette',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=pipette)
          ! Configure pressure solver
-         ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
+         ! ! Configure pressure solver
+         ! ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+         ! call param_read('Pressure iteration',ps%maxit)
+         ! call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
          vs=ddadi(cfg=cfg,name='Velocity',nst=7)
          ! Setup the solver
