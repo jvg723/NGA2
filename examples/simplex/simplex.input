@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 1 8
+Partition :	1 2 4
 I/O partition : 1 1 1
 
 # Mesh definition
@@ -24,7 +24,7 @@ Reconstruction method : 9
 Puncture thickness : ! 41.0e-3
 
 # Flow conditions
-Mass flow rate : 2.95e-3
+Mass flow rate : 1.79e-3   # nominal flow rate in kg/s at 50 psig
 Coflow velocity : 0
 
 # Fluid properties
@@ -42,11 +42,11 @@ Max time :          0.2
 
 # Pressure solver
 Pressure tolerance : 1e-5
-Pressure iteration : 100
+Pressure iteration : 50
 
 # Data output
 Ensight output period : 1e-4
 Restart output period : 1e-3
 
 # Data restart
-Restart from : !data_6.00018E-03
+Restart from : !data_5.00000E-03
