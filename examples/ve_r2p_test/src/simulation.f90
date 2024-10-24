@@ -326,11 +326,6 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          call param_read('Static contact angle',fs%contact_angle)
          fs%contact_angle=fs%contact_angle*Pi/180.0_WP
-         ! Read in pipette contact angle
-         if (include_pipette) then
-            call param_read('Pipette contact angle',fs%pipette_ca)
-            fs%pipette_ca=fs%pipette_ca*Pi/180.0_WP
-         end if
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
          ! Setup boundary conditions

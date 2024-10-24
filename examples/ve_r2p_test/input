@@ -20,7 +20,6 @@ Pipette height :            0.012
 Pipette inner radius :      0.70e-3
 Pipette outer radius :      1.46e-3
 Liquid injection velocity : 0.02
-Pipette contact angle :     150
 
 # Source
 Gravity : 0 0 0
