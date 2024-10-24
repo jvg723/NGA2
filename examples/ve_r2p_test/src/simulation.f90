@@ -15,8 +15,8 @@ module simulation
    private
    
    !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
-   ! type(hypre_str),   public :: ps
-   type(hypre_uns),   public :: ps
+   type(hypre_str),   public :: ps
+   ! type(hypre_uns),   public :: ps
    type(ddadi),       public :: vs
    type(tpns),        public :: fs
    type(vfs),         public :: vf
@@ -329,35 +329,25 @@ contains
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
          ! Setup boundary conditions
-         call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
-         call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
-         call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
-         call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
-         ! if (include_pipette) call fs%add_bcond(name='pipette',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=pipette)
-         ! ! Configure pressure solver
-         ! ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
-         ! ps%maxlevel=12
-         ! call param_read('Pressure iteration',ps%maxit)
-         ! call param_read('Pressure tolerance',ps%rcvg)
+         ! call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
+         ! call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
+         ! call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
+         ! call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
-         ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+         ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         ps%maxlevel=12
          call param_read('Pressure iteration',ps%maxit)
          call param_read('Pressure tolerance',ps%rcvg)
+         ! ! Configure pressure solver
+         ! ps=hypre_uns(cfg=cfg,name='Pressure',method=pcg_amg,nst=7)
+         ! call param_read('Pressure iteration',ps%maxit)
+         ! call param_read('Pressure tolerance',ps%rcvg)
          ! Configure implicit velocity solver
          vs=ddadi(cfg=cfg,name='Velocity',nst=7)
          ! Setup the solver
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-         ! ! Apply Dirichlet at liquid pipette
-         ! if (include_pipette) then
-         !    call param_read('Liquid injection velocity',Vpipette)
-         !    call fs%get_bcond('pipette',mybc)
-         !    do n=1,mybc%itr%no_
-         !       i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-         !       fs%V(i,j,k)=-Vpipette
-         !    end do
-         ! end if
          ! Calculate cell-centered velocities and divergence
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
