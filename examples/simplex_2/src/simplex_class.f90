@@ -7,7 +7,6 @@ module simplex_class
    use surfmesh_class,    only: surfmesh
    use ensight_class,     only: ensight
    use hypre_str_class,   only: hypre_str
-   !use hypre_uns_class,   only: hypre_uns
    use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
@@ -18,6 +17,7 @@ module simplex_class
    use event_class,       only: event
    use pardata_class,     only: pardata
    use monitor_class,     only: monitor
+   use timer_class,       only: timer
    implicit none
    private
    
@@ -42,7 +42,6 @@ module simplex_class
       type(vfs)         :: vf    !< Volume fraction solver
       type(tpns)        :: fs    !< Two-phase flow solver
       type(hypre_str)   :: ps    !< HYPRE linear solver for pressure
-      !type(hypre_uns)   :: ps    !< HYPRE linear solver for pressure
       type(ddadi)       :: vs    !< DDADI linear solver for velocity
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
@@ -66,6 +65,14 @@ module simplex_class
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
       real(WP) :: vof_removed              !< Integral of VOF removed
+
+      !> Timing info
+      type(monitor) :: timefile !< Timing monitoring
+      type(timer)   :: tstep    !< Timer for step
+      type(timer)   :: tsgs     !< Timer for SGS
+      type(timer)   :: tvel     !< Timer for velocity
+      type(timer)   :: tpres    !< Timer for pressure
+      type(timer)   :: tvof     !< Timer for VOF
       
    contains
       procedure :: init                            !< Initialize simplex simulation
@@ -478,7 +485,6 @@ contains
       create_flow_solver: block
          use tpns_class,      only: clipped_neumann,dirichlet,slip
          use hypre_str_class, only: pcg_pfmg2
-         !use hypre_uns_class, only: pcg_amg
          ! Create flow solver
          this%fs=tpns(cfg=this%cfg,name='Two-Phase NS')
          ! Set the flow properties
@@ -502,7 +508,6 @@ contains
          ! Configure pressure solver
          this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          this%ps%maxlevel=16
-         !this%ps=hypre_uns(cfg=this%cfg,name='Pressure',method=pcg_amg,nst=7)
          call this%input%read('Pressure iteration',this%ps%maxit)
          call this%input%read('Pressure tolerance',this%ps%rcvg)
          ! Configure velocity solver
@@ -588,6 +593,8 @@ contains
          ! Add variables to output
          call this%ens_out%add_vector('velocity',this%Ui,this%Vi,this%Wi)
          call this%ens_out%add_scalar('VOF',this%vf%VF)
+         call this%ens_out%add_scalar('pressure',this%fs%P)
+         call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
@@ -631,6 +638,24 @@ contains
          call this%cflfile%write()
       end block create_monitor
       
+      ! Create a timing monitor
+      create_timing: block
+         ! Create timers
+         this%tstep=timer(comm=this%cfg%comm,name='Timestep')
+         this%tvof =timer(comm=this%cfg%comm,name='VOFsolve')
+         this%tvel =timer(comm=this%cfg%comm,name='Velocity')
+         this%tpres=timer(comm=this%cfg%comm,name='Pressure')
+         this%tsgs =timer(comm=this%cfg%comm,name='SGSmodel')
+         ! Create corresponding monitor file
+         this%timefile=monitor(this%fs%cfg%amRoot,'timing')
+         call this%timefile%add_column(this%time%n,'Timestep number')
+         call this%timefile%add_column(this%time%t,'Time')
+         call this%timefile%add_column(this%tstep%time,trim(this%tstep%name))
+         call this%timefile%add_column(this%tvof%time ,trim(this%tvof%name))
+         call this%timefile%add_column(this%tvel%time ,trim(this%tvel%name))
+         call this%timefile%add_column(this%tpres%time,trim(this%tpres%name))
+         call this%timefile%add_column(this%tsgs%time ,trim(this%tsgs%name))
+      end block create_timing
    contains
       
       !> Function that identifies cells that need a label
@@ -660,6 +685,14 @@ contains
       implicit none
       class(simplex), intent(inout) :: this
       
+      ! Reset all timers and start timestep timer
+      call this%tstep%reset()
+      call this%tvof%reset()
+      call this%tsgs%reset()
+      call this%tvel%reset()
+      call this%tpres%reset()
+      call this%tstep%start()
+      
       ! Increment time
       call this%fs%get_cfl(this%time%dt,this%time%cfl)
       call this%time%adjust_dt()
@@ -677,12 +710,15 @@ contains
       call this%fs%get_olddensity(vf=this%vf)
       
       ! VOF solver step
+      call this%tvof%start() !< Start VOF timer
       call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      call this%tvof%stop() !< Stop VOF timer
       
       ! Prepare new staggered viscosity (at n+1)
       call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
       
       ! Turbulence modeling
+      call this%tsgs%start() !< Start SGS timer
       sgs_modeling: block
          use sgsmodel_class, only: vreman,dynamic_smag
          integer :: i,j,k
@@ -698,9 +734,13 @@ contains
             this%fs%visc_zx(i,j,k)=this%fs%visc_zx(i,j,k)+sum(this%fs%itp_xz(:,:,i,j,k)*this%sgs%visc(i-1:i,j,k-1:k))
          end do; end do; end do
       end block sgs_modeling
+      call this%tsgs%stop() !< Stop SGS timer
       
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
+
+         !> Start velocity timer
+         call this%tvel%start()
          
          ! Build mid-time velocity
          this%fs%U=0.5_WP*(this%fs%U+this%fs%Uold)
@@ -749,6 +789,10 @@ contains
          ! Apply other boundary conditions on the resulting fields
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          
+         !> Stop velocity timer and start pressure timer
+         call this%tvel%stop()
+         call this%tpres%start()
+
          ! Solve Poisson equation
          call this%fs%update_laplacian()
          call this%fs%correct_mfr()
@@ -767,6 +811,9 @@ contains
          this%fs%U=this%fs%U-this%time%dt*this%resU/this%fs%rho_U
          this%fs%V=this%fs%V-this%time%dt*this%resV/this%fs%rho_V
          this%fs%W=this%fs%W-this%time%dt*this%resW/this%fs%rho_W
+
+         !> Stop pressure timer
+         call this%tpres%stop()
          
          ! Increment sub-iteration counter
          this%time%it=this%time%it+1
@@ -788,7 +835,7 @@ contains
             i=this%vof_removal_layer%map(1,n)
             j=this%vof_removal_layer%map(2,n)
             k=this%vof_removal_layer%map(3,n)
-            this%vof_removed=this%vof_removed+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            if (n.le.this%vof_removal_layer%n_) this%vof_removed=this%vof_removed+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
             this%vf%VF(i,j,k)=0.0_WP
          end do
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_removed,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
@@ -833,11 +880,15 @@ contains
          call this%ens_out%write_data(this%time%t)
       end if
       
+      !> Stop timestep timer
+      call this%tstep%stop()
+
       ! Perform and output monitoring
       call this%fs%get_max()
       call this%vf%get_max()
       call this%mfile%write()
       call this%cflfile%write()
+      call this%timefile%write()
       
       ! Finally, see if it's time to save restart files
       if (this%save_evt%occurs()) then
