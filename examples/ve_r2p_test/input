@@ -19,10 +19,10 @@ Include pipette :           .true.  #<<< Provided in the command line
 Pipette height :            0.012
 Pipette inner radius :      0.70e-3
 Pipette outer radius :      1.46e-3
-Liquid injection velocity : 0.02
+
 
 # Source
-Gravity : 0 0 0
+Gravity : 0 -9.81 0
 
 # Fluid properties
 Liquid dynamic viscosity : 9.0e-4
