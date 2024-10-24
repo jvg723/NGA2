@@ -1,5 +1,5 @@
 # Parallelization
-Partition : 1 8 1
+Partition : 1 24 1
 
 # Are we using a moving domain?
 Moving domain : .true.
@@ -11,9 +11,9 @@ Stabilization : .true.
 Lx :	0.04088
 Ly :	0.04088
 Lz :	0.04088
-ny :	64
-nx :	64
-nz :	64
+ny :	128
+nx :	128
+nz :	128
 
 # Fluid properties
 Gravity :                     0 -9.81 0
