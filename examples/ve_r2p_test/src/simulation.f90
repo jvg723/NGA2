@@ -326,19 +326,13 @@ contains
          call param_read('Surface tension coefficient',fs%sigma)
          call param_read('Static contact angle',fs%contact_angle)
          fs%contact_angle=fs%contact_angle*Pi/180.0_WP
-         ! Read in pipette contact angle
-         if (include_pipette) then
-            call param_read('Pipette contact angle',fs%pipette_ca)
-            fs%pipette_ca=fs%pipette_ca*Pi/180.0_WP
-         end if
          ! Assign acceleration of gravity
          call param_read('Gravity',fs%gravity)
          ! Setup boundary conditions
-         call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
-         call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
-         call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
-         call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
-         if (include_pipette) call fs%add_bcond(name='pipette',type=dirichlet,face='y',dir=+1,canCorrect=.false.,locator=pipette)
+         ! call fs%add_bcond(name='bc_xp',type=clipped_neumann,face='x',dir=+1,canCorrect=.true.,locator=xp_locator)
+         ! call fs%add_bcond(name='bc_xm',type=clipped_neumann,face='x',dir=-1,canCorrect=.true.,locator=xm_locator)
+         ! call fs%add_bcond(name='bc_zp',type=clipped_neumann,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
+         ! call fs%add_bcond(name='bc_zm',type=clipped_neumann,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
          ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          ps%maxlevel=12
@@ -354,15 +348,6 @@ contains
          call fs%setup(pressure_solver=ps,implicit_solver=vs)
          ! Zero initial field
          fs%U=0.0_WP; fs%V=0.0_WP; fs%W=0.0_WP
-         ! Apply Dirichlet at liquid pipette
-         if (include_pipette) then
-            call param_read('Liquid injection velocity',Vpipette)
-            call fs%get_bcond('pipette',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               fs%V(i,j,k)=-Vpipette
-            end do
-         end if
          ! Calculate cell-centered velocities and divergence
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()

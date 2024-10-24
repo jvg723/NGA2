@@ -4,10 +4,10 @@ Partition : 8 1 1
 # Mesh definition
 Lx : 25e-3
 Ly : 25e-3
-Lz : 25e-3
+Lz : 25e-5
 nx : 100
 ny : 100
-nz : 100
+nz : 1
 
 
 # Droplet properties
@@ -19,11 +19,10 @@ Include pipette :           .true.  #<<< Provided in the command line
 Pipette height :            0.012
 Pipette inner radius :      0.70e-3
 Pipette outer radius :      1.46e-3
-Liquid injection velocity : 0.02
-Pipette contact angle :     150
+
 
 # Source
-Gravity : 0 0 0
+Gravity : 0 -9.81 0
 
 # Fluid properties
 Liquid dynamic viscosity : 9.0e-4
