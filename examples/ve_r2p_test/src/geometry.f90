@@ -42,7 +42,7 @@ contains
             x(i)=real(i-1,WP)/real(nx,WP)*Lx-0.5_WP*Lx
          end do
          do j=1,ny+1
-            y(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
+            y(j)=real(j-1,WP)/real(ny,WP)*Ly
          end do
          do k=1,nz+1
             z(k)=real(k-1,WP)/real(nz,WP)*Lz-0.5_WP*Lz
@@ -75,14 +75,14 @@ contains
          integer  :: i,j,k
          ! Start from open box
          cfg%VF=1.0_WP
-         ! ! Add plate below y=0
-         ! do k=cfg%kmino_,cfg%kmaxo_
-         !    do j=cfg%jmino_,cfg%jmaxo_
-         !       do i=cfg%imino_,cfg%imaxo_
-         !          if (cfg%ym(j).lt.0.0_WP) cfg%VF(i,j,k)=0.0_WP
-         !       end do
-         !    end do
-         ! end do
+         ! Add plate below y=0
+         do k=cfg%kmino_,cfg%kmaxo_
+            do j=cfg%jmino_,cfg%jmaxo_
+               do i=cfg%imino_,cfg%imaxo_
+                  if (cfg%ym(j).lt.0.0_WP) cfg%VF(i,j,k)=0.0_WP
+               end do
+            end do
+         end do
          ! ! Create pipette
          ! call param_read('Include pipette',include_pipette)
          ! if (include_pipette) then

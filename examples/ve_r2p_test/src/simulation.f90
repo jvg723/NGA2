@@ -36,7 +36,8 @@ module simulation
    real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
    
    !> Problem definition and post-processing
-   real(WP), dimension(3) :: Cdrop
+   ! real(WP), dimension(3) :: Cdrop
+   real(WP), dimension(3) :: Cellipse
    real(WP) :: Rdrop,Vimb
    type(monitor) :: ppfile
    type(event) :: ppevt
@@ -44,15 +45,15 @@ module simulation
 contains
    
    
-   !> Function that defines a level set function for a contacting drop problem
-   function levelset_contact_drop(xyz,t) result(G)
-      implicit none
-      real(WP), dimension(3),intent(in) :: xyz
-      real(WP), intent(in) :: t
-      real(WP) :: G
-      ! Create the droplet
-      G=Rdrop-sqrt(sum((xyz-Cdrop)**2))
-   end function levelset_contact_drop
+   ! !> Function that defines a level set function for a contacting drop problem
+   ! function levelset_contact_drop(xyz,t) result(G)
+   !    implicit none
+   !    real(WP), dimension(3),intent(in) :: xyz
+   !    real(WP), intent(in) :: t
+   !    real(WP) :: G
+   !    ! Create the droplet
+   !    G=Rdrop-sqrt(sum((xyz-Cdrop)**2))
+   ! end function levelset_contact_drop
 
    !> Function that defines a level set function for a contacting elliptical drop problem
    function levelset_contact_ellipse(xyz, t) result(G)
@@ -61,7 +62,7 @@ contains
       real(WP), intent(in) :: t
       real(WP) :: G
       real(WP) :: a, b, c   ! Semi-axis lengths of the ellipse
-      real(WP), dimension(3) :: Cellipse  ! Center of the ellipse
+      ! real(WP), dimension(3) :: Cellipse  ! Center of the ellipse
       ! real(WP), dimension(2) :: Cellipse  ! Center of the ellipse
 
       ! Define the semi-axis lengths
@@ -70,7 +71,7 @@ contains
       c = 0.002_WP  ! Semi-axis along z-axis
 
       ! Define the center of the ellipse
-      Cellipse = [0.0_WP, 0.0_WP, 0.0_WP]  ! Center at origin 
+      ! Cellipse = [0.0_WP, 0.002_WP, 0.0_WP]  ! Center at origin 
 
       ! ! Create the elliptical drop level set function
       ! G = 0.001_WP - ((xyz(1) - Cellipse(1))**2/a**2 ) + &
@@ -272,7 +273,8 @@ contains
          else ! 3D analytical drop shape
             Rdrop=Rdrop*(4.0_WP/(2.0_WP-3.0_WP*cos(contact)+(cos(contact))**3))**(1.0_WP/3.0_WP)
          end if
-         Cdrop=[0.0_WP,-Rdrop*cos(contact),0.0_WP]
+         ! Cdrop=[0.0_WP,-Rdrop*cos(contact),0.0_WP]
+         Cellipse = [0.0_WP, 0.001_WP, 0.0_WP]  ! Center at origin 
          if (vf%cfg%amRoot) then
             write(output_unit,'("Droplet initial radius is ",es12.5)') Rdrop
             write(message    ,'("Droplet initial radius is ",es12.5)') Rdrop; call log(message)
@@ -282,7 +284,7 @@ contains
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
                   ! Handle wall cells or cells below the plate surface
-                  if (vf%mask(i,j,k).eq.1) then
+                  if (vf%mask(i,j,k).eq.1.or.vf%cfg%ym(j).lt.0.0_WP) then ! FIX THIS 
                      vf%VF(i,j,k)=0.0_WP
                      vf%Lbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
                      vf%Gbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
