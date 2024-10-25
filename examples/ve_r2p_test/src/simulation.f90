@@ -82,10 +82,7 @@ contains
                    ((xyz(3) - Cellipse(3))**2/c**2 ) 
 
 
-      ! ! Create the elliptical drop level set function
-      ! G = ((xyz(1) - Cellipse(1))**2/a**2 ) + &
-      ! ((xyz(2) - Cellipse(2))**2/b**2 ) + &
-      ! ((xyz(3) - Cellipse(3))**2/c**2 ) - 0.1_WP
+
    end function levelset_contact_ellipse
 
    
@@ -285,7 +282,7 @@ contains
             do j=vf%cfg%jmino_,vf%cfg%jmaxo_
                do i=vf%cfg%imino_,vf%cfg%imaxo_
                   ! Handle wall cells or cells below the plate surface
-                  if (vf%mask(i,j,k).eq.1.or.vf%cfg%ym(j).lt.0.0_WP) then
+                  if (vf%mask(i,j,k).eq.1) then
                      vf%VF(i,j,k)=0.0_WP
                      vf%Lbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
                      vf%Gbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
