@@ -53,6 +53,41 @@ contains
       ! Create the droplet
       G=Rdrop-sqrt(sum((xyz-Cdrop)**2))
    end function levelset_contact_drop
+
+   !> Function that defines a level set function for a contacting elliptical drop problem
+   function levelset_contact_ellipse(xyz, t) result(G)
+      implicit none
+      real(WP), dimension(3), intent(in) :: xyz
+      real(WP), intent(in) :: t
+      real(WP) :: G
+      real(WP) :: a, b, c   ! Semi-axis lengths of the ellipse
+      real(WP), dimension(3) :: Cellipse  ! Center of the ellipse
+      ! real(WP), dimension(2) :: Cellipse  ! Center of the ellipse
+
+      ! Define the semi-axis lengths
+      a = 0.002_WP  ! Semi-axis along x-axis for radius
+      b = 0.005_WP  ! Semi-axis along y-axis
+      c = 0.002_WP  ! Semi-axis along z-axis
+
+      ! Define the center of the ellipse
+      Cellipse = [0.0_WP, 0.0_WP, 0.0_WP]  ! Center at origin 
+
+      ! ! Create the elliptical drop level set function
+      ! G = 0.001_WP - ((xyz(1) - Cellipse(1))**2/a**2 ) + &
+      !                ((xyz(2) - Cellipse(2))**2/b**2 )
+
+      ! Create the elliptical drop level set function
+      G = 0.1_WP - ((xyz(1) - Cellipse(1))**2/a**2 ) - &
+                   ((xyz(2) - Cellipse(2))**2/b**2 ) - &
+                   ((xyz(3) - Cellipse(3))**2/c**2 ) 
+
+
+      ! ! Create the elliptical drop level set function
+      ! G = ((xyz(1) - Cellipse(1))**2/a**2 ) + &
+      ! ((xyz(2) - Cellipse(2))**2/b**2 ) + &
+      ! ((xyz(3) - Cellipse(3))**2/c**2 ) - 0.1_WP
+   end function levelset_contact_ellipse
+
    
    
    !> Specialized subroutine that computes the imbibed liquid volume
@@ -274,7 +309,7 @@ contains
                   end do
                   ! Call adaptive refinement code to get volume and barycenters recursively
                   vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_contact_drop,0.0_WP,amr_ref_lvl)
+                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_contact_ellipse,0.0_WP,amr_ref_lvl)
                   vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
                   if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
                      vf%Lbary(:,i,j,k)=v_cent
