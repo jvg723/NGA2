@@ -83,24 +83,24 @@ contains
                end do
             end do
          end do
-         ! ! Create pipette
-         ! call param_read('Include pipette',include_pipette)
-         ! if (include_pipette) then
-         !    ! Read in pipette geometry
-         !    call param_read('Pipette height',ypip)
-         !    call param_read('Pipette inner radius',ripip)
-         !    call param_read('Pipette outer radius',ropip)
-         !    ! Adjust walls
-         !    do k=cfg%kmino_,cfg%kmaxo_
-         !       do j=cfg%jmino_,cfg%jmaxo_
-         !          do i=cfg%imino_,cfg%imaxo_
-         !             if (sqrt(cfg%xm(i)**2+cfg%zm(k)**2).gt.ripip.and.&
-         !             &   sqrt(cfg%xm(i)**2+cfg%zm(k)**2).lt.ropip.and.cfg%ym(j).gt.ypip) cfg%VF(i,j,k)=0.0_WP
-         !          end do
-         !       end do
-         !    end do
-         !    call cfg%sync(cfg%VF)
-         ! end if
+         ! Create pipette
+         call param_read('Include pipette',include_pipette)
+         if (include_pipette) then
+            ! Read in pipette geometry
+            call param_read('Pipette height',ypip)
+            call param_read('Pipette inner radius',ripip)
+            call param_read('Pipette outer radius',ropip)
+            ! Adjust walls
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (sqrt(cfg%xm(i)**2+cfg%zm(k)**2).gt.ripip.and.&
+                     &   sqrt(cfg%xm(i)**2+cfg%zm(k)**2).lt.ropip.and.cfg%ym(j).gt.ypip) cfg%VF(i,j,k)=0.0_WP
+                  end do
+               end do
+            end do
+            call cfg%sync(cfg%VF)
+         end if
       end block create_walls
       
       
