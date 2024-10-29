@@ -66,9 +66,9 @@ contains
       ! real(WP), dimension(2) :: Cellipse  ! Center of the ellipse
 
       ! Define the semi-axis lengths
-      a = 0.0009_WP  ! Semi-axis along x-axis for radius
-      b = 0.0018_WP  ! Semi-axis along y-axis
-      c = 0.0009_WP  ! Semi-axis along z-axis
+      a = 0.0011_WP  ! Semi-axis along x-axis for radius
+      b = 0.0020_WP  ! Semi-axis along y-axis
+      c = 0.0011_WP  ! Semi-axis along z-axis
 
       ! Define the center of the ellipse
       ! Cellipse = [0.0_WP, 0.002_WP, 0.0_WP]  ! Center at origin 
@@ -274,7 +274,7 @@ contains
             Rdrop=Rdrop*(4.0_WP/(2.0_WP-3.0_WP*cos(contact)+(cos(contact))**3))**(1.0_WP/3.0_WP)
          end if
          ! Cdrop=[0.0_WP,-Rdrop*cos(contact),0.0_WP]
-         Cellipse = [0.0_WP, 0.0015_WP, 0.0_WP]  ! Center at origin 
+         Cellipse = [0.0_WP, 0.002_WP, 0.0_WP]  ! Center at origin 
          ! Cellipse = [0.0_WP, -Rdrop*cos(contact), 0.0_WP]  ! Center at origin 
          if (vf%cfg%amRoot) then
             write(output_unit,'("Droplet initial radius is ",es12.5)') Rdrop
