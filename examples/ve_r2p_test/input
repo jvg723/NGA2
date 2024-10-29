@@ -25,17 +25,17 @@ Pipette outer radius :      1.5e-3
 Gravity : 0 -9.81 0
 
 # Fluid properties
-Liquid dynamic viscosity : 9.0e-4
-Gas dynamic viscosity :    1.8e-5
+Liquid dynamic viscosity : 1.0e-2
+Gas dynamic viscosity :    1.0e-4
 
-Liquid density : 997
-Gas density :    1.15
+Liquid density : 100
+Gas density :    1
 
 Surface tension coefficient : 0.072
 Static contact angle : 30.0   
 
 # Time integration
-Max timestep size : 1e-4
+Max timestep size : 1e-5
 Max cfl number :    0.9
 Max time :          0.2
 
