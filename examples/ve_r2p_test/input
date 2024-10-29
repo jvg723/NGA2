@@ -2,11 +2,11 @@
 Partition : 8 1 1
 
 # Mesh definition
-Lx : 5.25e-3
-Ly : 5.25e-3
-Lz : 5.25e-6
-nx : 150
-ny : 150
+Lx : 8e-3
+Ly : 8e-3
+Lz : 8e-6
+nx : 200
+ny : 200
 nz : 1
 
 
@@ -15,8 +15,8 @@ Droplet radius :        2e-3
 Initial contact angle : 180
 
 # Pipette information
-Include pipette :           .false.  #<<< Provided in the command line
-Pipette height :            3.0e-3
+Include pipette :           .true.  #<<< Provided in the command line
+Pipette height :            4.93e-3
 Pipette inner radius :      1.0-3
 Pipette outer radius :      1.5e-3
 
