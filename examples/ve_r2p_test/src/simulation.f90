@@ -66,9 +66,9 @@ contains
       ! real(WP), dimension(2) :: Cellipse  ! Center of the ellipse
 
       ! Define the semi-axis lengths
-      a = 0.003_WP  ! Semi-axis along x-axis for radius
-      b = 0.005_WP  ! Semi-axis along y-axis
-      c = 0.003_WP  ! Semi-axis along z-axis
+      a = 0.002_WP  ! Semi-axis along x-axis for radius
+      b = 0.00283_WP  ! Semi-axis along y-axis
+      c = 0.0002_WP  ! Semi-axis along z-axis
 
       ! Define the center of the ellipse
       ! Cellipse = [0.0_WP, 0.002_WP, 0.0_WP]  ! Center at origin 
@@ -78,7 +78,7 @@ contains
       !                ((xyz(2) - Cellipse(2))**2/b**2 )
 
       ! Create the elliptical drop level set function
-      G = 0.1_WP - ((xyz(1) - Cellipse(1))**2/a**2 ) - &
+      G = 1.0_WP - ((xyz(1) - Cellipse(1))**2/a**2 ) - &
                    ((xyz(2) - Cellipse(2))**2/b**2 ) - &
                    ((xyz(3) - Cellipse(3))**2/c**2 ) 
 
@@ -274,7 +274,8 @@ contains
             Rdrop=Rdrop*(4.0_WP/(2.0_WP-3.0_WP*cos(contact)+(cos(contact))**3))**(1.0_WP/3.0_WP)
          end if
          ! Cdrop=[0.0_WP,-Rdrop*cos(contact),0.0_WP]
-         Cellipse = [0.0_WP, -Rdrop*cos(contact), 0.0_WP]  ! Center at origin 
+         Cellipse = [0.0_WP, 0.00245_WP, 0.0_WP]  ! Center at origin 
+         ! Cellipse = [0.0_WP, -Rdrop*cos(contact), 0.0_WP]  ! Center at origin 
          if (vf%cfg%amRoot) then
             write(output_unit,'("Droplet initial radius is ",es12.5)') Rdrop
             write(message    ,'("Droplet initial radius is ",es12.5)') Rdrop; call log(message)
