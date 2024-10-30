@@ -7,7 +7,7 @@ module simplex_class
    use surfmesh_class,    only: surfmesh
    use ensight_class,     only: ensight
    use hypre_str_class,   only: hypre_str
-   use ddadi_class,       only: ddadi
+   !use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use cclabel_class,     only: cclabel
@@ -42,7 +42,7 @@ module simplex_class
       type(vfs)         :: vf    !< Volume fraction solver
       type(tpns)        :: fs    !< Two-phase flow solver
       type(hypre_str)   :: ps    !< HYPRE linear solver for pressure
-      type(ddadi)       :: vs    !< DDADI linear solver for velocity
+      !type(ddadi)       :: vs    !< DDADI linear solver for velocity
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
       type(cclabel)     :: ccl   !< CCLabel to transfer droplets
@@ -635,9 +635,9 @@ contains
          call this%input%read('Pressure iteration',this%ps%maxit)
          call this%input%read('Pressure tolerance',this%ps%rcvg)
          ! Configure velocity solver
-         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         !this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
+         call this%fs%setup(pressure_solver=this%ps)!,implicit_solver=this%vs)
       end block create_flow_solver
 
       
@@ -991,15 +991,15 @@ contains
       call this%fs%get_olddensity(vf=this%vf)
       
       ! VOF solver step
-      call this%tvof%start() !< Start VOF timer
+      call this%tvof%start() ! Start VOF timer
       call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-      call this%tvof%stop() !< Stop VOF timer
+      call this%tvof%stop() ! Stop VOF timer
       
       ! Prepare new staggered viscosity (at n+1)
       call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
       
       ! Turbulence modeling
-      call this%tsgs%start() !< Start SGS timer
+      call this%tsgs%start() ! Start SGS timer
       sgs_modeling: block
          use sgsmodel_class, only: vreman,dynamic_smag
          integer :: i,j,k
@@ -1015,12 +1015,12 @@ contains
             this%fs%visc_zx(i,j,k)=this%fs%visc_zx(i,j,k)+sum(this%fs%itp_xz(:,:,i,j,k)*this%sgs%visc(i-1:i,j,k-1:k))
          end do; end do; end do
       end block sgs_modeling
-      call this%tsgs%stop() !< Stop SGS timer
+      call this%tsgs%stop() ! Stop SGS timer
       
       ! Perform sub-iterations
       do while (this%time%it.le.this%time%itmax)
          
-         !> Start velocity timer
+         ! Start velocity timer
          call this%tvel%start()
          
          ! Build mid-time velocity
@@ -1071,11 +1071,11 @@ contains
             call this%fs%cfg%sync(this%fs%V)
             call this%fs%cfg%sync(this%fs%W)
          end block ibforcing
-        
+         
          ! Apply other boundary conditions on the resulting fields
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          
-         !> Stop velocity timer and start pressure timer
+         ! Stop velocity timer and start pressure timer
          call this%tvel%stop()
          call this%tpres%start()
          
@@ -1105,7 +1105,7 @@ contains
          this%fs%V=this%fs%V-this%time%dt*this%resV/this%fs%rho_V
          this%fs%W=this%fs%W-this%time%dt*this%resW/this%fs%rho_W
          
-         !> Stop pressure timer
+         ! Stop pressure timer
          call this%tpres%stop()
          
          ! Increment sub-iteration counter
@@ -1118,9 +1118,9 @@ contains
       call this%fs%get_div()
       
       ! Transfer VOF into droplets
-      call this%ttrans%start() !< Start transfer timer
+      call this%ttrans%start() ! Start transfer timer
       call this%transfer_drops()
-      call this%ttrans%stop() !< Stop transfer timer
+      call this%ttrans%stop() ! Stop transfer timer
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -1222,7 +1222,7 @@ contains
       ! Output flow rate
       if (this%flowrate_evt%occurs()) call this%analyze_flowrate()
       
-      !> Stop timestep timer
+      ! Stop timestep timer
       call this%tstep%stop()
       
       ! Perform and output monitoring

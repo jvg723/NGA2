@@ -84,26 +84,6 @@ module ligament_class
 contains
    
    
-   !> Function that defines a level set function for a droplet
-   function levelset_droplet(xyz,t) result(G)
-      implicit none
-      real(WP), dimension(3),intent(in) :: xyz
-      real(WP), intent(in) :: t
-      real(WP) :: G
-      G=0.5_WP-sqrt(xyz(1)**2+xyz(2)**2+xyz(3)**2)
-   end function levelset_droplet
-
-
-   !> Function that defines a level set function for a ligament
-   function levelset_ligament(xyz,t) result(G)
-      implicit none
-      real(WP), dimension(3),intent(in) :: xyz
-      real(WP), intent(in) :: t
-      real(WP) :: G
-      G=0.5_WP-sqrt(xyz(1)**2+xyz(2)**2)
-   end function levelset_ligament
-   
-   
    !> Initialization of ligament simulation
    subroutine init(this)
       implicit none
@@ -142,7 +122,7 @@ contains
          this%cfg=config(grp=group,decomp=partition,grid=grid)
       end block create_config
       
-
+      
       ! Initialize time tracker with 2 subiterations
       initialize_timetracker: block
          use param, only: param_read
@@ -171,7 +151,7 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: VFlo,VFhi,elvira,r2p
+         use vfs_class, only: remap,VFlo,VFhi,plicnet,r2p
          use mms_geom,  only: cube_refine_vol
          use param,     only: param_read
          integer :: i,j,k,n,si,sj,sk
@@ -231,7 +211,7 @@ contains
       create_iterator: block
          this%vof_removal_layer=iterator(this%cfg,'VOF removal',vof_removal_layer_locator)
       end block create_iterator
-
+      
       
       ! Create a multiphase flow solver with bconds
       create_flow_solver: block
@@ -259,7 +239,9 @@ contains
          call param_read('Pressure tolerance',this%ps%rcvg)
          ! Configure implicit velocity solver
          this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
+         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
          call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
          ! Zero initial field
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
@@ -269,10 +251,14 @@ contains
             i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
             this%fs%U(i,j,k)=1.0_WP
          end do
-         ! Compute cell-centered velocity
-         call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
+         ! Apply all other boundary conditions
+         call this%fs%apply_bcond(this%time%t,this%time%dt)
+         ! Adjust MFR for global mass balance
+         call this%fs%correct_mfr()
          ! Compute divergence
          call this%fs%get_div()
+         ! Compute cell-centered velocity
+         call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       end block create_flow_solver
 
      ! Create a viscoleastic model
@@ -364,7 +350,59 @@ contains
                   end do
                end do
             end do
-         end do
+            call this%vf%sync_interface()
+            deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
+            ! Reset moments
+            call this%vf%reset_volume_moments()
+            ! Update the band
+            call this%vf%update_band()
+            ! Create discontinuous polygon mesh from IRL interface
+            call this%vf%polygonalize_interface()
+            ! Calculate distance from polygons
+            call this%vf%distance_from_polygon()
+            ! Calculate subcell phasic volumes
+            call this%vf%subcell_vol()
+            ! Calculate curvature
+            call this%vf%get_curvature()
+            ! Now read in the velocity solver data
+            call this%df%pull(name='U',var=this%fs%U)
+            call this%df%pull(name='V',var=this%fs%V)
+            call this%df%pull(name='W',var=this%fs%W)
+            call this%df%pull(name='P',var=this%fs%P)
+            call this%df%pull(name='Pjx',var=this%fs%Pjx)
+            call this%df%pull(name='Pjy',var=this%fs%Pjy)
+            call this%df%pull(name='Pjz',var=this%fs%Pjz)
+            ! Apply all other boundary conditions
+            call this%fs%apply_bcond(this%time%t,this%time%dt)
+            ! Compute MFR through all boundary conditions
+            call this%fs%get_mfr()
+            ! Adjust MFR for global mass balance
+            call this%fs%correct_mfr()
+            ! Compute cell-centered velocity
+            call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
+            ! Compute divergence
+            call this%fs%get_div()
+            ! Also update time
+            call this%df%pull(name='t' ,val=this%time%t )
+            call this%df%pull(name='dt',val=this%time%dt)
+            this%time%told=this%time%t-this%time%dt
+            !this%time%dt=this%time%dtmax !< Force max timestep size anyway
+         else
+            ! We are not restarting, prepare a new directory for storing restart files
+            if (this%cfg%amRoot) then
+               if (.not.isdir('restart')) call makedir('restart')
+            end if
+            ! Prepare pardata object for saving restart files
+            call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=15)
+            this%df%valname=['t ','dt']
+            this%df%varname=['U  ','V  ','W  ','P  ','Pjx','Pjy','Pjz','P11','P12','P13','P14','P21','P22','P23','P24']
+         end if
+      end block handle_restart
+      
+      
+      ! Create surfmesh object for interface polygon output
+      create_smesh: block
+         this%smesh=surfmesh(nvar=0,name='plic')
       end block create_smesh
 
       ! Create partmesh object for Lagrangian particle output
@@ -398,9 +436,6 @@ contains
          call this%ens_out%add_scalar('VOF',this%vf%VF)
          call this%ens_out%add_scalar('curvature',this%vf%curv)
          call this%ens_out%add_scalar('pressure',this%fs%P)
-         call this%ens_out%add_scalar('thin_sensor',this%vf%thin_sensor)
-         call this%ens_out%add_scalar('edge_sensor',this%vf%edge_sensor)
-         call this%ens_out%add_vector('edge_normal',this%resU,this%resV,this%resW)
          call this%ens_out%add_surface('plic',this%smesh)
          do nsc=1,this%ve%nscalar
             call this%ens_out%add_scalar(trim(this%ve%SCname(nsc)),this%ve%SC(:,:,:,nsc))
@@ -429,9 +464,9 @@ contains
          call this%mfile%add_column(this%fs%Vmax,'Vmax')
          call this%mfile%add_column(this%fs%Wmax,'Wmax')
          call this%mfile%add_column(this%fs%Pmax,'Pmax')
-         call this%mfile%add_column(this%vf%VFmax,'VOF maximum')
-         call this%mfile%add_column(this%vf%VFmin,'VOF minimum')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
+         call this%mfile%add_column(this%vf%SDint,'SD integral')
+         call this%mfile%add_column(this%vof_removed,'VOF removed')
          call this%mfile%add_column(this%vf%flotsam_error,'Flotsam error')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
@@ -529,9 +564,16 @@ contains
    
    !> Take one time step
    subroutine step(this)
-      use tpns_class, only: arithmetic_visc,harmonic_visc
+      use tpns_class, only: arithmetic_visc
       implicit none
       class(ligament), intent(inout) :: this
+      
+      ! Reset all timers and start timestep timer
+      call this%tstep%reset()
+      call this%tvof%reset()
+      call this%tvel%reset()
+      call this%tpres%reset()
+      call this%tstep%start()
       
       ! Increment time
       call this%fs%get_cfl(this%time%dt,this%time%cfl)
@@ -544,7 +586,7 @@ contains
       
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
-
+      
       ! Remember old velocity
       this%fs%Uold=this%fs%U
       this%fs%Vold=this%fs%V
@@ -552,9 +594,11 @@ contains
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
-         
+      
       ! VOF solver step
+      call this%tvof%start() ! Start VOF timer
       call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      call this%tvof%stop() ! Stop VOF timer
       
       ! Prepare new staggered viscosity (at n+1)
       call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
@@ -718,15 +762,18 @@ contains
          ! Apply boundary conditions
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          
+         ! Stop velocity timer and start pressure timer
+         call this%tvel%stop()
+         call this%tpres%start()
+         
          ! Solve Poisson equation
          call this%fs%update_laplacian()
-         !call this%fs%update_laplacian(pinpoint=[this%fs%cfg%imin,this%fs%cfg%jmin,this%fs%cfg%kmin])
          call this%fs%correct_mfr()
          call this%fs%get_div()
-         !call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
-         call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
          this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
-         !if (this%cfg%amRoot) this%fs%psolv%rhs(this%cfg%imin,this%cfg%jmin,this%cfg%kmin)=0.0_WP
          this%fs%psolv%sol=0.0_WP
          call this%fs%psolv%solve()
          call this%fs%shift_p(this%fs%psolv%sol)
@@ -740,6 +787,9 @@ contains
          
          ! Apply boundary conditions
          call this%fs%apply_bcond(this%time%t,this%time%dt)
+         
+         ! Stop pressure timer
+         call this%tpres%stop()
          
          ! Increment sub-iteration counter
          this%time%it=this%time%it+1
@@ -755,10 +805,19 @@ contains
       
       ! Remove VOF at edge of domain
       remove_vof: block
-         integer :: n
+         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+         use parallel, only: MPI_REAL_WP
+         integer :: n,i,j,k,ierr
+         this%vof_removed=0.0_WP
          do n=1,this%vof_removal_layer%no_
-            this%vf%VF(this%vof_removal_layer%map(1,n),this%vof_removal_layer%map(2,n),this%vof_removal_layer%map(3,n))=0.0_WP
+            i=this%vof_removal_layer%map(1,n)
+            j=this%vof_removal_layer%map(2,n)
+            k=this%vof_removal_layer%map(3,n)
+            if (n.le.this%vof_removal_layer%n_) this%vof_removed=this%vof_removed+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            this%vf%VF(i,j,k)=0.0_WP
          end do
+         call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_removed,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+         call this%vf%clean_irl_and_band()
       end block remove_vof
       
       ! Output to ensight
@@ -813,6 +872,9 @@ contains
          ! Perform ensight output
          call this%ens_out%write_data(this%time%t)
       end if
+      
+      ! Stop timestep timer
+      call this%tstep%stop()
       
       ! Perform and output monitoring
       call this%fs%get_max()

@@ -34,8 +34,12 @@ Max time :          800
 Pressure tolerance : 1e-5
 Pressure iteration : 100
 
-# Ensight output
+# Data output
 Ensight output period : 1
 
 # Post-processing output
 Postproc output period : 1
+
+# Data restart
+Restart from : !data_3.50007E-02
+HIT restart :  hit_128
