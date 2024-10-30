@@ -127,8 +127,8 @@ contains
          real(WP) :: Lx,Ly,Lz,xlig
          ! Read in grid definition
          call this%input%read('Lx',Lx); call this%input%read('nx',nx); allocate(x(nx+1));  call this%input%read('X ligament',xlig)
-                  call this%input%read('Ly',Ly); call this%input%read('ny',ny); allocate(y(ny+1))
-                  call this%input%read('Lz',Lz); call this%input%read('nz',nz); allocate(z(nz+1))
+         call this%input%read('Ly',Ly); call this%input%read('ny',ny); allocate(y(ny+1))
+         call this%input%read('Lz',Lz); call this%input%read('nz',nz); allocate(z(nz+1))
          ! Create simple rectilinear grid
          do i=1,nx+1
             x(i)=real(i-1,WP)/real(nx,WP)*Lx-xlig
@@ -317,7 +317,7 @@ contains
                      end do
                      ! Call adaptive refinement code to get volume and barycenters recursively
                      vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                     call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_droplet,0.0_WP,amr_ref_lvl)
+                     call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_ligament,0.0_WP,amr_ref_lvl)
                      this%vf%VF(i,j,k)=vol/this%vf%cfg%vol(i,j,k)
                      if (this%vf%VF(i,j,k).ge.VFlo.and.this%vf%VF(i,j,k).le.VFhi) then
                         this%vf%Lbary(:,i,j,k)=v_cent
