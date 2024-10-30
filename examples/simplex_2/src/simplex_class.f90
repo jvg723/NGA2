@@ -7,7 +7,7 @@ module simplex_class
    use surfmesh_class,    only: surfmesh
    use ensight_class,     only: ensight
    use hypre_str_class,   only: hypre_str
-   use ddadi_class,       only: ddadi
+   ! use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
    use vfs_class,         only: vfs
    use cclabel_class,     only: cclabel
@@ -42,7 +42,7 @@ module simplex_class
       type(vfs)         :: vf    !< Volume fraction solver
       type(tpns)        :: fs    !< Two-phase flow solver
       type(hypre_str)   :: ps    !< HYPRE linear solver for pressure
-      type(ddadi)       :: vs    !< DDADI linear solver for velocity
+      ! type(ddadi)       :: vs    !< DDADI linear solver for velocity
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
       type(cclabel)     :: ccl   !< CCLabel to transfer droplets
@@ -492,7 +492,7 @@ contains
          call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
          !this%vf%twoplane_thld2=0.3_WP
          !this%vf%thin_thld_min=1.0e-3_WP
-         ! Initialize the interface inclduing restarts
+         ! Initialize the interface including restarts
          if (this%restarted) then
             ! Read in the planes directly and set the IRL interface
             allocate(P11(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P11',var=P11)
@@ -626,9 +626,9 @@ contains
          call this%input%read('Pressure iteration',this%ps%maxit)
          call this%input%read('Pressure tolerance',this%ps%rcvg)
          ! Configure velocity solver
-         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         !this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
+         call this%fs%setup(pressure_solver=this%ps)!,implicit_solver=this%vs)
       end block create_flow_solver
       
       
