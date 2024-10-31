@@ -599,7 +599,7 @@ contains
       ! Create a two-phase flow solver with bconds
       create_flow_solver: block
          use tpns_class,      only: clipped_neumann,dirichlet,slip
-         use hypre_str_class, only: pcg_pfmg2
+         use hypre_str_class, only: pcg_pfmg2,pcg_pfmg
          ! Create flow solver
          this%fs=tpns(cfg=this%cfg,name='Two-Phase NS')
          ! Set the flow properties
@@ -621,7 +621,7 @@ contains
          call this%fs%add_bcond(name='bc_zp',type=slip,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
          call this%fs%add_bcond(name='bc_zm',type=slip,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
-         this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg,nst=7)
          this%ps%maxlevel=16
          call this%input%read('Pressure iteration',this%ps%maxit)
          call this%input%read('Pressure tolerance',this%ps%rcvg)
@@ -907,7 +907,7 @@ contains
    
    !> Take one time step
    subroutine step(this)
-      use tpns_class, only: arithmetic_visc
+      use tpns_class, only: arithmetic_visc,harmonic_visc
       implicit none
       class(simplex), intent(inout) :: this
       
@@ -942,7 +942,7 @@ contains
       call this%tvof%stop() !< Stop VOF timer
       
       ! Prepare new staggered viscosity (at n+1)
-      call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
+      call this%fs%get_viscosity(vf=this%vf,strat=harmonic_visc)
       
       ! Turbulence modeling
       call this%tsgs%start() !< Start SGS timer
