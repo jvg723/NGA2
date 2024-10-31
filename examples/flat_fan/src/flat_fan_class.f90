@@ -314,10 +314,10 @@ contains
          integer :: i,j,k
          ! Create polygon
          call this%poly%initialize(nvert=8,name='flat_fan')
-         this%poly%vert(:,1)=[-0.01000_WP,0.00000_WP]   ! [ , changes inner diameter of back pipe]
+         this%poly%vert(:,1)=[-0.01000_WP,0.002325_WP]   ! [ , changes inner diameter of back pipe]
          ! this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          ! this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
-         this%poly%vert(:,2)=[-0.003325_WP,0.002325_WP]    ! [ postion of front half of back pipe, diameter of front half of back pipe]
+         this%poly%vert(:,2)=[-0.003325_WP,0.002325_WP]  ! [ postion of front half of back pipe, diameter of front half of back pipe]
          this%poly%vert(:,3)=[-0.003325_WP,0.000825_WP]  ! [moves location of back half second pipe, changes its raidus]
          this%poly%vert(:,4)=[-0.000825_WP,0.000825_WP]  ! [moves location of front half second pipe, changes its raidus]
          this%poly%vert(:,5)=[ 0.00000_WP,0.00143_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
