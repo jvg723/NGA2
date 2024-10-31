@@ -313,17 +313,17 @@ contains
          use ibconfig_class, only: sharp
          integer :: i,j,k
          ! Create polygon
-         call this%poly%initialize(nvert=10,name='flat_fan')
-         this%poly%vert(:, 1)=[-0.01000_WP,0.00000_WP]
-         this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
-         this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
-         this%poly%vert(:, 4)=[-0.00385_WP,0.00160_WP]
-         this%poly%vert(:, 5)=[-0.00175_WP,0.00039_WP]
-         this%poly%vert(:, 6)=[-0.00114_WP,0.00039_WP]
-         this%poly%vert(:, 7)=[ 0.00000_WP,0.00143_WP]
-         this%poly%vert(:, 8)=[ 0.00000_WP,0.00177_WP]
-         this%poly%vert(:, 9)=[-0.00122_WP,0.00279_WP]
-         this%poly%vert(:,10)=[-0.01000_WP,0.00279_WP]
+         call this%poly%initialize(nvert=8,name='flat_fan')
+         this%poly%vert(:,1)=[-0.01000_WP,0.00000_WP]
+         ! this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
+         ! this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
+         this%poly%vert(:,2)=[-0.00385_WP,0.00160_WP]
+         this%poly%vert(:,3)=[-0.00175_WP,0.00039_WP]
+         this%poly%vert(:,4)=[-0.00114_WP,0.00039_WP]
+         this%poly%vert(:,5)=[ 0.00000_WP,0.00143_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
+         this%poly%vert(:,6)=[ 0.00000_WP,0.00177_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
+         this%poly%vert(:,7)=[-0.00122_WP,0.00300_WP]  ! [ , outer diameter of nozzle dimension along y/z]
+         this%poly%vert(:,8)=[-0.01000_WP,0.00300_WP]  ! [ , outer diameter of nozzle dimension along y/z]
          ! Initialize IB distance field
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
