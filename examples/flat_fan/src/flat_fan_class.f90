@@ -1,5 +1,5 @@
-!> Definition for a simplex class
-module simplex_class
+!> Definition for a flat fan class
+module flat_fan_class
    use precision,         only: WP
    use inputfile_class,   only: inputfile
    use ibconfig_class,    only: ibconfig
@@ -21,10 +21,10 @@ module simplex_class
    implicit none
    private
    
-   public :: simplex
+   public :: flat_fan
    
-   !> Simplex object
-   type :: simplex
+   !> flat fan object
+   type :: flat_fan
       
       !> Provide a pardata and an event tracker for saving restarts
       type(event)    :: save_evt
@@ -91,12 +91,12 @@ module simplex_class
       real(WP) :: Ucoflow,mfr,Apipe
       
    contains
-      procedure :: init                            !< Initialize simplex simulation
-      procedure :: step                            !< Advance simplex simulation by one time step
-      procedure :: final                           !< Finalize simplex simulation
+      procedure :: init                            !< Initialize flat fan simulation
+      procedure :: step                            !< Advance flat fan simulation by one time step
+      procedure :: final                           !< Finalize flat fan simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
-   end type simplex
+   end type flat_fan
    
    
 contains
@@ -109,7 +109,7 @@ contains
       use filesys,  only: makedir,isdir
       use string,   only: str_medium
       implicit none
-      class(simplex), intent(inout) :: this
+      class(flat_fan), intent(inout) :: this
       real(WP), dimension(:), allocatable :: CSA_s,CSA_f,CSA_l,CSA_g !< Solid, fluid, liquid, and gas cross-sectional areas
       real(WP), dimension(:), allocatable :: VFR_s,VFR_f,VFR_l,VFR_g !< Solid, fluid, liquid, and gas volume flow rates
       character(len=str_medium) :: filename,timestamp
@@ -172,7 +172,7 @@ contains
    subroutine transfer_drops(this)
       use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
       use parallel, only: MPI_REAL_WP
-      class(simplex), intent(inout) :: this
+      class(flat_fan), intent(inout) :: this
       real(WP), dimension(:), allocatable :: dvol
       integer :: n,m,ierr,nmax
       
@@ -240,16 +240,16 @@ contains
    end subroutine transfer_drops
    
    
-   !> Initialization of simplex simulation
+   !> Initialization of flat fan simulation
    subroutine init(this)
       implicit none
-      class(simplex), intent(inout) :: this
+      class(flat_fan), intent(inout) :: this
       
       
       ! Setup an input file
       read_input: block
          use parallel, only: amRoot
-         this%input=inputfile(amRoot=amRoot,filename='simplex.input')
+         this%input=inputfile(amRoot=amRoot,filename='flat_fan.input')
       end block read_input
       
       
@@ -300,7 +300,7 @@ contains
             z(k)=z(k-1)+sratio_yz*(z(k-1)-z(k-2))
          end do
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='simplex')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='flat_fan')
          ! Read in partition
          call this%input%read('Partition',partition)
          ! Create ibconfig
@@ -308,12 +308,12 @@ contains
       end block create_config
       
       
-      ! Now initialize simplex nozzle geometry
-      create_simplex: block
+      ! Now initialize flat fan nozzle geometry
+      create_flat_fan: block
          use ibconfig_class, only: sharp
          integer :: i,j,k
          ! Create polygon
-         call this%poly%initialize(nvert=10,name='simplex')
+         call this%poly%initialize(nvert=10,name='flat_fan')
          this%poly%vert(:, 1)=[-0.01000_WP,0.00000_WP]
          this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
@@ -382,7 +382,7 @@ contains
          end if
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
-      end block create_simplex
+      end block create_flat_fan
       
       
       ! Initialize flow rate
@@ -696,7 +696,7 @@ contains
       ! Add Ensight output
       create_ensight: block
          ! Create Ensight output from cfg
-         this%ens_out=ensight(cfg=this%cfg,name='simplex')
+         this%ens_out=ensight(cfg=this%cfg,name='flat_fan')
          ! Create event for Ensight output
          this%ens_evt=event(time=this%time,name='Ensight output')
          call this%input%read('Ensight output period',this%ens_evt%tper)
@@ -718,7 +718,7 @@ contains
          call this%fs%get_max()
          call this%vf%get_max()
          ! Create simulation monitor
-         this%mfile=monitor(this%fs%cfg%amRoot,'simulation_simplex')
+         this%mfile=monitor(this%fs%cfg%amRoot,'simulation_flat_fan')
          call this%mfile%add_column(this%time%n,'Timestep number')
          call this%mfile%add_column(this%time%t,'Time')
          call this%mfile%add_column(this%time%dt,'Timestep size')
@@ -735,7 +735,7 @@ contains
          call this%mfile%add_column(this%fs%psolv%rerr,'Pressure error')
          call this%mfile%write()
          ! Create CFL monitor
-         this%cflfile=monitor(this%fs%cfg%amRoot,'cfl_simplex')
+         this%cflfile=monitor(this%fs%cfg%amRoot,'cfl_flat_fan')
          call this%cflfile%add_column(this%time%n,'Timestep number')
          call this%cflfile%add_column(this%time%t,'Time')
          call this%cflfile%add_column(this%fs%CFLst,'STension CFL')
@@ -909,7 +909,7 @@ contains
    subroutine step(this)
       use tpns_class, only: arithmetic_visc
       implicit none
-      class(simplex), intent(inout) :: this
+      class(flat_fan), intent(inout) :: this
       
       ! Reset all timers and start timestep timer
       call this%tstep%reset()
@@ -1182,13 +1182,13 @@ contains
    end subroutine step
    
    
-   !> Finalize simplex simulation
+   !> Finalize flat fan simulation
    subroutine final(this)
       implicit none
-      class(simplex), intent(inout) :: this
+      class(flat_fan), intent(inout) :: this
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%gradU)!,this%SR)
    end subroutine final
    
    
-end module simplex_class
+end module flat_fan_class

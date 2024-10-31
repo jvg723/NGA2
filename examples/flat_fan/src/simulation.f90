@@ -1,12 +1,12 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,     only: WP
-   use simplex_class, only: simplex
+   use flat_fan_class, only: flat_fan
    implicit none
    private
    
-   !> Simplex simulation
-   type(simplex) :: spx
+   !> flat fan simulation
+   type(flat_fan) :: ff
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -17,8 +17,8 @@ contains
    subroutine simulation_init
       implicit none
       
-      ! Initialize simplex simulation
-      call spx%init()
+      ! Initialize flat fan simulation
+      call ff%init()
       
    end subroutine simulation_init
    
@@ -27,10 +27,10 @@ contains
    subroutine simulation_run
       implicit none
       
-      ! Simplex drives overall time integration
-      do while (.not.spx%time%done())
-         ! Advance simplex simulation
-         call spx%step()
+      ! flat fan drives overall time integration
+      do while (.not.ff%time%done())
+         ! Advance flat fan simulation
+         call ff%step()
       end do
       
    end subroutine simulation_run
@@ -40,8 +40,8 @@ contains
    subroutine simulation_final
       implicit none
       
-      ! Finalize simplex simulation
-      call spx%final()
+      ! Finalize flat fan simulation
+      call ff%final()
       
    end subroutine simulation_final
    
