@@ -314,10 +314,10 @@ contains
          integer :: i,j,k
          ! Create polygon
          call this%poly%initialize(nvert=8,name='flat_fan')
-         this%poly%vert(:,1)=[-0.01000_WP,0.00000_WP]
+         this%poly%vert(:,1)=[-0.01000_WP,0.00000_WP]   ! [ , changes inner diameter of back pipe]
          ! this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          ! this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
-         this%poly%vert(:,2)=[-0.00385_WP,0.00160_WP]
+         this%poly%vert(:,2)=[-0.003325_WP,0.002325_WP]    ! [ postion of front half of back pipe, diameter of front half of back pipe]
          this%poly%vert(:,3)=[-0.003325_WP,0.000825_WP]  ! [moves location of back half second pipe, changes its raidus]
          this%poly%vert(:,4)=[-0.000825_WP,0.000825_WP]  ! [moves location of front half second pipe, changes its raidus]
          this%poly%vert(:,5)=[ 0.00000_WP,0.00143_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
@@ -337,49 +337,49 @@ contains
          call this%cfg%calculate_normal()
          ! Get VF field
          call this%cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
-         ! Carve out inlet pipes
-         create_inlet_pipes: block
-            use mms_geom, only: cube_refine_vol
-            integer :: si,sj,sk,n
-            real(WP), dimension(3,8) :: cube_vertex
-            real(WP), dimension(3) :: v_cent,a_cent
-            real(WP) :: vol,area,contact
-            integer, parameter :: amr_ref_lvl=4
-            do k=this%cfg%kmino_,this%cfg%kmaxo_
-               do j=this%cfg%jmino_,this%cfg%jmaxo_
-                  do i=this%cfg%imino_,this%cfg%imaxo_
-                     ! Only work to the left of the plenum
-                     if (this%cfg%xm(i)-this%p1(1).gt.this%cfg%min_meshsize) cycle
-                     ! Set cube vertices
-                     n=0
-                     do sk=0,1
-                        do sj=0,1
-                           do si=0,1
-                              n=n+1; cube_vertex(:,n)=[this%cfg%x(i+si),this%cfg%y(j+sj),this%cfg%z(k+sk)]
-                           end do
-                        end do
-                     end do
-                     ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 1
-                     vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                     call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_1,0.0_WP,amr_ref_lvl)
-                     this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k),vol/(this%cfg%dx(i)*this%cfg%dy(j)*this%cfg%dz(k)))
-                     ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 2
-                     vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-                     call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_2,0.0_WP,amr_ref_lvl)
-                     this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k),vol/(this%cfg%dx(i)*this%cfg%dy(j)*this%cfg%dz(k)))
-                  end do
-               end do
-            end do
-         end block create_inlet_pipes
-         ! Apply Neumann on VF and apply stair-stepping at entrance
-         if (this%cfg%iproc.eq.1) then
-            ! Stair-step entrance
-            this%cfg%VF(this%cfg%imin,:,:)=max(real(nint(this%cfg%VF(this%cfg%imin,:,:)),WP),epsilon(1.0_WP))
-            ! Copy into overlap layer
-            do i=this%cfg%imino,this%cfg%imin-1
-               this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
-            end do
-         end if
+         ! ! Carve out inlet pipes
+         ! create_inlet_pipes: block
+         !    use mms_geom, only: cube_refine_vol
+         !    integer :: si,sj,sk,n
+         !    real(WP), dimension(3,8) :: cube_vertex
+         !    real(WP), dimension(3) :: v_cent,a_cent
+         !    real(WP) :: vol,area,contact
+         !    integer, parameter :: amr_ref_lvl=4
+         !    do k=this%cfg%kmino_,this%cfg%kmaxo_
+         !       do j=this%cfg%jmino_,this%cfg%jmaxo_
+         !          do i=this%cfg%imino_,this%cfg%imaxo_
+         !             ! Only work to the left of the plenum
+         !             if (this%cfg%xm(i)-this%p1(1).gt.this%cfg%min_meshsize) cycle
+         !             ! Set cube vertices
+         !             n=0
+         !             do sk=0,1
+         !                do sj=0,1
+         !                   do si=0,1
+         !                      n=n+1; cube_vertex(:,n)=[this%cfg%x(i+si),this%cfg%y(j+sj),this%cfg%z(k+sk)]
+         !                   end do
+         !                end do
+         !             end do
+         !             ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 1
+         !             vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
+         !             call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_1,0.0_WP,amr_ref_lvl)
+         !             this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k),vol/(this%cfg%dx(i)*this%cfg%dy(j)*this%cfg%dz(k)))
+         !             ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 2
+         !             vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
+         !             call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_2,0.0_WP,amr_ref_lvl)
+         !             this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k),vol/(this%cfg%dx(i)*this%cfg%dy(j)*this%cfg%dz(k)))
+         !          end do
+         !       end do
+         !    end do
+         ! end block create_inlet_pipes
+         ! ! Apply Neumann on VF and apply stair-stepping at entrance
+         ! if (this%cfg%iproc.eq.1) then
+         !    ! Stair-step entrance
+         !    this%cfg%VF(this%cfg%imin,:,:)=max(real(nint(this%cfg%VF(this%cfg%imin,:,:)),WP),epsilon(1.0_WP))
+         !    ! Copy into overlap layer
+         !    do i=this%cfg%imino,this%cfg%imin-1
+         !       this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
+         !    end do
+         ! end if
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
       end block create_flat_fan
