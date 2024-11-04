@@ -230,9 +230,14 @@ contains
       allocate(u_vol_(1:this%ccl%nstruct),v_vol_(1:this%ccl%nstruct),w_vol_(1:this%ccl%nstruct));u_vol_=0.0_WP;v_vol_=0.0_WP;w_vol_=0.0_WP
       allocate(Imom(1:this%ccl%nstruct,3,3),Imom_(1:this%ccl%nstruct,3,3));Imom=0.0_WP;Imom_=0.0_WP
 
+      ! stats of the ligaments that will be used for modeling breakup
+      allocate(x(1:this%ccl%nstruct),y(1:this%ccl%nstruct),z(1:this%ccl%nstruct));x=0.0_WP;y=0.0_WP;z=0.0_WP
+      allocate(u(1:this%ccl%nstruct),v(1:this%ccl%nstruct),w(1:this%ccl%nstruct));u=0.0_WP;v=0.0_WP;w=0.0_WP
+      allocate(lengths(1:this%ccl%nstruct,1:3));lengths=0.0_WP
+      allocate(vol(1:this%ccl%nstruct));vol=0.0_WP;
+      myint =0.0_WP; integral =0.0_WP; transfered_ = 0
       ! Query optimal work array size
       call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      
       ! First pass: loop over individual structures and accumulate stats
       do n=1,this%ccl%nstruct
          ! Periodicity
@@ -330,14 +335,6 @@ contains
       deallocate(vol_,x_vol_,y_vol_,z_vol_,u_vol_,v_vol_,w_vol_,Imom_,Imom)
       deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
       deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
-
-      ! stats of the ligaments that will be used for modeling breakup
-      allocate(x(1:this%ccl%nstruct),y(1:this%ccl%nstruct),z(1:this%ccl%nstruct));x=0.0_WP;y=0.0_WP;z=0.0_WP
-      allocate(u(1:this%ccl%nstruct),v(1:this%ccl%nstruct),w(1:this%ccl%nstruct));u=0.0_WP;v=0.0_WP;w=0.0_WP
-      allocate(lengths(1:this%ccl%nstruct,1:3));lengths=0.0_WP
-      allocate(vol(1:this%ccl%nstruct));vol=0.0_WP;
-      myint =0.0_WP; integral =0.0_WP; transfered_ = 0
-
       ! Second pass to transfer drops
       do n=1,this%ccl%nstruct
          
@@ -383,7 +380,6 @@ contains
          end do
          ! vol(n) = 0.0_WP
       end do
-
       call MPI_ALLREDUCE(transfered_,transfered,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
       if (transfered .gt. 0) then 
          ! Sync VF and clean up IRL and band
@@ -393,9 +389,7 @@ contains
          this%vol_convert = this%vol_convert + integral 
          call this%lp%sync()
       end if
-
       deallocate(x,y,z,u,v,w,vol,lengths)
-      
       
    contains
       
