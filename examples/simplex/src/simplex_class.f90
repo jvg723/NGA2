@@ -100,9 +100,8 @@ module simplex_class
       real(WP) :: Ucoflow,mfr,Apipe
 
       !> Transfer model parameters
-      real(WP) :: min_filmthickness      =1.0e-3_WP
       real(WP) :: max_eccentricity       =8.0e-1_WP
-      real(WP) :: d_threshold            =6.0e-1_WP
+      real(WP) :: d_threshold            =0.002_WP
       real(WP) :: vol_convert            =0.0_WP
       
    contains
@@ -217,6 +216,8 @@ contains
       
       ! Start by performing a CCL
       call this%ccl%build(make_label,same_label)
+
+      if (this%vf%cfg%amRoot) print*, this%ccl%nstruct
       
       ! Allocate droplet stats arrays
       allocate(vol_(1:this%ccl%nstruct));vol_=0.0_WP
@@ -331,27 +332,38 @@ contains
          ! Zero out length in 3rd dimension if 2D
          if (this%vf%cfg%nx.eq.1.or.this%vf%cfg%ny.eq.1.or.this%vf%cfg%nz.eq.1) lengths(n,3)=0.0_WP
       end do
+      
       ! Deallocate arrays
       deallocate(vol_,x_vol_,y_vol_,z_vol_,u_vol_,v_vol_,w_vol_,Imom_,Imom)
       deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
       deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
+      
       ! Second pass to transfer drops
       do n=1,this%ccl%nstruct
          
-         diam=(6.0_WP*vol(n)/pi)**(1.0_WP/3.0_WP)
-         autotransfer=.false.
-         ! Test if structure is at end of domain
-         if (x(n).gt.this%vf%cfg%x(this%vf%cfg%imax-10)) autotransfer=.true.
-         if (.not.autotransfer) then
-            ! Test if sphericity is compatible with transfer
-            lmin=lengths(n,3)
-            if (lmin.eq.0.0_WP) lmin=lengths(n,2) ! Handle 2D case
-            lmax=lengths(n,1)
-            eccentricity=sqrt(1.0_WP-lmin**2/(lmax**2+tiny(1.0_WP)))
+         ! diam=(6.0_WP*vol(n)/pi)**(1.0_WP/3.0_WP)
+         ! autotransfer=.false.
+         ! ! Test if structure is at end of domain
+         ! if (x(n).gt.this%vf%cfg%x(this%vf%cfg%imax-10)) autotransfer=.true.
+         ! if (.not.autotransfer) then
+         !    ! Test if sphericity is compatible with transfer
+         !    lmin=lengths(n,3)
+         !    if (lmin.eq.0.0_WP) lmin=lengths(n,2) ! Handle 2D case
+         !    lmax=lengths(n,1)
+         !    eccentricity=sqrt(1.0_WP-lmin**2/(lmax**2+tiny(1.0_WP)))
 
-            if (eccentricity.gt.this%max_eccentricity) cycle
-            if ((diam.eq.0.0_WP).or.(diam.gt.this%d_threshold)) cycle
-         end if
+         !    if (eccentricity.gt.this%max_eccentricity) cycle
+         !    if ((diam.eq.0.0_WP).or.(diam.gt.this%d_threshold)) cycle
+         ! end if
+
+         ! Test if sphericity is compatible with transfer
+         lmin=lengths(n,3)
+         if (lmin.eq.0.0_WP) lmin=lengths(n,2) ! Handle 2D case
+         lmax=lengths(n,1)
+         eccentricity=sqrt(1.0_WP-lmin**2/(lmax**2+tiny(1.0_WP)))
+         diam=(6.0_WP*vol(n)/pi)**(1.0_WP/3.0_WP)
+         if (eccentricity.gt.this%max_eccentricity) cycle
+         if ((diam.eq.0.0_WP).or.(diam.gt.this%d_threshold)) cycle
          
          ! Create drop from available liquid volume - only one root does that
          if (this%vf%cfg%amRoot) then
@@ -941,6 +953,7 @@ contains
          call this%ens_out%add_scalar('visc_sgs',this%sgs%visc)
          call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
+         call this%ens_out%add_particle('spray',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight

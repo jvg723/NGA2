@@ -45,9 +45,9 @@ Pressure tolerance : 1e-5
 Pressure iteration : 50
 
 # Data output
-Ensight output period : 1e-4
-Drop analysis period  : 1e-4
+Ensight output period : 1e-5
+Drop analysis period  : 1e-5
 Restart output period : 1e-3
 
 # Data restart
-Restart from : data_3.50007E-02
+Restart from : !data_3.50007E-02
