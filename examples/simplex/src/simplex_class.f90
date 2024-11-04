@@ -110,6 +110,7 @@ module simplex_class
       procedure :: final                           !< Finalize simplex simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
+      procedure :: analyze_drops                   !< Post-process droplet diameter using ccl
    end type simplex
    
    
@@ -416,6 +417,29 @@ contains
       end function same_label
       
    end subroutine transfer_drops
+
+   !> Perform droplet analysis
+   subroutine analyze_drops(this)
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
+      use string,    only: str_medium
+      use filesys,   only: makedir,isdir
+      implicit none
+      class(simplex), intent(inout) :: this
+      character(len=str_medium) :: filename,timestamp
+      integer :: iunit,n,m,ierr
+      ! Only root process outputs to a file
+      if (this%cfg%amRoot) then
+         if (.not.isdir('spray_stats')) call makedir('spray_stats')
+         filename='stats_'; write(timestamp,'(es12.5)') this%time%t
+         open(newunit=iunit,file='spray_stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         do n=1,this%ccl%nstruct
+            ! ! Output list of diameters
+            ! write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+         end do
+         close(iunit)
+      end if
+   end subroutine analyze_drops
    
    
    !> Initialization of simplex simulation
