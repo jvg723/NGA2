@@ -170,33 +170,146 @@ contains
    
    !> Transfer droplet to Lagrangian representation
    subroutine transfer_drops(this)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX,MPI_INTEGER
       use parallel, only: MPI_REAL_WP
+      use irl_fortran_interface
       class(simplex), intent(inout) :: this
-      real(WP), dimension(:), allocatable :: dvol
-      integer :: n,m,ierr,nmax
+      ! Stats from the ccl objects
+      real(WP), dimension(:), allocatable :: x,y,z,u,v,w,vol
+      real(WP), dimension(:,:), allocatable :: lengths   
+      integer :: n,nn,nnn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,per_x,per_y,per_z
+      ! Allocate variables to get stats
+      real(WP), dimension(:), allocatable :: vol_,x_vol_,y_vol_,z_vol_
+      real(WP), dimension(:), allocatable :: u_vol_,v_vol_,w_vol_
+      real(WP), dimension(:), allocatable :: x_min_,x_min,x_max_,x_max
+      real(WP), dimension(:), allocatable :: y_min_,y_min,y_max_,y_max
+      real(WP), dimension(:), allocatable :: z_min_,z_min,z_max_,z_max
+      real(WP), dimension(:,:,:), allocatable :: Imom_,Imom
+      real(WP) :: xtmp,ytmp,ztmp
+      ! Moment of inertia variable
+      real(WP), dimension(:), allocatable :: work
+      real(WP), dimension(1)   :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer , parameter :: order = 3
+      integer  :: lwork,info
       
       ! Start by performing a CCL
       call this%ccl%build(make_label,same_label)
       
       ! Allocate droplet stats arrays
-      !allocate(dvol(1:this%ccl%nstruct)); dvol=0.0_WP
+      allocate(vol_(1:this%ccl%nstruct));vol_=0.0_WP
+      allocate(x_min(1:this%ccl%nstruct),x_min_(1:this%ccl%nstruct));x_min=0.0_WP;x_min_= 10000.0_WP
+      allocate(x_max(1:this%ccl%nstruct),x_max_(1:this%ccl%nstruct));x_max=0.0_WP;x_max_=-10000.0_WP
+      allocate(y_min(1:this%ccl%nstruct),y_min_(1:this%ccl%nstruct));y_min=0.0_WP;y_min_= 10000.0_WP
+      allocate(y_max(1:this%ccl%nstruct),y_max_(1:this%ccl%nstruct));y_max=0.0_WP;y_max_=-10000.0_WP
+      allocate(z_min(1:this%ccl%nstruct),z_min_(1:this%ccl%nstruct));z_min=0.0_WP;z_min_= 10000.0_WP
+      allocate(z_max(1:this%ccl%nstruct),z_max_(1:this%ccl%nstruct));z_max=0.0_WP;z_max_=-10000.0_WP
+      allocate(x_vol_(1:this%ccl%nstruct),y_vol_(1:this%ccl%nstruct),z_vol_(1:this%ccl%nstruct));x_vol_=0.0_WP;y_vol_=0.0_WP;z_vol_=0.0_WP
+      allocate(u_vol_(1:this%ccl%nstruct),v_vol_(1:this%ccl%nstruct),w_vol_(1:this%ccl%nstruct));u_vol_=0.0_WP;v_vol_=0.0_WP;w_vol_=0.0_WP
+      allocate(Imom(1:this%ccl%nstruct,3,3),Imom_(1:this%ccl%nstruct,3,3));Imom=0.0_WP;Imom_=0.0_WP
+
+      ! Query optimal work array size
+      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
       
       ! First pass: loop over individual structures and accumulate stats
-      !do n=1,this%ccl%nstruct
-      !   ! Loop over cells in structure
-      !   do m=1,this%ccl%struct(n)%n_
-      !      ! Accumulate volume
-      !      dvol(n)=dvol(n)+this%cfg%vol(this%ccl%struct(n)%map(1,m),this%ccl%struct(n)%map(2,m),this%ccl%struct(n)%map(3,m))*&
-      !      &                 this%vf%VF(this%ccl%struct(n)%map(1,m),this%ccl%struct(n)%map(2,m),this%ccl%struct(n)%map(3,m))
-      !      ! Accumulate ...
-      !   end do
-      !end do
-      
-      ! Reduce stats
-      !call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      
-      
+      do n=1,this%ccl%nstruct
+         ! Periodicity
+         per_x = this%ccl%struct(n)%per(1); per_y = this%ccl%struct(n)%per(2); per_z = this%ccl%struct(n)%per(3)
+         ! get number of local cells
+         do nn=1,this%ccl%struct(n)%n_
+            i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+            ! Location of struct node
+            xtmp = this%vf%cfg%xm(i)-per_x*this%vf%cfg%xL
+            ytmp = this%vf%cfg%ym(j)-per_y*this%vf%cfg%yL
+            ztmp = this%vf%cfg%zm(k)-per_z*this%vf%cfg%zL
+            ! Volume
+            vol_(n) = vol_(n) + this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            ! Center of gravity
+            x_vol_(n) = x_vol_(n) + xtmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            y_vol_(n) = y_vol_(n) + ytmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            z_vol_(n) = z_vol_(n) + ztmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            ! Average gas velocity inside struct
+            u_vol_(n) = u_vol_(n) + this%fs%U(i,j,k)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            v_vol_(n) = v_vol_(n) + this%fs%V(i,j,k)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            w_vol_(n) = w_vol_(n) + this%fs%W(i,j,k)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+         end do
+      end do
+      ! Sum parallel stats
+      call MPI_ALLREDUCE(vol_,vol,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(x_vol_,x,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(y_vol_,y,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(z_vol_,z,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(u_vol_,u,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(v_vol_,v,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(w_vol_,w,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      do n=1,this%ccl%nstruct
+         ! Periodicity
+         per_x = this%ccl%struct(n)%per(1); per_y = this%ccl%struct(n)%per(2); per_z = this%ccl%struct(n)%per(3)
+         do nn=1,this%ccl%struct(n)%n_
+            ! Indices of struct node
+            i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
+            xtmp = this%vf%cfg%xm(i)-per_x*this%vf%cfg%xL-x(n)/vol(n)
+            ytmp = this%vf%cfg%ym(j)-per_y*this%vf%cfg%yL-y(n)/vol(n)
+            ztmp = this%vf%cfg%zm(k)-per_z*this%vf%cfg%zL-z(n)/vol(n)
+            ! Moment of Inertia
+            Imom_(n,1,1) = Imom_(n,1,1) + (ytmp**2 + ztmp**2)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            Imom_(n,2,2) = Imom_(n,2,2) + (xtmp**2 + ztmp**2)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            Imom_(n,3,3) = Imom_(n,3,3) + (xtmp**2 + ytmp**2)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            Imom_(n,1,2) = Imom_(n,1,2) - xtmp*ytmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            Imom_(n,1,3) = Imom_(n,1,3) - xtmp*ztmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            Imom_(n,2,3) = Imom_(n,2,3) - ytmp*ztmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            do nnn=1,2
+               if (getNumberOfVertices(this%vf%interface_polygon(nnn,i,j,k)).gt.0) then
+                  d = calculateCentroid(this%vf%interface_polygon(nnn,i,j,k))
+                  x_min_(n) = min(x_min_(n),d(1)); x_max_(n) = max(x_max_(n),d(1))
+                  y_min_(n) = min(y_min_(n),d(2)); y_max_(n) = max(y_max_(n),d(2))
+                  z_min_(n) = min(z_min_(n),d(3)); z_max_(n) = max(z_max_(n),d(3))
+               end if
+            end do
+         end do 
+      end do
+
+      ! Sum parallel stat on Imom
+      do i=1,3
+         do j=1,3
+            call MPI_ALLREDUCE(Imom_(:,i,j),Imom(:,i,j),this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         end do
+      end do
+      ! Get extents
+      call MPI_ALLREDUCE(x_min_,x_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(x_max_,x_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(y_min_,y_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(y_max_,y_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(z_min_,z_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(z_max_,z_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      ! Store data
+      do n=1,this%ccl%nstruct
+         ! Center of gravity
+         x(n) = x(n)/vol(n); y(n) = y(n)/vol(n); z(n) = z(n)/vol(n)
+         ! Periodicity: transport back inside domain if needed
+         if (x(n).lt.this%vf%cfg%x(this%vf%cfg%imin)) x(n) = x(n)+this%vf%cfg%xL
+         if (y(n).lt.this%vf%cfg%y(this%vf%cfg%jmin)) y(n) = y(n)+this%vf%cfg%yL
+         if (z(n).lt.this%vf%cfg%z(this%vf%cfg%kmin)) z(n) = z(n)+this%vf%cfg%zL
+         u(n)=u(n)/vol(n); v(n)=v(n)/vol(n); w(n)=w(n)/vol(n)
+         ! Eigenvalues/eigenvectors of moments of inertia tensor
+         A = Imom(n,:,:); nnn = 3
+         ! On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
+         call dsyev('V','U',nnn,A,nnn,d,work,lwork,info)
+         ! Get rid of very small negative values (due to machine accuracy)
+         d = max(0.0_WP,d)
+         ! Store characteristic lengths
+         lengths(n,1) = sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/vol(n))
+         lengths(n,2) = sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/vol(n))
+         lengths(n,3) = sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/vol(n))
+         ! Zero out length in 3rd dimension if 2D
+         if (this%vf%cfg%nx.eq.1.or.this%vf%cfg%ny.eq.1.or.this%vf%cfg%nz.eq.1) lengths(n,3)=0.0_WP
+      end do
+      ! Deallocate arrays
+      deallocate(vol_,x_vol_,y_vol_,z_vol_,u_vol_,v_vol_,w_vol_,Imom_,Imom)
+      deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
+      deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
+
       ! Find the liquid core
       !nmax=maxloc(dvol,dim=1)
       
@@ -214,8 +327,7 @@ contains
       !call this%vf%sync_interface()
       !call this%vf%clean_irl_and_band()
       
-      ! Deallocate
-      !deallocate(dvol)
+
       
    contains
       
