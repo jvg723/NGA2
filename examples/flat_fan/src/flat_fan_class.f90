@@ -268,7 +268,7 @@ contains
          call this%input%read('Lz',Lz); call this%input%read('nz',nz); allocate(z_uni(nz+1))
          ! Create simple rectilinear grid
          do i=1,nx+1
-            x_uni(i)=real(i-1,WP)/real(nx,WP)*Lx-xshift
+            x_uni(i)=real(i-1,WP)/real(nx,WP)*Lx-0.5_WP*Lx
          end do
          do j=1,ny+1
             y_uni(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
@@ -312,24 +312,36 @@ contains
       create_flat_fan: block
          use ibconfig_class, only: sharp
          integer :: i,j,k
+         real(WP) :: radius,Dout_1,Din_1
          ! Create polygon
-         call this%poly%initialize(nvert=6,name='flat_fan')
-         this%poly%vert(:,1)=[-0.01000_WP,0.002325_WP]   ! [ , changes inner diameter of back pipe]
+         call this%poly%initialize(nvert=4,name='flat_fan')
+         ! this%poly%vert(:,1)=[-0.01000_WP,0.002325_WP]   ! [ , changes inner diameter of back pipe]
          ! this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          ! this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
-         this%poly%vert(:,2)=[-0.003325_WP,0.002325_WP]  ! [ postion of front half of back pipe, diameter of front half of back pipe]
-         this%poly%vert(:,3)=[-0.003325_WP,0.000825_WP]  ! [moves location of back half second pipe, changes its raidus]
-         this%poly%vert(:,4)=[-0.000825_WP,0.000825_WP]  ! [moves location of front half second pipe, changes its raidus]
-         this%poly%vert(:,5)=[-0.000825_WP,0.00143_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
+         this%poly%vert(:,1)=[-0.003325_WP,0.002325_WP]  ! [ postion of front half of back pipe, diameter of front half of back pipe]
+         this%poly%vert(:,2)=[-0.003325_WP,0.000825_WP]  ! [moves location of back half second pipe, changes its raidus]
+         this%poly%vert(:,3)=[0.00_WP,0.002325_WP]  ! [ postion of front half of back pipe, diameter of front half of back pipe]
+         this%poly%vert(:,4)=[0.00_WP,0.000825_WP]  ! [moves location of back half second pipe, changes its raidus]
+         ! this%poly%vert(:,3)=[-0.000825_WP,0.000825_WP]  ! [moves location of front half second pipe, changes its raidus]
+         ! this%poly%vert(:,4)=[-0.000825_WP,0.00143_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
          ! this%poly%vert(:,6)=[ 0.00000_WP,0.00177_WP]  ! [ , changes radius of outer portion of the end of the nozzle along y/z]
-         this%poly%vert(:,6)=[-0.000825_WP,0.00300_WP]  ! [ location of the front half of the nozzle, outer diameter of nozzle dimension along y/z]
+         ! this%poly%vert(:,5)=[-0.000825_WP,0.00300_WP]  ! [ location of the front half of the nozzle, outer diameter of nozzle dimension along y/z]
          ! this%poly%vert(:,7)=[-0.01000_WP,0.00300_WP]  ! [ , outer diameter of nozzle dimension along y/z]
+         !> Dimensions for larger pipe
+         Dout_1=0.00565_WP
+         Din_1 =0.00465_WP
+         ! !> Dimensions for smaller pipe
+         ! Dout_2=0.00565_WP
+         ! Din_1 =0.00165_WP
+
          ! Initialize IB distance field
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
-                  ! Calculate distance from object obtained by revolution of polygon
-                  this%cfg%Gib(i,j,k)=-this%poly%get_distance([this%cfg%xm(i),sqrt(this%cfg%ym(j)**2+this%cfg%zm(k)**2)])
+                  radius=sqrt(this%cfg%ym(j)**2+this%cfg%zm(k)**2)
+                  if (this%cfg%xm(i).lt.-0.003325_WP) this%cfg%Gib(i,j,k)=max(0.5_WP*Din_1-radius,radius-0.5_WP*Dout_1)
+                  ! ! Calculate distance from object obtained by revolution of polygon
+                  ! this%cfg%Gib(i,j,k)=-this%poly%get_distance([this%cfg%xm(i),sqrt(this%cfg%ym(j)**2+this%cfg%zm(k)**2)])
                end do
             end do
          end do
