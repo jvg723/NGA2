@@ -5,10 +5,12 @@ module simplex_class
    use ibconfig_class,    only: ibconfig
    use polygon_class,     only: polygon
    use surfmesh_class,    only: surfmesh
+   use partmesh_class,    only: partmesh
    use ensight_class,     only: ensight
    use hypre_str_class,   only: hypre_str
    !use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
+   use lpt_class,         only: lpt
    use vfs_class,         only: vfs
    use cclabel_class,     only: cclabel
    use iterator_class,    only: iterator
@@ -18,6 +20,7 @@ module simplex_class
    use pardata_class,     only: pardata
    use monitor_class,     only: monitor
    use timer_class,       only: timer
+   use string,            only: str_medium
    implicit none
    private
    
@@ -29,6 +32,7 @@ module simplex_class
       !> Provide a pardata and an event tracker for saving restarts
       type(event)    :: save_evt
       type(pardata)  :: df
+      character(len=str_medium) :: lpt_file
       logical :: restarted
       
       !> Input file for the simulation
@@ -46,9 +50,13 @@ module simplex_class
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
       type(cclabel)     :: ccl   !< CCLabel to transfer droplets
+
+      !> Break-up modeling
+      type(lpt)         :: lp    !< Lagrangian particle solver
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
+      type(partmesh) :: pmesh    !< For spray conversion
       type(ensight) :: ens_out   !< Ensight output for flow variables
       type(event)   :: ens_evt   !< Event trigger for Ensight output
       
@@ -784,6 +792,23 @@ contains
          ! Compute cell-centered velocity
          call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       end block initialize_velocity
+
+      ! Create lpt solver
+      create_lpt_solver: block
+         ! Create the solver
+         this%lp=lpt(cfg=this%cfg,name='spray')
+         ! Get particle density from the flow solver
+         this%lp%rho=this%fs%rho_l
+         ! Turn off drag
+         this%lp%drag_model='none'         
+         ! Initialize with zero particles
+         call this%lp%resize(0)
+         ! Get initial particle volume fraction
+         call this%lp%update_VF()               
+         ! Handle restarts
+         if (this%restarted) call this%lp%read(filename=trim(this%lpt_file))
+         call this%lp%get_max()
+      end block create_lpt_solver
       
       
       ! Create CCL
@@ -803,6 +828,24 @@ contains
          this%smesh=surfmesh(nvar=0,name='plic')
          call this%vf%update_surfmesh_nowall(this%smesh)
       end block create_smesh
+
+      ! Create partmesh object for Lagrangian particle output
+      create_pmesh_lpt: block
+         integer :: i
+         ! Include an extra variable for droplet diameter
+         this%pmesh=partmesh(nvar=2,nvec=1,name='lpt')
+         this%pmesh%varname(1)='diameter'
+         this%pmesh%varname(2)='id'
+         this%pmesh%vecname(1)='velocity'
+         ! Transfer particles to pmesh
+         call this%lp%update_partmesh(this%pmesh)
+         ! Also populate diameter variable
+         do i=1,this%lp%np_
+            this%pmesh%var(1,i)=this%lp%p(i)%d
+            this%pmesh%var(2,i)=this%lp%p(i)%id
+            this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+         end do
+      end block create_pmesh_lpt
       
       
       ! Add Ensight output
@@ -1037,6 +1080,10 @@ contains
       call this%fs%get_cfl(this%time%dt,this%time%cfl)
       call this%time%adjust_dt()
       call this%time%increment()
+
+      ! Advance our spray
+      this%resU=this%fs%rho_g; this%resV=this%fs%visc_g
+      call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
       
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
@@ -1218,6 +1265,18 @@ contains
       ! Output to ensight
       if (this%ens_evt%occurs()) then
          call this%vf%update_surfmesh_nowall(this%smesh)
+         ! Update partmesh object
+         update_pmesh: block
+            integer :: i
+            ! Transfer particles to pmesh
+            call this%lp%update_partmesh(this%pmesh)
+            ! Also populate diameter variable
+            do i=1,this%lp%np_
+               this%pmesh%var(1,i)=this%lp%p(i)%d
+               this%pmesh%var(2,i)=this%lp%p(i)%id
+               this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+            end do
+         end block update_pmesh 
          call this%ens_out%write_data(this%time%t)
       end if
       
@@ -1287,6 +1346,7 @@ contains
             call this%df%push(name='P23',var=P23         )
             call this%df%push(name='P24',var=P24         )
             call this%df%write(fdata='restart/data_'//trim(adjustl(timestamp)))
+            call this%lp%write(filename='restart/datalpt_'//trim(adjustl(timestamp)))
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
          end block save_restart
