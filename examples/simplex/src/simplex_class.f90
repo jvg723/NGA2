@@ -59,6 +59,7 @@ module simplex_class
       type(partmesh) :: pmesh    !< For spray conversion
       type(ensight) :: ens_out   !< Ensight output for flow variables
       type(event)   :: ens_evt   !< Event trigger for Ensight output
+      type(event)   :: drop_evt  !< Event to trigger droplet diameter output
       
       !> Simulation monitor file
       type(monitor) :: mfile    !< General simulation monitoring
@@ -427,15 +428,17 @@ contains
       implicit none
       class(simplex), intent(inout) :: this
       character(len=str_medium) :: filename,timestamp
-      integer :: iunit,n,m,ierr
+      integer :: iunit,np,m,ierr
       ! Only root process outputs to a file
       if (this%cfg%amRoot) then
          if (.not.isdir('spray_stats')) call makedir('spray_stats')
          filename='stats_'; write(timestamp,'(es12.5)') this%time%t
          open(newunit=iunit,file='spray_stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         do n=1,this%ccl%nstruct
-            ! ! Output list of diameters
-            ! write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+         ! Write the header
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z ','type'
+         do np=1,this%lp%np
+            write(iunit,'(f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,I2)') this%lp%p(np)%d,this%lp%p(np)%vel(1),this%lp%p(np)%vel(2),this%lp%p(np)%vel(3)&
+            &, norm2([this%lp%p(np)%vel(1),this%lp%p(np)%vel(2),this%lp%p(np)%vel(3)]),this%lp%p(np)%pos(1),this%lp%p(np)%pos(2),this%lp%p(np)%pos(3),INT(this%lp%p(np)%id)
          end do
          close(iunit)
       end if
@@ -1015,6 +1018,13 @@ contains
          this%flowrate_evt=event(time=this%time,name='Flow rate output')
          call this%input%read('Flow rate output period',this%flowrate_evt%tper,default=huge(1.0_WP))
       end block flowrate_analysis_prep
+
+      ! Create an event for spray stats analysis
+      drop_analysis: block
+         this%drop_evt=event(time=this%time,name='Drop analysis')
+         call this%input%read('Drop analysis period',this%drop_evt%tper)
+         if (this%drop_evt%occurs()) call this%analyze_drops()
+      end block drop_analysis
       
       
    contains
@@ -1365,6 +1375,9 @@ contains
       
       ! Output flow rate
       if (this%flowrate_evt%occurs()) call this%analyze_flowrate()
+
+      ! Output spray stats
+      if (this%drop_evt%occurs()) call this%analyze_drops()
       
       ! Stop timestep timer
       call this%tstep%stop()
