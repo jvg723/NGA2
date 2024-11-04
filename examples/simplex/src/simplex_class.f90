@@ -97,6 +97,12 @@ module simplex_class
       real(WP), dimension(3) :: n1=[+0.6_WP,-0.8_WP,0.0_WP]
       real(WP), dimension(3) :: n2=[+0.6_WP,+0.8_WP,0.0_WP]
       real(WP) :: Ucoflow,mfr,Apipe
+
+      !> Transfer model parameters
+      real(WP) :: min_filmthickness      =1.0e-3_WP
+      real(WP) :: max_eccentricity       =8.0e-1_WP
+      real(WP) :: d_threshold            =6.0e-1_WP
+      real(WP) :: vol_convert            =0.0_WP
       
    contains
       procedure :: init                            !< Initialize simplex simulation
@@ -178,14 +184,16 @@ contains
    
    !> Transfer droplet to Lagrangian representation
    subroutine transfer_drops(this)
+      use mathtools, only: pi
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX,MPI_INTEGER
       use parallel, only: MPI_REAL_WP
       use irl_fortran_interface
+      use messager, only: die
       class(simplex), intent(inout) :: this
       ! Stats from the ccl objects
       real(WP), dimension(:), allocatable :: x,y,z,u,v,w,vol
       real(WP), dimension(:,:), allocatable :: lengths   
-      integer :: n,nn,nnn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,per_x,per_y,per_z
+      integer :: n,nn,nnn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,per_x,per_y,per_z,transfered_,transfered
       ! Allocate variables to get stats
       real(WP), dimension(:), allocatable :: vol_,x_vol_,y_vol_,z_vol_
       real(WP), dimension(:), allocatable :: u_vol_,v_vol_,w_vol_
@@ -194,6 +202,9 @@ contains
       real(WP), dimension(:), allocatable :: z_min_,z_min,z_max_,z_max
       real(WP), dimension(:,:,:), allocatable :: Imom_,Imom
       real(WP) :: xtmp,ytmp,ztmp
+      ! Varaibles determing transfer
+      real(WP) :: diam,lmin,lmax,eccentricity,myint,integral
+      logical :: autotransfer
       ! Moment of inertia variable
       real(WP), dimension(:), allocatable :: work
       real(WP), dimension(1)   :: lwork_query
@@ -318,24 +329,71 @@ contains
       deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
       deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
 
-      ! Find the liquid core
-      !nmax=maxloc(dvol,dim=1)
-      
-      ! Second pass to transfer drops
-      !do n=1,this%ccl%nstruct
-      !   ! Skip structures that do not meet our criteria
-      !   if (n.eq.nmax) cycle
-      !   ! Remove all other structures
-      !   do m=1,this%ccl%struct(n)%n_
-      !      this%vf%VF(this%ccl%struct(n)%map(1,m),this%ccl%struct(n)%map(2,m),this%ccl%struct(n)%map(3,m))=0.0_WP
-      !   end do
-      !   ! Create a droplet instead
-      !
-      !end do
-      !call this%vf%sync_interface()
-      !call this%vf%clean_irl_and_band()
-      
+      ! stats of the ligaments that will be used for modeling breakup
+      allocate(x(1:this%ccl%nstruct),y(1:this%ccl%nstruct),z(1:this%ccl%nstruct));x=0.0_WP;y=0.0_WP;z=0.0_WP
+      allocate(u(1:this%ccl%nstruct),v(1:this%ccl%nstruct),w(1:this%ccl%nstruct));u=0.0_WP;v=0.0_WP;w=0.0_WP
+      allocate(lengths(1:this%ccl%nstruct,1:3));lengths=0.0_WP
+      allocate(vol(1:this%ccl%nstruct));vol=0.0_WP;
+      myint =0.0_WP; integral =0.0_WP; transfered_ = 0
 
+      ! Second pass to transfer drops
+      do n=1,this%ccl%nstruct
+         
+         diam=(6.0_WP*vol(n)/pi)**(1.0_WP/3.0_WP)
+         autotransfer=.false.
+         ! Test if structure is at end of domain
+         if (x(n).gt.this%vf%cfg%x(this%vf%cfg%imax-10)) autotransfer=.true.
+         if (.not.autotransfer) then
+            ! Test if sphericity is compatible with transfer
+            lmin=lengths(n,3)
+            if (lmin.eq.0.0_WP) lmin=lengths(n,2) ! Handle 2D case
+            lmax=lengths(n,1)
+            eccentricity=sqrt(1.0_WP-lmin**2/(lmax**2+tiny(1.0_WP)))
+
+            if (eccentricity.gt.this%max_eccentricity) cycle
+            if ((diam.eq.0.0_WP).or.(diam.gt.this%d_threshold)) cycle
+         end if
+         
+         ! Create drop from available liquid volume - only one root does that
+         if (this%vf%cfg%amRoot) then
+            transfered_ = 1
+            ! Make room for new drop
+            np=this%lp%np_+1; call this%lp%resize(np)
+            ! Add the drop
+            this%lp%p(np)%id  =int(1,8)                                                                                 
+            this%lp%p(np)%dt  =0.0_WP                                                                                   
+            this%lp%p(np)%Acol =0.0_WP                                                                                  
+            this%lp%p(np)%Tcol =0.0_WP                                                                                  
+            this%lp%p(np)%d   =diam                                                                                     
+            this%lp%p(np)%pos =[x(n),y(n),z(n)] 
+            this%lp%p(np)%vel =[u(n),v(n),w(n)] 
+            this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])               
+            this%lp%p(np)%flag=0                                                                                        
+            ! Increment particle counter
+            this%lp%np_=np
+         end if
+
+         ! Find local structs with matching id
+         do nn=1,this%ccl%struct(n)%n_
+            i=this%ccl%struct(n)%map(1,nn);j=this%ccl%struct(n)%map(2,nn);k=this%ccl%struct(n)%map(3,nn)
+            myint = myint + this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+            this%vf%VF(i,j,k)=0.0_WP
+         end do
+         ! vol(n) = 0.0_WP
+      end do
+
+      call MPI_ALLREDUCE(transfered_,transfered,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
+      if (transfered .gt. 0) then 
+         ! Sync VF and clean up IRL and band
+         call this%vf%cfg%sync(this%vf%VF)
+         call this%vf%clean_irl_and_band()
+         call MPI_ALLREDUCE(myint,integral,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) ! total converted liquid volume this timestep
+         this%vol_convert = this%vol_convert + integral 
+         call this%lp%sync()
+      end if
+
+      deallocate(x,y,z,u,v,w,vol,lengths)
+      
       
    contains
       
@@ -885,6 +943,7 @@ contains
          call this%mfile%add_column(this%fs%Pmax,'Pmax')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
          call this%mfile%add_column(this%vof_removed,'VOF removed')
+         call this%mfile%add_column(this%vol_convert,'VOL converted')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
