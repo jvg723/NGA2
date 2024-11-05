@@ -110,7 +110,6 @@ module simplex_class
       procedure :: final                           !< Finalize simplex simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
-      procedure :: analyze_drops                   !< Post-process droplet diameter using ccl
    end type simplex
    
    
@@ -216,8 +215,6 @@ contains
       
       ! Start by performing a CCL
       call this%ccl%build(make_label,same_label)
-
-      if (this%vf%cfg%amRoot) print*, this%ccl%nstruct
       
       ! Allocate droplet stats arrays
       allocate(vol_(1:this%ccl%nstruct));vol_=0.0_WP
@@ -340,21 +337,6 @@ contains
       
       ! Second pass to transfer drops
       do n=1,this%ccl%nstruct
-         
-         ! diam=(6.0_WP*vol(n)/pi)**(1.0_WP/3.0_WP)
-         ! autotransfer=.false.
-         ! ! Test if structure is at end of domain
-         ! if (x(n).gt.this%vf%cfg%x(this%vf%cfg%imax-10)) autotransfer=.true.
-         ! if (.not.autotransfer) then
-         !    ! Test if sphericity is compatible with transfer
-         !    lmin=lengths(n,3)
-         !    if (lmin.eq.0.0_WP) lmin=lengths(n,2) ! Handle 2D case
-         !    lmax=lengths(n,1)
-         !    eccentricity=sqrt(1.0_WP-lmin**2/(lmax**2+tiny(1.0_WP)))
-
-         !    if (eccentricity.gt.this%max_eccentricity) cycle
-         !    if ((diam.eq.0.0_WP).or.(diam.gt.this%d_threshold)) cycle
-         ! end if
 
          ! Test if sphericity is compatible with transfer
          lmin=lengths(n,3)
@@ -424,31 +406,6 @@ contains
       end function same_label
       
    end subroutine transfer_drops
-
-   !> Perform droplet analysis
-   subroutine analyze_drops(this)
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-      use parallel,  only: MPI_REAL_WP
-      use string,    only: str_medium
-      use filesys,   only: makedir,isdir
-      implicit none
-      class(simplex), intent(inout) :: this
-      character(len=str_medium) :: filename,timestamp
-      integer :: iunit,np,m,ierr
-      ! Only root process outputs to a file
-      if (this%cfg%amRoot) then
-         if (.not.isdir('spray_stats')) call makedir('spray_stats')
-         filename='stats_'; write(timestamp,'(es12.5)') this%time%t
-         open(newunit=iunit,file='spray_stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         ! Write the header
-         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z ','type'
-         do np=1,this%lp%np
-            write(iunit,'(f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,f24.16,3x,I2)') this%lp%p(np)%d,this%lp%p(np)%vel(1),this%lp%p(np)%vel(2),this%lp%p(np)%vel(3)&
-            &, norm2([this%lp%p(np)%vel(1),this%lp%p(np)%vel(2),this%lp%p(np)%vel(3)]),this%lp%p(np)%pos(1),this%lp%p(np)%pos(2),this%lp%p(np)%pos(3),INT(this%lp%p(np)%id)
-         end do
-         close(iunit)
-      end if
-   end subroutine analyze_drops
    
    
    !> Initialization of simplex simulation
@@ -1026,12 +983,6 @@ contains
          call this%input%read('Flow rate output period',this%flowrate_evt%tper,default=huge(1.0_WP))
       end block flowrate_analysis_prep
 
-      ! Create an event for spray stats analysis
-      drop_analysis: block
-         this%drop_evt=event(time=this%time,name='Drop analysis')
-         call this%input%read('Drop analysis period',this%drop_evt%tper)
-         if (this%drop_evt%occurs()) call this%analyze_drops()
-      end block drop_analysis
       
       
    contains
@@ -1383,9 +1334,6 @@ contains
       ! Output flow rate
       if (this%flowrate_evt%occurs()) call this%analyze_flowrate()
 
-      ! Output spray stats
-      if (this%drop_evt%occurs()) call this%analyze_drops()
-      
       ! Stop timestep timer
       call this%tstep%stop()
       
