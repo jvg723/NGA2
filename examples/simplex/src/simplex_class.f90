@@ -848,7 +848,7 @@ contains
          ! Get particle density from the flow solver
          this%lp%rho=this%fs%rho_l
          ! Turn off drag
-         this%lp%drag_model='none'         
+         this%lp%drag_model='Schiller Naumann'         
          ! Initialize with zero particles
          call this%lp%resize(0)
          ! Get initial particle volume fraction
