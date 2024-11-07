@@ -52,9 +52,6 @@ module simplex_class
       type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
       type(timetracker) :: time  !< Time info
       type(cclabel)     :: ccl   !< CCLabel to transfer droplets
-
-      !> Break-up modeling
-      type(lpt)         :: lp    !< Lagrangian particle solver
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
