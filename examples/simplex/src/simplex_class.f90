@@ -1,6 +1,7 @@
 !> Definition for a simplex class
 module simplex_class
    use precision,         only: WP
+   use string,            only: str_medium
    use inputfile_class,   only: inputfile
    use ibconfig_class,    only: ibconfig
    use polygon_class,     only: polygon
@@ -12,6 +13,7 @@ module simplex_class
    use tpns_class,        only: tpns
    use lpt_class,         only: lpt
    use vfs_class,         only: vfs
+   use lpt_class,         only: lpt
    use cclabel_class,     only: cclabel
    use iterator_class,    only: iterator
    use sgsmodel_class,    only: sgsmodel
@@ -56,14 +58,12 @@ module simplex_class
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
-      type(partmesh) :: pmesh    !< For spray conversion
-      type(ensight) :: ens_out   !< Ensight output for flow variables
-      type(event)   :: ens_evt   !< Event trigger for Ensight output
-      type(event)   :: drop_evt  !< Event to trigger droplet diameter output
+      type(ensight)  :: ens_out  !< Ensight output for flow variables
+      type(event)    :: ens_evt  !< Event trigger for Ensight output
       
       !> Simulation monitor file
-      type(monitor) :: mfile    !< General simulation monitoring
-      type(monitor) :: cflfile  !< CFL monitoring
+      type(monitor) :: mfile     !< General simulation monitoring
+      type(monitor) :: cflfile   !< CFL monitoring
       
       !> Work arrays
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU           !< Velocity gradient
@@ -73,8 +73,8 @@ module simplex_class
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
-      real(WP) :: vof_removed              !< Integral of VOF removed
-      integer :: nlayer=4                  !< Size of buffer layer for VOF removal
+      real(WP)       :: vof_removed        !< Integral of VOF removed
+      integer        :: nlayer=4           !< Size of buffer layer for VOF removal
       
       !> Timing info
       type(monitor) :: timefile !< Timing monitoring
@@ -87,6 +87,16 @@ module simplex_class
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
+      
+      !> Drop transfer modeling
+      logical :: use_drop_transfer !< Do we use droplet transfer
+      type(lpt)      :: lp         !< Lagrangian particle tracking
+      type(monitor)  :: pfile      !< Particle monitoring
+      type(partmesh) :: pmesh      !< Particle mesh for lpt
+      real(WP) :: dmax             !< Maximum diameter for transfer
+      real(WP) :: dmin             !< Minimum diameter below which transfer is automatic
+      real(WP) :: emax             !< Maximum eccentricity for transfer
+      real(WP) :: vof_transfered   !< Integral of VOF transfered
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -184,206 +194,198 @@ contains
    
    !> Transfer droplet to Lagrangian representation
    subroutine transfer_drops(this)
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
       use mathtools, only: pi
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX,MPI_INTEGER
-      use parallel, only: MPI_REAL_WP
-      use irl_fortran_interface
-      use messager, only: die
       class(simplex), intent(inout) :: this
-      ! Stats from the ccl objects
-      real(WP), dimension(:), allocatable :: x,y,z,u,v,w,vol
-      real(WP), dimension(:,:), allocatable :: lengths   
-      integer :: n,nn,nnn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,per_x,per_y,per_z,transfered_,transfered
-      ! Allocate variables to get stats
-      real(WP), dimension(:), allocatable :: vol_,x_vol_,y_vol_,z_vol_
-      real(WP), dimension(:), allocatable :: u_vol_,v_vol_,w_vol_
-      real(WP), dimension(:), allocatable :: x_min_,x_min,x_max_,x_max
-      real(WP), dimension(:), allocatable :: y_min_,y_min,y_max_,y_max
-      real(WP), dimension(:), allocatable :: z_min_,z_min,z_max_,z_max
-      real(WP), dimension(:,:,:), allocatable :: Imom_,Imom
-      real(WP) :: xtmp,ytmp,ztmp
-      ! Varaibles determing transfer
-      real(WP) :: diam,lmin,lmax,eccentricity,myint,integral
-      logical :: autotransfer
-      ! Moment of inertia variable
-      real(WP), dimension(:), allocatable :: work
-      real(WP), dimension(1)   :: lwork_query
+      real(WP), dimension(:)    , allocatable :: dvol
+      real(WP), dimension(:,:)  , allocatable :: dpos
+      real(WP), dimension(:,:)  , allocatable :: dvel
+      real(WP), dimension(:,:,:), allocatable :: dmoi
+      real(WP), dimension(:)    , allocatable :: drem
+      integer :: n,m,ierr,i,j,k,nmax
+      real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
+      logical :: transfer
+      ! Moment of inertia calculation using lapack
+      real(WP), dimension(:), allocatable, save :: work !< Saved!
+      integer, save :: lwork                            !< Saved!
+      real(WP), dimension(1) :: lwork_query
       real(WP), dimension(3) :: d
       real(WP), dimension(3,3) :: A
-      integer , parameter :: order = 3
-      integer  :: lwork,info
+      integer :: info
+      
+      ! Query optimal work array size
+      if (.not.allocated(work)) then
+         call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+         lwork=int(lwork_query(1)); allocate(work(lwork))
+      end if
       
       ! Start by performing a CCL
       call this%ccl%build(make_label,same_label)
       
       ! Allocate droplet stats arrays
-      allocate(vol_(1:this%ccl%nstruct));vol_=0.0_WP
-      allocate(x_min(1:this%ccl%nstruct),x_min_(1:this%ccl%nstruct));x_min=0.0_WP;x_min_= 10000.0_WP
-      allocate(x_max(1:this%ccl%nstruct),x_max_(1:this%ccl%nstruct));x_max=0.0_WP;x_max_=-10000.0_WP
-      allocate(y_min(1:this%ccl%nstruct),y_min_(1:this%ccl%nstruct));y_min=0.0_WP;y_min_= 10000.0_WP
-      allocate(y_max(1:this%ccl%nstruct),y_max_(1:this%ccl%nstruct));y_max=0.0_WP;y_max_=-10000.0_WP
-      allocate(z_min(1:this%ccl%nstruct),z_min_(1:this%ccl%nstruct));z_min=0.0_WP;z_min_= 10000.0_WP
-      allocate(z_max(1:this%ccl%nstruct),z_max_(1:this%ccl%nstruct));z_max=0.0_WP;z_max_=-10000.0_WP
-      allocate(x_vol_(1:this%ccl%nstruct),y_vol_(1:this%ccl%nstruct),z_vol_(1:this%ccl%nstruct));x_vol_=0.0_WP;y_vol_=0.0_WP;z_vol_=0.0_WP
-      allocate(u_vol_(1:this%ccl%nstruct),v_vol_(1:this%ccl%nstruct),w_vol_(1:this%ccl%nstruct));u_vol_=0.0_WP;v_vol_=0.0_WP;w_vol_=0.0_WP
-      allocate(Imom(1:this%ccl%nstruct,3,3),Imom_(1:this%ccl%nstruct,3,3));Imom=0.0_WP;Imom_=0.0_WP
-
-      ! stats of the ligaments that will be used for modeling breakup
-      allocate(x(1:this%ccl%nstruct),y(1:this%ccl%nstruct),z(1:this%ccl%nstruct));x=0.0_WP;y=0.0_WP;z=0.0_WP
-      allocate(u(1:this%ccl%nstruct),v(1:this%ccl%nstruct),w(1:this%ccl%nstruct));u=0.0_WP;v=0.0_WP;w=0.0_WP
-      allocate(lengths(1:this%ccl%nstruct,1:3));lengths=0.0_WP
-      allocate(vol(1:this%ccl%nstruct));vol=0.0_WP;
-      myint =0.0_WP; integral =0.0_WP; transfered_ = 0
-      ! Query optimal work array size
-      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-      ! First pass: loop over individual structures and accumulate stats
+      allocate(dvol(1:this%ccl%nstruct        )); dvol=0.0_WP
+      allocate(dpos(1:this%ccl%nstruct,1:3    )); dpos=0.0_WP
+      allocate(dvel(1:this%ccl%nstruct,1:3    )); dvel=0.0_WP
+      allocate(dmoi(1:this%ccl%nstruct,1:3,1:3)); dmoi=0.0_WP
+      allocate(drem(1:this%ccl%nstruct        )); drem=0.0_WP
+      
+      ! First pass to accumulate volume, position, and velocity
       do n=1,this%ccl%nstruct
-         ! Periodicity
-         per_x = this%ccl%struct(n)%per(1); per_y = this%ccl%struct(n)%per(2); per_z = this%ccl%struct(n)%per(3)
-         ! get number of local cells
-         do nn=1,this%ccl%struct(n)%n_
-            i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
-            ! Location of struct node
-            xtmp = this%vf%cfg%xm(i)-per_x*this%vf%cfg%xL
-            ytmp = this%vf%cfg%ym(j)-per_y*this%vf%cfg%yL
-            ztmp = this%vf%cfg%zm(k)-per_z*this%vf%cfg%zL
-            ! Volume
-            vol_(n) = vol_(n) + this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            ! Center of gravity
-            x_vol_(n) = x_vol_(n) + xtmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            y_vol_(n) = y_vol_(n) + ytmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            z_vol_(n) = z_vol_(n) + ztmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            ! Average gas velocity inside struct
-            u_vol_(n) = u_vol_(n) + this%fs%U(i,j,k)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            v_vol_(n) = v_vol_(n) + this%fs%V(i,j,k)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            w_vol_(n) = w_vol_(n) + this%fs%W(i,j,k)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+         ! Loop over cells in structure
+         do m=1,this%ccl%struct(n)%n_
+            ! Get cell indices
+            i=this%ccl%struct(n)%map(1,m)
+            j=this%ccl%struct(n)%map(2,m)
+            k=this%ccl%struct(n)%map(3,m)
+            ! Get cell position, accounting for periodicity
+            x=this%vf%cfg%xm(i)-this%ccl%struct(n)%per(1)*this%vf%cfg%xL
+            y=this%vf%cfg%ym(j)-this%ccl%struct(n)%per(2)*this%vf%cfg%yL
+            z=this%vf%cfg%zm(k)-this%ccl%struct(n)%per(3)*this%vf%cfg%zL
+            ! Accumulate volume, position, and velocity
+            dvol(n  )=dvol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            dpos(n,:)=dpos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
+            dvel(n,:)=dvel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
+            ! Check if drop touches auto-transfer layer
+            if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
+            &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
+            &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
+            &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
+            &   k.ge.this%vf%cfg%kmax-this%nlayer) drem(n)=1.0_WP
          end do
       end do
-      ! Sum parallel stats
-      call MPI_ALLREDUCE(vol_,vol,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(x_vol_,x,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(y_vol_,y,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(z_vol_,z,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(u_vol_,u,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(v_vol_,v,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(w_vol_,w,this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,1*this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dpos,3*this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dvel,3*this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,drem,1*this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      
+      ! Second pass to accumulate moment of inertia
       do n=1,this%ccl%nstruct
-         ! Periodicity
-         per_x = this%ccl%struct(n)%per(1); per_y = this%ccl%struct(n)%per(2); per_z = this%ccl%struct(n)%per(3)
-         do nn=1,this%ccl%struct(n)%n_
-            ! Indices of struct node
-            i=this%ccl%struct(n)%map(1,nn); j=this%ccl%struct(n)%map(2,nn); k=this%ccl%struct(n)%map(3,nn)
-            xtmp = this%vf%cfg%xm(i)-per_x*this%vf%cfg%xL-x(n)/vol(n)
-            ytmp = this%vf%cfg%ym(j)-per_y*this%vf%cfg%yL-y(n)/vol(n)
-            ztmp = this%vf%cfg%zm(k)-per_z*this%vf%cfg%zL-z(n)/vol(n)
-            ! Moment of Inertia
-            Imom_(n,1,1) = Imom_(n,1,1) + (ytmp**2 + ztmp**2)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            Imom_(n,2,2) = Imom_(n,2,2) + (xtmp**2 + ztmp**2)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            Imom_(n,3,3) = Imom_(n,3,3) + (xtmp**2 + ytmp**2)*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            Imom_(n,1,2) = Imom_(n,1,2) - xtmp*ytmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            Imom_(n,1,3) = Imom_(n,1,3) - xtmp*ztmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            Imom_(n,2,3) = Imom_(n,2,3) - ytmp*ztmp*this%vf%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-            do nnn=1,2
-               if (getNumberOfVertices(this%vf%interface_polygon(nnn,i,j,k)).gt.0) then
-                  d = calculateCentroid(this%vf%interface_polygon(nnn,i,j,k))
-                  x_min_(n) = min(x_min_(n),d(1)); x_max_(n) = max(x_max_(n),d(1))
-                  y_min_(n) = min(y_min_(n),d(2)); y_max_(n) = max(y_max_(n),d(2))
-                  z_min_(n) = min(z_min_(n),d(3)); z_max_(n) = max(z_max_(n),d(3))
-               end if
-            end do
-         end do 
-      end do
-
-      ! Sum parallel stat on Imom
-      do i=1,3
-         do j=1,3
-            call MPI_ALLREDUCE(Imom_(:,i,j),Imom(:,i,j),this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         ! Get drop barycenter
+         x0=dpos(n,1)/dvol(n)
+         y0=dpos(n,2)/dvol(n)
+         z0=dpos(n,3)/dvol(n)
+         ! Loop over cells in structure
+         do m=1,this%ccl%struct(n)%n_
+            ! Get cell indices
+            i=this%ccl%struct(n)%map(1,m)
+            j=this%ccl%struct(n)%map(2,m)
+            k=this%ccl%struct(n)%map(3,m)
+            ! Get cell position relative to drop barycenter, accounting for periodicity
+            x=this%vf%cfg%xm(i)-this%ccl%struct(n)%per(1)*this%vf%cfg%xL-x0
+            y=this%vf%cfg%ym(j)-this%ccl%struct(n)%per(2)*this%vf%cfg%yL-y0
+            z=this%vf%cfg%zm(k)-this%ccl%struct(n)%per(3)*this%vf%cfg%zL-z0
+            ! Accumulate moment of inertia
+            dmoi(n,1,1)=dmoi(n,1,1)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y**2+z**2)
+            dmoi(n,2,2)=dmoi(n,2,2)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(z**2+x**2)
+            dmoi(n,3,3)=dmoi(n,3,3)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x**2+y**2)
+            dmoi(n,1,2)=dmoi(n,1,2)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x*y)
+            dmoi(n,1,3)=dmoi(n,1,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x*z)
+            dmoi(n,2,3)=dmoi(n,2,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y*z)
          end do
       end do
-      ! Get extents
-      call MPI_ALLREDUCE(x_min_,x_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(x_max_,x_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(y_min_,y_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(y_max_,y_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(z_min_,z_min,this%ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(z_max_,z_max,this%ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-      ! Store data
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dmoi,9*this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      
+      ! Third pass to generate normalized drop stats
       do n=1,this%ccl%nstruct
-         ! Center of gravity
-         x(n) = x(n)/vol(n); y(n) = y(n)/vol(n); z(n) = z(n)/vol(n)
-         ! Periodicity: transport back inside domain if needed
-         if (x(n).lt.this%vf%cfg%x(this%vf%cfg%imin)) x(n) = x(n)+this%vf%cfg%xL
-         if (y(n).lt.this%vf%cfg%y(this%vf%cfg%jmin)) y(n) = y(n)+this%vf%cfg%yL
-         if (z(n).lt.this%vf%cfg%z(this%vf%cfg%kmin)) z(n) = z(n)+this%vf%cfg%zL
-         u(n)=u(n)/vol(n); v(n)=v(n)/vol(n); w(n)=w(n)/vol(n)
-         ! Eigenvalues/eigenvectors of moments of inertia tensor
-         A = Imom(n,:,:); nnn = 3
-         ! On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
-         call dsyev('V','U',nnn,A,nnn,d,work,lwork,info)
-         ! Get rid of very small negative values (due to machine accuracy)
-         d = max(0.0_WP,d)
-         ! Store characteristic lengths
-         lengths(n,1) = sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/vol(n))
-         lengths(n,2) = sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/vol(n))
-         lengths(n,3) = sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/vol(n))
-         ! Zero out length in 3rd dimension if 2D
-         if (this%vf%cfg%nx.eq.1.or.this%vf%cfg%ny.eq.1.or.this%vf%cfg%nz.eq.1) lengths(n,3)=0.0_WP
+         ! Get drop barycenter, accounting for periodicity
+         dpos(n,:)=dpos(n,:)/dvol(n)
+         if (this%vf%cfg%xper.and.dpos(n,1).lt.this%vf%cfg%x(this%vf%cfg%imin)) dpos(n,1)=dpos(n,1)+this%vf%cfg%xL
+         if (this%vf%cfg%yper.and.dpos(n,2).lt.this%vf%cfg%y(this%vf%cfg%jmin)) dpos(n,2)=dpos(n,2)+this%vf%cfg%yL
+         if (this%vf%cfg%zper.and.dpos(n,3).lt.this%vf%cfg%z(this%vf%cfg%kmin)) dpos(n,3)=dpos(n,3)+this%vf%cfg%zL
+         ! Get drop velocity
+         dvel(n,:)=dvel(n,:)/dvol(n)
       end do
       
-      ! Deallocate arrays
-      deallocate(vol_,x_vol_,y_vol_,z_vol_,u_vol_,v_vol_,w_vol_,Imom_,Imom)
-      deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
-      deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
+      ! Find the liquid core
+      nmax=maxloc(dvol,dim=1)
       
-      ! Second pass to transfer drops
+      ! Zero out monitoring variables
+      this%vof_transfered=0.0_WP
+      this%lp%np_new=0
+      
+      ! Transfer drops based on our criteria
       do n=1,this%ccl%nstruct
-
-         ! Test if sphericity is compatible with transfer
-         lmin=lengths(n,3)
-         if (lmin.eq.0.0_WP) lmin=lengths(n,2) ! Handle 2D case
-         lmax=lengths(n,1)
-         eccentricity=sqrt(1.0_WP-lmin**2/(lmax**2+tiny(1.0_WP)))
-         diam=(6.0_WP*vol(n)/pi)**(1.0_WP/3.0_WP)
-         if (eccentricity.gt.this%max_eccentricity) cycle
-         if ((diam.eq.0.0_WP).or.(diam.gt.this%d_threshold)) cycle
          
-         ! Create drop from available liquid volume - only one root does that
-         if (this%vf%cfg%amRoot) then
-            transfered_ = 1
-            ! Make room for new drop
-            np=this%lp%np_+1; call this%lp%resize(np)
-            ! Add the drop
-            this%lp%p(np)%id  =int(1,8)                                                                                 
-            this%lp%p(np)%dt  =0.0_WP                                                                                   
-            this%lp%p(np)%Acol =0.0_WP                                                                                  
-            this%lp%p(np)%Tcol =0.0_WP                                                                                  
-            this%lp%p(np)%d   =diam                                                                                     
-            this%lp%p(np)%pos =[x(n),y(n),z(n)] 
-            this%lp%p(np)%vel =[u(n),v(n),w(n)] 
-            this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])               
-            this%lp%p(np)%flag=0                                                                                        
-            ! Increment particle counter
-            this%lp%np_=np
+         ! Compute diameter
+         diam=(6.0_WP*dvol(n)/pi)**(1.0_WP/3.0_WP)
+         
+         ! Decide whether to transfer based on diameter
+         if (diam.gt.this%dmax) then
+            ! Too big to transfer
+            transfer=.false.
+         else if (diam.lt.this%dmin) then
+            ! Small enough to transfer automatically
+            transfer=.true.
+         else
+            ! In between, check eccentricity from moment of inertia tensor
+            A=dmoi(n,:,:)
+            call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
+            d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
+            ! Get characteristic lengths of drop
+            lmax=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/dvol(n))
+            lmid=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/dvol(n))
+            lmin=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/dvol(n))
+            if (lmin.eq.0.0_WP) lmin=lmid ! Handle 2D case
+            ecc=sqrt(1.0_WP-lmin**2/(lmax**2+epsilon(1.0_WP)))
+            if (ecc.gt.this%emax) then
+               ! Too eccentric to transfer yet
+               transfer=.false.
+            else
+               ! Spherical enough to transfer
+               transfer=.true.
+            end if
          end if
+         
+         ! Force transfer if drop touches auto-transfer layer
+         if (drem(n).gt.0.0_WP) transfer=.true.
+         
+         ! But prevent transfer if that's the core
+         if (n.eq.nmax) transfer=.false.
+         
+         ! Perform transfer
+         if (transfer) then
+            
+            ! Root creates a new Lagrangian drop
+            if (this%vf%cfg%amRoot) then
+               ! Increment particle counter
+               this%lp%np_=this%lp%np_+1
+               ! Make room for new drop
+               call this%lp%resize(this%lp%np_)
+               ! Add the drop
+               this%lp%p(this%lp%np_)%id  =int(1,8)
+               this%lp%p(this%lp%np_)%d   =diam
+               this%lp%p(this%lp%np_)%pos =dpos(n,:)
+               this%lp%p(this%lp%np_)%vel =dvel(n,:)
+               this%lp%p(this%lp%np_)%ind =this%lp%cfg%get_ijk_global(dpos(n,:),[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+               this%lp%p(this%lp%np_)%flag=0
+               this%lp%p(this%lp%np_)%dt  =0.0_WP
+               this%lp%p(this%lp%np_)%Acol=0.0_WP
+               this%lp%p(this%lp%np_)%Tcol=0.0_WP
+            end if
+            
+            ! Zero out VF in the structure
+            do m=1,this%ccl%struct(n)%n_
+               this%vf%VF(this%ccl%struct(n)%map(1,m),this%ccl%struct(n)%map(2,m),this%ccl%struct(n)%map(3,m))=0.0_WP
+            end do
+            
+            ! Increment monitoring variables
+            this%vof_transfered=this%vof_transfered+dvol(n)
+            this%lp%np_new=this%lp%np_new+1
 
-         ! Find local structs with matching id
-         do nn=1,this%ccl%struct(n)%n_
-            i=this%ccl%struct(n)%map(1,nn);j=this%ccl%struct(n)%map(2,nn);k=this%ccl%struct(n)%map(3,nn)
-            myint = myint + this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
-            this%vf%VF(i,j,k)=0.0_WP
-         end do
-         ! vol(n) = 0.0_WP
+         end if
+         
       end do
-      call MPI_ALLREDUCE(transfered_,transfered,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
-      if (transfered .gt. 0) then 
-         ! Sync VF and clean up IRL and band
-         call this%vf%cfg%sync(this%vf%VF)
-         call this%vf%clean_irl_and_band()
-         call MPI_ALLREDUCE(myint,integral,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr) ! total converted liquid volume this timestep
-         this%vol_convert = this%vol_convert + integral 
-         call this%lp%sync()
-      end if
-      deallocate(x,y,z,u,v,w,vol,lengths)
+      
+      ! Synchronize VF fields
+      call this%vf%sync_interface()
+      call this%vf%clean_irl_and_band()
+      
+      ! Synchronize particles
+      call this%lp%sync()
+      
+      ! Deallocate all but work array
+      deallocate(dvol,dpos,dvel,dmoi,drem)
       
    contains
       
@@ -594,47 +596,6 @@ contains
       end block initialize_timetracker
       
       
-      ! Handle restart/saves here
-      restart_and_save: block
-         use string,  only: str_medium
-         use filesys, only: makedir,isdir
-         character(len=str_medium) :: filename
-         integer, dimension(3) :: iopartition
-         ! Create event for saving restart files
-         this%save_evt=event(this%time,'Restart output')
-         call this%input%read('Restart output period',this%save_evt%tper)
-         ! Check if we are restarting
-         call this%input%read('Restart from',filename,default='')
-         this%restarted=.false.; if (len_trim(filename).gt.0) this%restarted=.true.
-         ! Read in the I/O partition
-         call this%input%read('I/O partition',iopartition)
-         ! Perform pardata initialization
-         if (this%restarted) then
-            ! We are restarting, read the file
-            call this%df%initialize(pg=this%cfg,iopartition=iopartition,fdata='restart/'//trim(filename))
-         else
-            ! We are not restarting, prepare a new directory for storing restart files
-            if (this%cfg%amRoot) then
-               if (.not.isdir('restart')) call makedir('restart')
-            end if
-            ! Prepare pardata object for saving restart files
-            call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=15)
-            this%df%valname=['t ','dt']
-            this%df%varname=['U  ','V  ','W  ','P  ','Pjx','Pjy','Pjz','P11','P12','P13','P14','P21','P22','P23','P24']
-         end if
-      end block restart_and_save
-      
-      
-      ! Revisit timetracker to adjust time and time step values if this is a restart
-      update_timetracker: block
-         if (this%restarted) then
-            call this%df%pull(name='t' ,val=this%time%t )
-            call this%df%pull(name='dt',val=this%time%dt)
-            this%time%told=this%time%t-this%time%dt
-         end if
-      end block update_timetracker
-      
-      
       ! Allocate work arrays
       allocate_work_arrays: block
          allocate(this%gradU(1:3,1:3,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
@@ -651,109 +612,48 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use vfs_class, only: remap,plicnet,r2p,r2pnet,lvira
-         use irl_fortran_interface
          integer :: i,j,k
          real(WP) :: rad
-         real(WP), dimension(:,:,:), allocatable :: P11,P12,P13,P14
-         real(WP), dimension(:,:,:), allocatable :: P21,P22,P23,P24
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
-         !this%vf%twoplane_thld2=0.3_WP
-         !this%vf%thin_thld_min=1.0e-3_WP
-         ! Initialize the interface including restarts
-         if (this%restarted) then
-            ! Read in the planes directly and set the IRL interface
-            allocate(P11(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P11',var=P11)
-            allocate(P12(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P12',var=P12)
-            allocate(P13(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P13',var=P13)
-            allocate(P14(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P14',var=P14)
-            allocate(P21(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P21',var=P21)
-            allocate(P22(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P22',var=P22)
-            allocate(P23(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P23',var=P23)
-            allocate(P24(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P24',var=P24)
-            do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
-               do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
-                  do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
-                     ! Check if the second plane is meaningful
-                     if (this%vf%two_planes.and.P21(i,j,k)**2+P22(i,j,k)**2+P23(i,j,k)**2.gt.0.0_WP) then
-                        call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),2)
-                        call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[P11(i,j,k),P12(i,j,k),P13(i,j,k)],P14(i,j,k))
-                        call setPlane(this%vf%liquid_gas_interface(i,j,k),1,[P21(i,j,k),P22(i,j,k),P23(i,j,k)],P24(i,j,k))
-                     else
-                        call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
-                        call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[P11(i,j,k),P12(i,j,k),P13(i,j,k)],P14(i,j,k))
-                     end if
-                  end do
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         this%vf%thin_thld_min=0.0_WP
+         this%vf%flotsam_thld=0.0_WP
+         this%vf%maxcurv_times_mesh=1.0_WP
+         ! Initialize to flat interface at exit
+         do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
+            do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
+               do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
+                  rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+                  ! Ensure the nozzle is filled with liquid up to the throat with wet walls
+                  if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.this%Rinlet) then
+                     this%vf%VF(i,j,k)=1.0_WP
+                  else if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.this%Rexit) then
+                     this%vf%VF(i,j,k)=1.0_WP
+                  else
+                     this%vf%VF(i,j,k)=0.0_WP
+                  end if
+                  ! Initialize phasic barycenters
+                  this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
+                  this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
                end do
             end do
-            call this%vf%sync_interface()
-            deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
-            ! Reset moments
-            call this%vf%reset_volume_moments()
-            ! Ensure that boundaries are correct
-            if (this%vf%cfg%iproc.eq.1)               this%vf%VF(this%vf%cfg%imino:this%vf%cfg%imin-1,:,:)=0.0_WP
-            if (this%vf%cfg%iproc.eq.this%vf%cfg%npx) this%vf%VF(this%vf%cfg%imax+1:this%vf%cfg%imaxo,:,:)=0.0_WP
-            if (this%vf%cfg%jproc.eq.1)               this%vf%VF(:,this%vf%cfg%jmino:this%vf%cfg%jmin-1,:)=0.0_WP
-            if (this%vf%cfg%jproc.eq.this%vf%cfg%npy) this%vf%VF(:,this%vf%cfg%jmax+1:this%vf%cfg%jmaxo,:)=0.0_WP
-            if (this%vf%cfg%kproc.eq.1)               this%vf%VF(:,:,this%vf%cfg%kmino:this%vf%cfg%kmin-1)=0.0_WP
-            if (this%vf%cfg%kproc.eq.this%vf%cfg%npz) this%vf%VF(:,:,this%vf%cfg%kmax+1:this%vf%cfg%kmaxo)=0.0_WP
-            do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
-               do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
-                  do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
-                     rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
-                     if (i.lt.this%vf%cfg%imin.and.rad.le.this%Rinlet) this%vf%VF(i,j,k)=1.0_WP
-                  end do
-               end do
-            end do
-            ! Update the band
-            call this%vf%update_band()
-            ! Set interface planes at the boundaries
-            call this%vf%set_full_bcond()
-            ! Create discontinuous polygon mesh from IRL interface
-            call this%vf%polygonalize_interface()
-            ! Calculate distance from polygons
-            call this%vf%distance_from_polygon()
-            ! Calculate subcell phasic volumes
-            call this%vf%subcell_vol()
-            ! Calculate curvature
-            call this%vf%get_curvature()
-         else
-            ! Initialize to flat interface at exit
-            do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
-               do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
-                  do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
-                     rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
-                     ! Ensure the nozzle is filled with liquid up to the throat with wet walls
-                     if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.this%Rinlet) then
-                        this%vf%VF(i,j,k)=1.0_WP
-                     else if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.this%Rexit) then
-                        this%vf%VF(i,j,k)=1.0_WP
-                     else
-                        this%vf%VF(i,j,k)=0.0_WP
-                     end if
-                     ! Initialize phasic barycenters
-                     this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
-                     this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
-                  end do
-               end do
-            end do
-            ! Update the band
-            call this%vf%update_band()
-            ! Perform interface reconstruction from VOF field
-            call this%vf%build_interface()
-            ! Set interface planes at the boundaries
-            call this%vf%set_full_bcond()
-            ! Create discontinuous polygon mesh from IRL interface
-            call this%vf%polygonalize_interface()
-            ! Calculate distance from polygons
-            call this%vf%distance_from_polygon()
-            ! Calculate subcell phasic volumes
-            call this%vf%subcell_vol()
-            ! Calculate curvature
-            call this%vf%get_curvature()
-            ! Reset moments to guarantee compatibility with interface reconstruction
-            call this%vf%reset_volume_moments()
-         end if
+         end do
+         ! Update the band
+         call this%vf%update_band()
+         ! Perform interface reconstruction from VOF field
+         call this%vf%build_interface()
+         ! Set interface planes at the boundaries
+         call this%vf%set_full_bcond()
+         ! Create discontinuous polygon mesh from IRL interface
+         call this%vf%polygonalize_interface()
+         ! Calculate distance from polygons
+         call this%vf%distance_from_polygon()
+         ! Calculate subcell phasic volumes
+         call this%vf%subcell_vol()
+         ! Calculate curvature
+         call this%vf%get_curvature()
+         ! Reset moments to guarantee compatibility with interface reconstruction
+         call this%vf%reset_volume_moments()
       end block create_and_initialize_vof
       
       
@@ -807,18 +707,6 @@ contains
          integer :: i,j,k,n
          ! Zero velocity except if restarting
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
-         if (this%restarted) then
-            ! Read data
-            call this%df%pull(name='U',var=this%fs%U)
-            call this%df%pull(name='V',var=this%fs%V)
-            call this%df%pull(name='W',var=this%fs%W)
-            call this%df%pull(name='P',var=this%fs%P)
-            call this%df%pull(name='Pjx',var=this%fs%Pjx)
-            call this%df%pull(name='Pjy',var=this%fs%Pjy)
-            call this%df%pull(name='Pjz',var=this%fs%Pjz)
-            ! Apply boundary conditions
-            call this%fs%apply_bcond(this%time%t,this%time%dt)
-         end if
          ! Apply Dirichlet condition at pipe inlets
          call this%fs%get_bcond('inlets',mybc)
          do n=1,mybc%itr%no_
@@ -840,29 +728,6 @@ contains
          ! Compute cell-centered velocity
          call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       end block initialize_velocity
-
-      ! Create lpt solver
-      create_lpt_solver: block
-         ! Create the solver
-         this%lp=lpt(cfg=this%cfg,name='spray')
-         ! Get particle density from the flow solver
-         this%lp%rho=this%fs%rho_l
-         ! Turn off drag
-         this%lp%drag_model='Schiller Naumann'         
-         ! Initialize with zero particles
-         call this%lp%resize(0)
-         ! Get initial particle volume fraction
-         call this%lp%update_VF()               
-         ! Handle restarts
-         if (this%restarted) call this%lp%read(filename=trim(this%lpt_file))
-         call this%lp%get_max()
-      end block create_lpt_solver
-      
-      
-      ! Create CCL
-      create_ccl: block
-         call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
-      end block create_ccl
       
       
       ! Create an LES model
@@ -871,29 +736,207 @@ contains
       end block create_sgs
       
       
+      ! Prepare Lagrangian drop model
+      prepare_transfer: block
+         ! Is transfer used?
+         call this%input%read('Transfer drops',this%use_drop_transfer,default=.true.)
+         ! Only initialize transfer model if used
+         if (this%use_drop_transfer) then
+            ! Create CCL
+            call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
+            ! Create lpt solver
+            this%lp=lpt(cfg=this%cfg,name='spray')
+            this%lp%rho=this%fs%rho_l
+            this%lp%gravity=this%fs%gravity
+            this%lp%filter_width=3.5_WP*this%cfg%min_meshsize
+            call this%lp%resize(0)
+            ! Set parameters for transfer
+            this%dmin=1.5_WP*this%cfg%min_meshsize
+            this%dmax=1.0e-3_WP
+            this%emax=0.8_WP
+            ! Zero out transfered volume
+            this%vof_transfered=0.0_WP
+         end if
+      end block prepare_transfer
+      
+      
+      ! Handle restart/saves here
+      handle_restart: block
+         use string,                only: str_medium
+         use filesys,               only: makedir,isdir
+         use irl_fortran_interface, only: setNumberOfPlanes,setPlane
+         use tpns_class,            only: bcond
+         character(len=str_medium) :: timestamp
+         integer, dimension(3) :: iopartition
+         real(WP), dimension(:,:,:), allocatable :: P11,P12,P13,P14
+         real(WP), dimension(:,:,:), allocatable :: P21,P22,P23,P24
+         real(WP) :: rad
+         integer :: i,j,k,n
+         type(bcond), pointer :: mybc
+         logical :: partfile_exists
+         ! Create event for saving restart files
+         this%save_evt=event(this%time,'Restart output')
+         call this%input%read('Restart output period',this%save_evt%tper)
+         ! Check if we are restarting
+         call this%input%read('Restart from',timestamp,default='')
+         this%restarted=.false.; if (len_trim(timestamp).gt.0) this%restarted=.true.
+         ! Read in the I/O partition
+         call this%input%read('I/O partition',iopartition)
+         ! Perform pardata initialization
+         if (this%restarted) then
+            ! We are restarting, read the file
+            call this%df%initialize(pg=this%cfg,iopartition=iopartition,fdata='restart/data_'//trim(timestamp))
+            ! Read in the planes directly and set the IRL interface
+            allocate(P11(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P11',var=P11)
+            allocate(P12(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P12',var=P12)
+            allocate(P13(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P13',var=P13)
+            allocate(P14(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P14',var=P14)
+            allocate(P21(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P21',var=P21)
+            allocate(P22(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P22',var=P22)
+            allocate(P23(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P23',var=P23)
+            allocate(P24(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P24',var=P24)
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     ! Check if the second plane is meaningful
+                     if (this%vf%two_planes.and.P21(i,j,k)**2+P22(i,j,k)**2+P23(i,j,k)**2.gt.0.0_WP) then
+                        call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),2)
+                        call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[P11(i,j,k),P12(i,j,k),P13(i,j,k)],P14(i,j,k))
+                        call setPlane(this%vf%liquid_gas_interface(i,j,k),1,[P21(i,j,k),P22(i,j,k),P23(i,j,k)],P24(i,j,k))
+                     else
+                        call setNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k),1)
+                        call setPlane(this%vf%liquid_gas_interface(i,j,k),0,[P11(i,j,k),P12(i,j,k),P13(i,j,k)],P14(i,j,k))
+                     end if
+                  end do
+               end do
+            end do
+            call this%vf%sync_interface()
+            deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
+            ! Reset moments
+            call this%vf%reset_volume_moments()
+            ! Ensure that boundaries are correct
+            if (this%vf%cfg%iproc.eq.1)               this%vf%VF(this%vf%cfg%imino:this%vf%cfg%imin-1,:,:)=0.0_WP
+            if (this%vf%cfg%iproc.eq.this%vf%cfg%npx) this%vf%VF(this%vf%cfg%imax+1:this%vf%cfg%imaxo,:,:)=0.0_WP
+            if (this%vf%cfg%jproc.eq.1)               this%vf%VF(:,this%vf%cfg%jmino:this%vf%cfg%jmin-1,:)=0.0_WP
+            if (this%vf%cfg%jproc.eq.this%vf%cfg%npy) this%vf%VF(:,this%vf%cfg%jmax+1:this%vf%cfg%jmaxo,:)=0.0_WP
+            if (this%vf%cfg%kproc.eq.1)               this%vf%VF(:,:,this%vf%cfg%kmino:this%vf%cfg%kmin-1)=0.0_WP
+            if (this%vf%cfg%kproc.eq.this%vf%cfg%npz) this%vf%VF(:,:,this%vf%cfg%kmax+1:this%vf%cfg%kmaxo)=0.0_WP
+            do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
+               do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
+                  do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
+                     rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+                     if (i.lt.this%vf%cfg%imin.and.rad.le.this%Rinlet) this%vf%VF(i,j,k)=1.0_WP
+                  end do
+               end do
+            end do
+            ! Update the band
+            call this%vf%update_band()
+            ! Set interface planes at the boundaries
+            call this%vf%set_full_bcond()
+            ! Create discontinuous polygon mesh from IRL interface
+            call this%vf%polygonalize_interface()
+            ! Calculate distance from polygons
+            call this%vf%distance_from_polygon()
+            ! Calculate subcell phasic volumes
+            call this%vf%subcell_vol()
+            ! Calculate curvature
+            call this%vf%get_curvature()
+            ! Now read in the velocity solver data
+            call this%df%pull(name='U',var=this%fs%U)
+            call this%df%pull(name='V',var=this%fs%V)
+            call this%df%pull(name='W',var=this%fs%W)
+            call this%df%pull(name='P',var=this%fs%P)
+            call this%df%pull(name='Pjx',var=this%fs%Pjx)
+            call this%df%pull(name='Pjy',var=this%fs%Pjy)
+            call this%df%pull(name='Pjz',var=this%fs%Pjz)
+            ! Reapply inflow boundary conditions in case input has changed
+            call this%fs%get_bcond('inlets',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               this%fs%U(i,j,k)=this%cfg%VF(i,j,k)*this%mfr/(this%fs%rho_l*this%Apipe)
+            end do
+            call this%fs%get_bcond('coflow',mybc)
+            do n=1,mybc%itr%no_
+               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+               this%fs%U(i,j,k)=this%Ucoflow
+            end do
+            ! Apply all other boundary conditions
+            call this%fs%apply_bcond(this%time%t,this%time%dt)
+            ! Compute MFR through all boundary conditions
+            call this%fs%get_mfr()
+            ! Adjust MFR for global mass balance
+            call this%fs%correct_mfr()
+            ! Compute cell-centered velocity
+            call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
+            ! Compute divergence
+            call this%fs%get_div()
+            ! Also update time
+            call this%df%pull(name='t' ,val=this%time%t )
+            call this%df%pull(name='dt',val=this%time%dt)
+            this%time%told=this%time%t-this%time%dt
+            !this%time%dt=this%time%dtmax !< Force max timestep size anyway
+            ! Finally, handle particle I/O
+            if (this%use_drop_transfer) then
+               ! Check if particle file exists
+               inquire(file='restart/part_'//trim(timestamp),exist=partfile_exists)
+               ! If so, read it
+               if (partfile_exists) call this%lp%read(filename='restart/part_'//trim(timestamp))
+            end if
+         else
+            ! We are not restarting, prepare a new directory for storing restart files
+            if (this%cfg%amRoot) then
+               if (.not.isdir('restart')) call makedir('restart')
+            end if
+            ! Prepare pardata object for saving restart files
+            call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=15)
+            this%df%valname=['t ','dt']
+            this%df%varname=['U  ','V  ','W  ','P  ','Pjx','Pjy','Pjz','P11','P12','P13','P14','P21','P22','P23','P24']
+         end if
+      end block handle_restart
+      
+      
       ! Create surfmesh object for interface polygon output
       create_smesh: block
-         this%smesh=surfmesh(nvar=0,name='plic')
+         use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+         integer :: i,j,k,np,nplane
+         this%smesh=surfmesh(nvar=2,name='plic')
+         this%smesh%varname(1)='nplane'
+         this%smesh%varname(2)='thickness'
+         ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
-      end block create_smesh
-
-      ! Create partmesh object for Lagrangian particle output
-      create_pmesh_lpt: block
-         integer :: i
-         ! Include an extra variable for droplet diameter
-         this%pmesh=partmesh(nvar=2,nvec=1,name='lpt')
-         this%pmesh%varname(1)='diameter'
-         this%pmesh%varname(2)='id'
-         this%pmesh%vecname(1)='velocity'
-         ! Transfer particles to pmesh
-         call this%lp%update_partmesh(this%pmesh)
-         ! Also populate diameter variable
-         do i=1,this%lp%np_
-            this%pmesh%var(1,i)=this%lp%p(i)%d
-            this%pmesh%var(2,i)=this%lp%p(i)%id
-            this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+         ! Also populate nplane variable
+         this%smesh%var(1,:)=1.0_WP
+         np=0
+         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                  if (this%cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                        this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                     end if
+                  end do
+               end do
+            end do
          end do
-      end block create_pmesh_lpt
+      end block create_smesh
+      
+      
+      ! Create partmesh object for particle output
+      if (this%use_drop_transfer) then
+         create_pmesh: block
+            integer :: i
+            this%pmesh=partmesh(nvar=1,nvec=1,name='lpt')
+            this%pmesh%varname(1)='radius'
+            this%pmesh%vecname(1)='velocity'
+            call this%lp%update_partmesh(this%pmesh)
+            do i=1,this%lp%np_
+               this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
+               this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+            end do
+         end block create_pmesh
+      end if
       
       
       ! Add Ensight output
@@ -906,11 +949,9 @@ contains
          ! Add variables to output
          call this%ens_out%add_vector('velocity',this%Ui,this%Vi,this%Wi)
          call this%ens_out%add_scalar('VOF',this%vf%VF)
-         call this%ens_out%add_scalar('pressure',this%fs%P)
-         call this%ens_out%add_scalar('visc_sgs',this%sgs%visc)
          call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
-         call this%ens_out%add_particle('spray',this%pmesh)
+         if (this%use_drop_transfer) call this%ens_out%add_particle('part',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -934,7 +975,7 @@ contains
          call this%mfile%add_column(this%fs%Pmax,'Pmax')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
          call this%mfile%add_column(this%vof_removed,'VOF removed')
-         call this%mfile%add_column(this%vol_convert,'VOL converted')
+         call this%mfile%add_column(this%vof_transfered,'VOF transfered')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
@@ -952,6 +993,25 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_y,'Viscous yCFL')
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
+         ! Create particle monitor
+         if (this%use_drop_transfer) then
+            call this%lp%get_max()
+            this%pfile=monitor(amroot=this%lp%cfg%amRoot,name='particles')
+            call this%pfile%add_column(this%time%n,'Timestep number')
+            call this%pfile%add_column(this%time%t,'Time')
+            call this%pfile%add_column(this%lp%np,'Particle number')
+            call this%pfile%add_column(this%lp%np_new,'Npart new')
+            call this%pfile%add_column(this%lp%np_out,'Npart removed')
+            call this%pfile%add_column(this%lp%Umin,'Particle Umin')
+            call this%pfile%add_column(this%lp%Umax,'Particle Umax')
+            call this%pfile%add_column(this%lp%Vmin,'Particle Vmin')
+            call this%pfile%add_column(this%lp%Vmax,'Particle Vmax')
+            call this%pfile%add_column(this%lp%Wmin,'Particle Wmin')
+            call this%pfile%add_column(this%lp%Wmax,'Particle Wmax')
+            call this%pfile%add_column(this%lp%dmin,'Particle dmin')
+            call this%pfile%add_column(this%lp%dmax,'Particle dmax')
+            call this%pfile%write()
+         end if
       end block create_monitor
       
       
@@ -1131,10 +1191,13 @@ contains
       call this%fs%get_cfl(this%time%dt,this%time%cfl)
       call this%time%adjust_dt()
       call this%time%increment()
-
-      ! Advance our spray
-      this%resU=this%fs%rho_g; this%resV=this%fs%visc_g
-      call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
+      
+      ! Advance lagrangian droplets
+      if (this%use_drop_transfer) then
+         this%resU=this%fs%rho_g
+         this%resV=this%fs%visc_g
+         call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
+      end if
       
       ! Remember old VOF
       this%vf%VFold=this%vf%VF
@@ -1235,9 +1298,9 @@ contains
          call this%fs%update_laplacian()
          call this%fs%correct_mfr()
          call this%fs%get_div()
-         call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         !call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
          !call this%fs%add_surface_tension_jump_thin(dt=this%time%dt,div=this%fs%div,vf=this%vf)
-         !call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
          this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
          this%fs%psolv%sol=0.0_WP
          call this%fs%psolv%solve()
@@ -1264,7 +1327,7 @@ contains
       
       ! Transfer VOF into droplets
       call this%ttrans%start() ! Start transfer timer
-      call this%transfer_drops()
+      if (this%use_drop_transfer) call this%transfer_drops()
       call this%ttrans%stop() ! Stop transfer timer
       
       ! Remove VOF at edge of domain
@@ -1315,19 +1378,41 @@ contains
       
       ! Output to ensight
       if (this%ens_evt%occurs()) then
-         call this%vf%update_surfmesh_nowall(this%smesh)
-         ! Update partmesh object
-         update_pmesh: block
-            integer :: i
-            ! Transfer particles to pmesh
-            call this%lp%update_partmesh(this%pmesh)
-            ! Also populate diameter variable
-            do i=1,this%lp%np_
-               this%pmesh%var(1,i)=this%lp%p(i)%d
-               this%pmesh%var(2,i)=this%lp%p(i)%id
-               this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+         ! Update surface mesh
+         update_smesh: block
+            use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+            integer :: i,j,k,np,nplane
+            ! Transfer polygons to smesh
+            call this%vf%update_surfmesh_nowall(this%smesh)
+            ! Also populate nplane variable
+            this%smesh%var(1,:)=1.0_WP
+            np=0
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     if (this%cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        end if
+                     end do
+                  end do
+               end do
             end do
-         end block update_pmesh 
+         end block update_smesh
+         ! Update particle mesh object
+         if (this%use_drop_transfer) then
+            update_pmesh: block
+               integer :: i
+               call this%lp%update_partmesh(this%pmesh)
+               do i=1,this%lp%np_
+                  this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
+                  this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+               end do
+            end block update_pmesh 
+         end if
+         ! Write ensight files
          call this%ens_out%write_data(this%time%t)
       end if
       
@@ -1343,6 +1428,10 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%timefile%write()
+      if (this%use_drop_transfer) then
+         call this%lp%get_max()
+         call this%pfile%write()
+      end if
       
       ! Finally, see if it's time to save restart files
       if (this%save_evt%occurs()) then
@@ -1400,6 +1489,8 @@ contains
             call this%lp%write(filename='restart/datalpt_'//trim(adjustl(timestamp)))
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
+            ! Finally, handle particle I/O
+            if (this%use_drop_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
          end block save_restart
       end if
       
