@@ -11,7 +11,6 @@ module simplex_class
    use hypre_str_class,   only: hypre_str
    !use ddadi_class,       only: ddadi
    use tpns_class,        only: tpns
-   use lpt_class,         only: lpt
    use vfs_class,         only: vfs
    use lpt_class,         only: lpt
    use cclabel_class,     only: cclabel
@@ -22,7 +21,6 @@ module simplex_class
    use pardata_class,     only: pardata
    use monitor_class,     only: monitor
    use timer_class,       only: timer
-   use string,            only: str_medium
    implicit none
    private
    
@@ -34,7 +32,6 @@ module simplex_class
       !> Provide a pardata and an event tracker for saving restarts
       type(event)    :: save_evt
       type(pardata)  :: df
-      character(len=str_medium) :: lpt_file
       logical :: restarted
       
       !> Input file for the simulation
@@ -105,11 +102,6 @@ module simplex_class
       real(WP), dimension(3) :: n1=[+0.6_WP,-0.8_WP,0.0_WP]
       real(WP), dimension(3) :: n2=[+0.6_WP,+0.8_WP,0.0_WP]
       real(WP) :: Ucoflow,mfr,Apipe
-
-      !> Transfer model parameters
-      real(WP) :: max_eccentricity       =8.0e-1_WP
-      real(WP) :: d_threshold            =0.002_WP
-      real(WP) :: vol_convert            =0.0_WP
       
    contains
       procedure :: init                            !< Initialize simplex simulation
@@ -1483,7 +1475,6 @@ contains
             call this%df%push(name='P23',var=P23         )
             call this%df%push(name='P24',var=P24         )
             call this%df%write(fdata='restart/data_'//trim(adjustl(timestamp)))
-            call this%lp%write(filename='restart/datalpt_'//trim(adjustl(timestamp)))
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
             ! Finally, handle particle I/O
