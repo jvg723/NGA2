@@ -1288,7 +1288,7 @@ contains
             use ibconfig_class, only: VFhi,VFlo
             integer :: i,j,k
             real(WP) :: vf,vol,dudn,delta,Uib,Vib,Wib
-            real(WP) :: Cslip=0.2_WP ! Whitmore, Bose, and Moin
+            real(WP) :: Cslip=0.2_WP ! Whitmore, Bose, and Moin = 0.5
             do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
                do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
                   do i=this%fs%cfg%imin_,this%fs%cfg%imax_
