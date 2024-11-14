@@ -1,5 +1,6 @@
 # Parallelization
-Partition :	1 1 8
+Partition :	1 2 4
+I/O partition : 1 1 1
 
 # Mesh definition
 X ligament : 2
@@ -12,7 +13,7 @@ nz : 80 !256
 
 # Flow conditions
 Reynolds number :      100
-Weber number :         10
+Weber number :         20
 Viscosity ratio :      50
 Density ratio :        1000
 Target Re_lambda :     45
@@ -26,12 +27,12 @@ Polymer relaxation time :       1
 Maximum polymer extensibility : 10
 
 # Time integration
-Max timestep size : 2.5e-2
-Max cfl number :    0.9
-Max time :          800
+Max timestep size : 5e-2
+Max cfl number :    1.0
+Max time :          200
 
 # Pressure solver
-Pressure tolerance : 1e-5
+Pressure tolerance : 1e-4
 Pressure iteration : 100
 
 # Data output
@@ -41,5 +42,5 @@ Ensight output period : 1
 Postproc output period : 1
 
 # Data restart
-Restart from : !data_3.50007E-02
+Restart from : 3.00000E+01
 HIT restart :  hit_128
