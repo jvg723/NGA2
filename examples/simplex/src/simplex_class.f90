@@ -117,6 +117,7 @@ module simplex_class
       procedure :: transfer_ligaments              !< Transfer ligaments to a Lagrangian representation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
       procedure :: get_thickness_unfiltered
+      procedure :: get_cclstats
    end type simplex
 
    ! Temp arrays for ligament transfer
@@ -1665,6 +1666,170 @@ contains
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
       deallocate(this%gradU,this%Uib,this%Vib,this%Wib)
    end subroutine final
+
+
+   subroutine get_cclstats(this,ccl,x,y,z,u,v,w,vol,lengths,maxlength,axes,f_ligament)
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX,MPI_INTEGER
+      use parallel,  only: MPI_REAL_WP
+      use irl_fortran_interface
+      implicit none
+      class(simplex), intent(inout) :: this
+      class(cclabel), intent(in)::ccl
+      real(WP), dimension(1:), intent(inout) :: x,y,z,u,v,w,vol,maxlength,f_ligament
+      real(WP), dimension(1:,1:), intent(inout) :: lengths
+      real(WP), dimension(1:,1:,1:), intent(inout) :: axes
+      integer :: n,nn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,per_x,per_y,per_z
+      ! Allocate variables to get stats
+      real(WP), dimension(:), allocatable :: vol_,x_vol_,y_vol_,z_vol_
+      real(WP), dimension(:), allocatable :: u_vol_,v_vol_,w_vol_
+      real(WP), dimension(:), allocatable :: x_min_,x_min,x_max_,x_max
+      real(WP), dimension(:), allocatable :: y_min_,y_min,y_max_,y_max
+      real(WP), dimension(:), allocatable :: z_min_,z_min,z_max_,z_max
+      real(WP), dimension(:,:,:), allocatable :: Imom_,Imom
+      ! For ligament type
+      integer(WP), dimension(:), allocatable :: ncell_,ncell,n_ligament_,n_ligament
+      real(WP) :: xtmp,ytmp,ztmp
+      ! Moment of inertia variable
+      real(WP), dimension(:), allocatable :: work
+      real(WP), dimension(1)   :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer , parameter :: order = 3
+      integer  :: lwork,info
+
+      allocate(vol_(1:ccl%nstruct));vol_=0.0_WP
+      allocate(x_min(1:ccl%nstruct),x_min_(1:ccl%nstruct));x_min=0.0_WP;x_min_= 10000.0_WP
+      allocate(x_max(1:ccl%nstruct),x_max_(1:ccl%nstruct));x_max=0.0_WP;x_max_=-10000.0_WP
+      allocate(y_min(1:ccl%nstruct),y_min_(1:ccl%nstruct));y_min=0.0_WP;y_min_= 10000.0_WP
+      allocate(y_max(1:ccl%nstruct),y_max_(1:ccl%nstruct));y_max=0.0_WP;y_max_=-10000.0_WP
+      allocate(z_min(1:ccl%nstruct),z_min_(1:ccl%nstruct));z_min=0.0_WP;z_min_= 10000.0_WP
+      allocate(z_max(1:ccl%nstruct),z_max_(1:ccl%nstruct));z_max=0.0_WP;z_max_=-10000.0_WP
+      allocate(x_vol_(1:ccl%nstruct),y_vol_(1:ccl%nstruct),z_vol_(1:ccl%nstruct));x_vol_=0.0_WP;y_vol_=0.0_WP;z_vol_=0.0_WP
+      allocate(u_vol_(1:ccl%nstruct),v_vol_(1:ccl%nstruct),w_vol_(1:ccl%nstruct));u_vol_=0.0_WP;v_vol_=0.0_WP;w_vol_=0.0_WP
+      allocate(Imom(1:ccl%nstruct,3,3),Imom_(1:ccl%nstruct,3,3));Imom=0.0_WP;Imom_=0.0_WP
+      allocate(ncell(1:ccl%nstruct),ncell_(1:ccl%nstruct),n_ligament_(1:ccl%nstruct),n_ligament(1:ccl%nstruct))
+      ncell=0;ncell_=0;n_ligament=0;n_ligament_=0
+      ! Query optimal work array size
+      call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+      do i=1,ccl%nstruct
+         ! Periodicity
+         per_x = ccl%struct(i)%per(1); per_y = ccl%struct(i)%per(2); per_z = ccl%struct(i)%per(3)
+         ! get number of local cells
+         ncell_(i) = ccl%struct(i)%n_
+         do j=1,ccl%struct(i)%n_
+            ii=ccl%struct(i)%map(1,j); jj=ccl%struct(i)%map(2,j); kk=ccl%struct(i)%map(3,j)
+            ! Location of struct node
+            xtmp = this%vf%cfg%xm(ii)-per_x*this%vf%cfg%xL
+            ytmp = this%vf%cfg%ym(jj)-per_y*this%vf%cfg%yL
+            ztmp = this%vf%cfg%zm(kk)-per_z*this%vf%cfg%zL
+            ! Volume
+            vol_(i) = vol_(i) + this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            ! Center of gravity
+            x_vol_(i) = x_vol_(i) + xtmp*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            y_vol_(i) = y_vol_(i) + ytmp*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            z_vol_(i) = z_vol_(i) + ztmp*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            ! Average gas velocity inside struct
+            u_vol_(i) = u_vol_(i) + this%fs%U(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            v_vol_(i) = v_vol_(i) + this%fs%V(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            w_vol_(i) = w_vol_(i) + this%fs%W(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+
+            ! if(tmpfilm_type(ii,jj,kk).eq.1) n_ligament_(i)=n_ligament_(i)+1
+         end do
+      end do
+      ! Sum parallel stats
+      call MPI_ALLREDUCE(vol_,vol,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(x_vol_,x,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(y_vol_,y,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(z_vol_,z,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(u_vol_,u,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(v_vol_,v,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(w_vol_,w,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+
+      call MPI_ALLREDUCE(ncell_,ncell,ccl%nstruct,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(n_ligament_,n_ligament,ccl%nstruct,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
+      do i=1,ccl%nstruct
+         ! Periodicity
+         per_x = ccl%struct(i)%per(1); per_y = ccl%struct(i)%per(2); per_z = ccl%struct(i)%per(3)
+         do j=1,ccl%struct(i)%n_
+            ! Indices of struct node
+            ii=ccl%struct(i)%map(1,j); jj=ccl%struct(i)%map(2,j); kk=ccl%struct(i)%map(3,j)
+            xtmp = this%vf%cfg%xm(ii)-per_x*this%vf%cfg%xL-x(i)/vol(i)
+            ytmp = this%vf%cfg%ym(jj)-per_y*this%vf%cfg%yL-y(i)/vol(i)
+            ztmp = this%vf%cfg%zm(kk)-per_z*this%vf%cfg%zL-z(i)/vol(i)
+            ! Moment of Inertia
+            Imom_(i,1,1) = Imom_(i,1,1) + (ytmp**2 + ztmp**2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            Imom_(i,2,2) = Imom_(i,2,2) + (xtmp**2 + ztmp**2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            Imom_(i,3,3) = Imom_(i,3,3) + (xtmp**2 + ytmp**2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            Imom_(i,1,2) = Imom_(i,1,2) - xtmp*ytmp*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            Imom_(i,1,3) = Imom_(i,1,3) - xtmp*ztmp*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            Imom_(i,2,3) = Imom_(i,2,3) - ytmp*ztmp*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+            do n=1,2
+               if (getNumberOfVertices(this%vf%interface_polygon(n,ii,jj,kk)).gt.0) then
+                  d = calculateCentroid(this%vf%interface_polygon(n,ii,jj,kk))
+                  x_min_(i) = min(x_min_(i),d(1)); x_max_(i) = max(x_max_(i),d(1))
+                  y_min_(i) = min(y_min_(i),d(2)); y_max_(i) = max(y_max_(i),d(2))
+                  z_min_(i) = min(z_min_(i),d(3)); z_max_(i) = max(z_max_(i),d(3))
+               end if
+            end do
+            ! ! Min thickness
+            ! min_thickness_(i) = min(min_thickness_(i),this%struct_thickness(ii,jj,kk))
+         end do 
+      end do
+      ! Sum parallel stat on Imom
+      do i=1,3
+         do j=1,3
+            call MPI_ALLREDUCE(Imom_(:,i,j),Imom(:,i,j),ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         end do
+      end do
+      ! Get extents
+      call MPI_ALLREDUCE(x_min_,x_min,ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(x_max_,x_max,ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(y_min_,y_min,ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(y_max_,y_max,ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(z_min_,z_min,ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(z_max_,z_max,ccl%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+      !!  Get min thickness
+      !  call MPI_ALLREDUCE(min_thickness_,min_thickness,this%ccl_ligament%nstruct,MPI_REAL_WP,MPI_MIN,this%cfg%comm,ierr)
+      ! Store data
+      do i=1,ccl%nstruct
+         ! Center of gravity
+         x(i) = x(i)/vol(i); y(i) = y(i)/vol(i); z(i) = z(i)/vol(i)
+         ! Periodicity: transport back inside domain if needed
+         if (x(i).lt.this%vf%cfg%x(this%vf%cfg%imin)) x(i) = x(i)+this%vf%cfg%xL
+         if (y(i).lt.this%vf%cfg%y(this%vf%cfg%jmin)) y(i) = y(i)+this%vf%cfg%yL
+         if (z(i).lt.this%vf%cfg%z(this%vf%cfg%kmin)) z(i) = z(i)+this%vf%cfg%zL
+         u(i)=u(i)/vol(i); v(i)=v(i)/vol(i); w(i)=w(i)/vol(i)
+         maxlength(i) = hypot(hypot(x_max(i)-x_min(i),y_max(i)-y_min(i))**2,z_max(i)-z_min(i))
+         ! Eigenvalues/eigenvectors of moments of inertia tensor
+         A = Imom(i,:,:); n = 3
+         ! On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
+         call dsyev('V','U',n,A,n,d,work,lwork,info)
+         ! Get rid of very small negative values (due to machine accuracy)
+         d = max(0.0_WP,d)
+         ! Store characteristic lengths
+         lengths(i,1) = sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/vol(i))
+         lengths(i,2) = sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/vol(i))
+         lengths(i,3) = sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/vol(i))
+         ! Zero out length in 3rd dimension if 2D
+         if (this%vf%cfg%nx.eq.1.or.this%vf%cfg%ny.eq.1.or.this%vf%cfg%nz.eq.1) lengths(i,3)=0.0_WP
+         ! Store principal axes
+         axes(i,:,:) = A
+         ! Use max of bounding box and MoI-derived lengths as length
+         maxlength(i) = max(maxlength(i),lengths(i,1))
+         
+         if (ncell(i).eq.0) then 
+            f_ligament(i) = 0.0_WP
+         else 
+            f_ligament(i) = 1.0_WP*n_ligament(i)/(1.0_WP*ncell(i)) 
+         end if
+
+      end do
+      ! Deallocate arrays
+      deallocate(vol_,x_vol_,y_vol_,z_vol_,u_vol_,v_vol_,w_vol_,Imom_,Imom)
+      deallocate(x_min_,y_min_,z_min_,x_max_,y_max_,z_max_)
+      deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
+      deallocate(ncell,ncell_,n_ligament,n_ligament_)
+   end subroutine get_cclstats
    
    
 end module simplex_class
