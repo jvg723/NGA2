@@ -95,8 +95,8 @@ module simplex_class
       real(WP) :: vof_deleted      !< Integral of VOF deleted
 
       !> Ligament transfer
-      real(WP), dimension(:,:,:), allocatable :: tmpthickness
       type(cclabel) :: ccl_ligament
+      real(WP), dimension(:,:,:), allocatable :: unfiltered_thickness            !< Tmp film_type for output purposes
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -116,7 +116,11 @@ module simplex_class
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
       procedure :: transfer_ligaments              !< Transfer ligaments to a Lagrangian representation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
+      procedure :: get_thickness_unfiltered
    end type simplex
+
+   ! Temp arrays for ligament transfer
+   real(WP), dimension(:,:,:), allocatable :: tmpthickness
    
    
 contains
@@ -434,7 +438,7 @@ contains
          use vfs_class, only: VFlo
          implicit none
          integer, intent(in) :: i,j,k
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%tmpthickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.tmpthickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -450,6 +454,42 @@ contains
       end function same_label_ligament
 
    end subroutine transfer_ligaments
+
+   !> Measure local thickness of multiphasic structure
+   subroutine get_thickness_unfiltered(this)
+      use vfs_class, only: VFlo,VFhi
+      implicit none
+      class(simplex), intent(inout) :: this
+      integer :: i,j,k,ii,jj,kk,nneigh
+      real(WP) :: lvol,gvol,area
+      ! Reset thickness
+      tmpthickness=1.0_WP;nneigh=3!nneigh=1
+      ! First compute thickness based on current surface and volume moments (SD and VF)
+      do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+         do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+            do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+               lvol=0.0_WP; area=0.0_WP
+               do kk = k-nneigh,k+nneigh
+                  do jj = j-nneigh,j+nneigh
+                     do ii = i-nneigh,i+nneigh
+                        lvol = lvol + this%vf%VF(ii,jj,kk)
+                        area = area + this%vf%SD(ii,jj,kk)
+                     end do
+                  end do
+               end do
+               if (this%vf%VF(i,j,k).lt.VFlo) then
+                  tmpthickness(i,j,k) = 0.0_WP
+               else if (area .gt. 0.0_WP) then    
+                  tmpthickness(i,j,k) = 2.0_WP*lvol/(area+tiny(1.0_WP))
+               else
+                  tmpthickness(i,j,k) = 3.0_WP*this%cfg%min_meshsize
+               end if
+            end do
+         end do
+      end do
+      call this%vf%cfg%sync(tmpthickness)
+      this%unfiltered_thickness = tmpthickness
+   end subroutine get_thickness_unfiltered
    
    
    !> Initialization of simplex simulation
@@ -650,7 +690,8 @@ contains
          allocate(this%Uib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
-         allocate(this%tmpthickness(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(tmpthickness(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%unfiltered_thickness(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%unfiltered_thickness=0.0_WP
       end block allocate_work_arrays
       
       
@@ -1438,6 +1479,7 @@ contains
       call this%ttrans%stop() ! Stop transfer timer
 
       ! Transfer ligament to droplets
+      call this%get_thickness_unfiltered()
       call this%transfer_ligaments()
       
       ! Remove VOF at edge of domain
