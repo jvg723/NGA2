@@ -118,10 +118,12 @@ module simplex_class
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
       procedure :: get_thickness_unfiltered
       procedure :: get_cclstats
+      procedure :: get_structminthickness
    end type simplex
 
    ! Temp arrays for ligament transfer
    real(WP), dimension(:,:,:), allocatable :: tmpthickness
+   real(WP) :: min_ligamentthickness  =1.0_WP
    
    
 contains
@@ -425,10 +427,188 @@ contains
 
    !> Transfer ligaments to Lagrangian representation
    subroutine transfer_ligaments(this)
+      use mathtools, only: pi,twoPi
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
+      use parallel,  only: MPI_REAL_WP
+      use messager, only: die
+      use irl_fortran_interface
+      implicit none
       class(simplex), intent(inout) :: this
+      integer  :: n,nn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank
+      character(len=str_medium) :: filename
+      ! Stats of the ccl objects
+      real(WP), dimension(:), allocatable :: x,y,z,u,v,w,vol,maxlength
+      real(WP), dimension(:,:,:), allocatable :: axes
+      real(WP), dimension(:,:), allocatable :: lengths
+      real(WP), dimension(:), allocatable :: min_thickness,f_ligament
+      real(WP) :: myint,integral
+      
+      ! Varaibles determing transfer
+      real(WP) :: Vt,Vl,Vd,minor_radius,diam,Vrim,Lrim
+      integer  :: nmain,nsat,np_old,np_start
+      ! Prescribe inviscid breakup parameters
+      real(WP), parameter :: min_diam=1.0e-2_WP
+      real(WP), parameter :: dimless_wavenumber=0.697_WP
+      real(WP), parameter :: size_ratio=0.707_WP !0.015_WP
 
       ! Start by performing a CCL
       call this%ccl_ligament%build(make_label_ligament,same_label_ligament)
+
+      ! stats of the ligaments that will be used for modeling breakup
+      allocate(x(1:this%ccl_ligament%nstruct),y(1:this%ccl_ligament%nstruct),z(1:this%ccl_ligament%nstruct));x=0.0_WP;y=0.0_WP;z=0.0_WP
+      allocate(u(1:this%ccl_ligament%nstruct),v(1:this%ccl_ligament%nstruct),w(1:this%ccl_ligament%nstruct));u=0.0_WP;v=0.0_WP;w=0.0_WP
+      allocate(maxlength(1:this%ccl_ligament%nstruct),lengths(1:this%ccl_ligament%nstruct,1:3));maxlength=0.0_WP;lengths=0.0_WP
+      allocate(vol(1:this%ccl_ligament%nstruct),axes(1:this%ccl_ligament%nstruct,1:3,1:3));vol=0.0_WP;axes=0.0_WP
+      allocate(min_thickness(1:this%ccl_ligament%nstruct),f_ligament(1:this%ccl_ligament%nstruct)); min_thickness = this%vf%cfg%min_meshsize; f_ligament=0.0_WP
+      myint =0.0_WP; integral =0.0_WP
+   
+      ! if (this%vf%cfg%amRoot) print *, "breakup1"
+      call this%get_cclstats(this%ccl_ligament,x,y,z,u,v,w,vol,lengths,maxlength,axes,f_ligament)
+      ! if (this%vf%cfg%amRoot) print *, "breakup2"
+      call this%get_structminthickness(this%ccl_ligament,min_thickness,1)
+
+      np_start=this%lp%np_
+      do n=1,this%ccl_ligament%nstruct
+         ! Set a minimum breakup criteria for volume
+         if (min_thickness(n) .gt. min_ligamentthickness*this%vf%cfg%min_meshsize) cycle
+         if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) cycle
+         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", n ,"f_ligament is:", f_ligament(n)
+         if (f_ligament(n).lt.0.9_WP) cycle
+         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", n
+         ! Assume a cylinder ligament
+         Lrim=maxlength(n)
+         Vrim=vol(n)
+         minor_radius=sqrt(Vrim/pi/Lrim)                  
+         ! Drop size method from Kim & Moin (2011)
+         nmain=floor(dimless_wavenumber*Lrim/twoPi/minor_radius)
+         ! Skip if not a droplet is formed
+         if (nmain.lt.1) cycle
+   
+         nsat=nmain+1
+         diam=(6.0_WP*Vrim/pi/(real(nmain,WP)+size_ratio**3*real(nsat,WP)))**(1.0_WP/3.0_WP)
+         ! Restriction on the smallest droplet diameter via breakup
+         diam=max(diam,min_diam)
+   
+         if (nmain.gt.1) then
+            Vd=pi/6.0_WP*(diam**3+(size_ratio*diam)**3)
+            Vt=0.0_WP; Vl=0.0_WP     
+            np_old=this%lp%np_  ! Remember old number of particles
+            do nn=1,this%ccl_ligament%struct(n)%n_
+               i=this%ccl_ligament%struct(n)%map(1,nn); j=this%ccl_ligament%struct(n)%map(2,nn); k=this%ccl_ligament%struct(n)%map(3,nn)
+               ! Increment liquid volume to remove
+               Vl=Vl+this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+               ! Create drops from available liquid volume
+               do while (Vl-Vd.gt.0.0_WP)            
+                  ! Make room for new drop
+                  np=this%lp%np_+1; call this%lp%resize(np)
+                  ! Add the drop
+                  this%lp%p(np)%id  =int(8,8)                                                                                          !< Give id 
+                  this%lp%p(np)%dt  =0.0_WP                                                                                            !< Let the drop find it own integration time
+                  this%lp%p(np)%Acol=0.0_WP                                                                                            !< Give zero collision force
+                  this%lp%p(np)%Tcol=0.0_WP                                                                                            !< Give zero collision force
+                  this%lp%p(np)%d   =diam                                                                                              !< Assign diameter to account for full volume
+                  this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                                                                            !< Place the drop at the liquid barycenter
+                  this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W)!< Interpolate local cell velocity as drop velocity
+                  this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])!< Place the drop in the proper cell for the this%lp%cfg
+                  this%lp%p(np)%flag=0                                                                                                 !< Activate it
+                  ! Increment particle counter
+                  this%lp%np_=np
+                  ! Make room for new drop
+                  np=this%lp%np_+1; call this%lp%resize(np)
+                  ! Add the drop
+                  this%lp%p(np)%id  =int(9,8)                                                                                   
+                  this%lp%p(np)%dt  =0.0_WP                                                                                     
+                  this%lp%p(np)%Acol=0.0_WP                                                                                     
+                  this%lp%p(np)%Tcol=0.0_WP                                                                                     
+                  this%lp%p(np)%d   =size_ratio*diam                                                                                       
+                  this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)+2.0_WP*diam*axes(n,:,1)
+                  this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W)    
+                  this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])    
+                  this%lp%p(np)%flag=0                                                                                          
+                  ! Increment particle counter
+                  this%lp%np_=np
+                  ! Update tracked volumes
+                  Vl=Vl-Vd
+                  Vt=Vt+Vd
+               end do
+               ! Remove liquid in that cell
+               myint = myint + this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+               this%vf%VF(i,j,k)=0.0_WP
+            end do
+            ! Based on how many particles were created, decide what to do with left-over volume
+            if (Vl.gt.0.0_WP) then
+               if (Vt.eq.0.0_WP) then ! No particle was created, we need one...
+                  ! Add one last drop for remaining liquid volume
+                  np=this%lp%np_+1; call this%lp%resize(np)
+                  ! Add the drop
+                  this%lp%p(np)%id  =int(10,8)                                 
+                  this%lp%p(np)%dt  =0.0_WP                                    
+                  this%lp%p(np)%Acol=0.0_WP                                    
+                  this%lp%p(np)%Tcol=0.0_WP                                    
+                  this%lp%p(np)%d   =(6.0_WP*Vl/pi)**(1.0_WP/3.0_WP)           
+                  this%lp%p(np)%pos =this%vf%Lbary(:,i,j,k)                    
+                  this%lp%p(np)%vel =this%fs%cfg%get_velocity(pos=this%lp%p(np)%pos,i0=i,j0=j,k0=k,U=this%fs%U,V=this%fs%V,W=this%fs%W) 
+                  this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) 
+                  this%lp%p(np)%flag=0                                  
+                  ! Increment particle counter
+                  this%lp%np_=np
+               else ! Some particles were created, make them all larger
+                  do ip=np_old+1,this%lp%np_
+                     this%lp%p(ip)%d=this%lp%p(ip)%d*((Vt+Vl)/Vt)**(1.0_WP/3.0_WP)
+                  end do
+               end if
+            end if
+   
+         else ! nmain=1
+            if (this%vf%cfg%amRoot) then
+               ! Make room for new drop
+               np=this%lp%np_+1; call this%lp%resize(np)
+               ! Add the drop
+               this%lp%p(np)%id  =int(11,8)                                                                               
+               this%lp%p(np)%dt  =0.0_WP                                                                                  
+               this%lp%p(np)%Acol=0.0_WP                                                                                  
+               this%lp%p(np)%Tcol=0.0_WP                                                                                  
+               this%lp%p(np)%d   =diam                                                                                    
+               this%lp%p(np)%pos =[x(n),y(n),z(n)] 
+               this%lp%p(np)%vel =[u(n),v(n),w(n)] 
+               this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])     
+               this%lp%p(np)%flag=0                                                                                        
+               ! Increment particle counter
+               this%lp%np_=np
+               do nn=1,2
+                  ! Make room for new drop
+                  np=this%lp%np_+1; call this%lp%resize(np)
+                  ! Add the drop
+                  this%lp%p(np)%id  =int(12,8)                                                                               
+                  this%lp%p(np)%dt  =0.0_WP                                                                                  
+                  this%lp%p(np)%Acol=0.0_WP                                                                                  
+                  this%lp%p(np)%Tcol=0.0_WP                                                                                  
+                  this%lp%p(np)%d   =size_ratio*diam                                                                         
+                  this%lp%p(np)%pos =[x(n),y(n),z(n)] &
+                                    +sign(1.0_WP,real(nn,WP)-1.5_WP)*2.0_WP*diam*axes(n,:,1)
+                  this%lp%p(np)%vel =[u(n),v(n),w(n)] 
+                  this%lp%p(np)%ind =this%lp%cfg%get_ijk_global(this%lp%p(np)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin]) 
+                  this%lp%p(np)%flag=0                                                                                          
+                  ! Increment particle counter
+                  this%lp%np_=np
+               end do
+            end if
+   
+            do nn=1,this%ccl_ligament%struct(n)%n_
+               i=this%ccl_ligament%struct(n)%map(1,nn); j=this%ccl_ligament%struct(n)%map(2,nn); k=this%ccl_ligament%struct(n)%map(3,nn)
+               myint = myint + this%vf%VF(i,j,k)*this%vf%cfg%vol(i,j,k)
+               this%vf%VF(i,j,k)=0.0_WP
+            end do    
+         end if
+      end do
+      call this%vf%cfg%sync(this%vf%VF)
+      call this%vf%clean_irl_and_band()
+   
+      call MPI_ALLREDUCE(myint,integral,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)    
+      ! this%vol_convert = this%vol_convert + integral 
+
+      call this%lp%sync()
+      deallocate(x,y,z,u,v,w,vol,lengths,maxlength,axes)
       
       
       contains
@@ -440,7 +620,7 @@ contains
          implicit none
          integer, intent(in) :: i,j,k
          ! ZZ original value = 1.5
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.2.6_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -1830,6 +2010,32 @@ contains
       deallocate(x_min,y_min,z_min,x_max,y_max,z_max)
       deallocate(ncell,ncell_,n_ligament,n_ligament_)
    end subroutine get_cclstats
+
+   subroutine get_structminthickness(this,ccl,min_thickness,type)
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX
+      use parallel,  only: MPI_REAL_WP
+      implicit none
+      class(simplex), intent(inout) :: this 
+      class(cclabel), intent(in)::ccl
+      real(WP) , dimension(1:), intent(inout) :: min_thickness
+      integer, intent(in) :: type
+      integer :: n,nn,i,j,k,ierr
+      real(WP), dimension(:), allocatable :: min_thickness_
+      allocate(min_thickness_(1:ccl%nstruct)); min_thickness_ = 5.0_WP*this%vf%cfg%min_meshsize
+      call this%vf%get_thickness()
+      do n=1,ccl%nstruct
+         do nn=1,ccl%struct(n)%n_
+            i=ccl%struct(n)%map(1,nn); j=ccl%struct(n)%map(2,nn); k=ccl%struct(n)%map(3,nn)
+            if (type.eq.1) then
+               min_thickness_(n) = min(min_thickness_(n),tmpthickness(i,j,k))
+            else 
+               min_thickness_(n) = min(min_thickness_(n),this%vf%thickness(i,j,k))
+            end if
+         end do
+      end do
+      call MPI_ALLREDUCE(min_thickness_,min_thickness,ccl%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+      deallocate(min_thickness_)
+   end subroutine get_structminthickness
    
    
 end module simplex_class
