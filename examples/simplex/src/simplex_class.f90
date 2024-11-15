@@ -438,7 +438,8 @@ contains
          use vfs_class, only: VFlo
          implicit none
          integer, intent(in) :: i,j,k
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.tmpthickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+         ! ZZ original value = 1.5
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -993,9 +994,11 @@ contains
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          use vfs_class, only: r2p,plicnet,r2pnet,lvira
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=2,name='plic')
+         this%smesh=surfmesh(nvar=4,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
+         this%smesh%varname(3)='id_ccl_ligament'
+         this%smesh%varname(4)='unf_filt'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness
@@ -1011,6 +1014,8 @@ contains
                      if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        this%smesh%var(3,np)=real(this%ccl_ligament%id(i,j,k),WP)
+                        this%smesh%var(4,np)=this%unfiltered_thickness(i,j,k)
                      end if
                   end do
                end do
@@ -1142,7 +1147,6 @@ contains
          this%flowrate_evt=event(time=this%time,name='Flow rate output')
          call this%input%read('Flow rate output period',this%flowrate_evt%tper,default=huge(1.0_WP))
       end block flowrate_analysis_prep
-      
       
    contains
       
@@ -1550,6 +1554,8 @@ contains
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                           this%smesh%var(3,np)=real(this%ccl_ligament%id(i,j,k),WP)
+                           this%smesh%var(4,np)=this%unfiltered_thickness(i,j,k)
                         end if
                      end do
                   end do

@@ -41,7 +41,7 @@ Pressure iteration : 50
 
 # Data output
 Ensight output period : 1e-4
-Restart output period : 1e-3
+Restart output period : 1e-4
 
 # Data restart
-Restart from : 3.20002E-02
+Restart from : 3.36002E-02
