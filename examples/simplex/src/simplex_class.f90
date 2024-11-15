@@ -93,6 +93,10 @@ module simplex_class
       real(WP) :: emax             !< Maximum eccentricity for transfer
       real(WP) :: vof_transfered   !< Integral of VOF transfered
       real(WP) :: vof_deleted      !< Integral of VOF deleted
+
+      !> Ligament transfer
+      real(WP), dimension(:,:,:), allocatable :: tmpthickness
+      type(cclabel) :: ccl_ligament
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -110,6 +114,7 @@ module simplex_class
       procedure :: step                            !< Advance simplex simulation by one time step
       procedure :: final                           !< Finalize simplex simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
+      procedure :: transfer_ligaments              !< Transfer ligaments to a Lagrangian representation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
    end type simplex
    
@@ -403,6 +408,7 @@ contains
          end if
       end function make_label
       
+
       !> Function that identifies if cell pairs have same label
       logical function same_label(i1,j1,k1,i2,j2,k2)
          implicit none
@@ -411,6 +417,39 @@ contains
       end function same_label
       
    end subroutine transfer_drops
+
+   !> Transfer ligaments to Lagrangian representation
+   subroutine transfer_ligaments(this)
+      class(simplex), intent(inout) :: this
+
+      ! Start by performing a CCL
+      call this%ccl_ligament%build(make_label_ligament,same_label_ligament)
+      
+      
+      contains
+
+
+      !> Function that identifies cells that need a label to min thickness region
+      logical function make_label_ligament(i,j,k)
+         use vfs_class, only: VFlo
+         implicit none
+         integer, intent(in) :: i,j,k
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%tmpthickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+            make_label_ligament=.true.
+         else
+            make_label_ligament=.false.
+         end if
+      end function make_label_ligament
+      
+      
+      !> Function that identifies if cell pairs have same label
+      logical function same_label_ligament(i1,j1,k1,i2,j2,k2)
+         implicit none
+         integer, intent(in) :: i1,j1,k1,i2,j2,k2
+         same_label_ligament=.true.
+      end function same_label_ligament
+
+   end subroutine transfer_ligaments
    
    
    !> Initialization of simplex simulation
@@ -611,6 +650,7 @@ contains
          allocate(this%Uib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%tmpthickness(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -764,6 +804,12 @@ contains
             this%vof_transfered=0.0_WP
          end if
       end block prepare_transfer
+
+
+      ! Prepare ligament breakup model
+      prepare_ligament_breakup: block
+         call this%ccl_ligament%initialize(pg=this%cfg%pgrid,name='ccl_ligament')
+      end block prepare_ligament_breakup
       
       
       ! Handle restart/saves here
@@ -1390,6 +1436,9 @@ contains
       call this%ttrans%start() ! Start transfer timer
       if (this%use_drop_transfer) call this%transfer_drops()
       call this%ttrans%stop() ! Stop transfer timer
+
+      ! Transfer ligament to droplets
+      call this%transfer_ligaments()
       
       ! Remove VOF at edge of domain
       remove_vof: block
