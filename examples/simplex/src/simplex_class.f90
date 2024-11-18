@@ -109,6 +109,14 @@ module simplex_class
       real(WP), dimension(3) :: n1=[+0.6_WP,-0.8_WP,0.0_WP]
       real(WP), dimension(3) :: n2=[+0.6_WP,+0.8_WP,0.0_WP]
       real(WP) :: Ucoflow,mfr,Apipe
+
+      !> Break-up model parameters
+      real(WP) :: vol_convert=0.0_WP
+      real(WP), dimension(:,:,:), allocatable :: film_type            !< Tmp film_type for output purposes
+      real(WP), dimension(:,:,:), allocatable :: thickness            !< Tmp film_type for output purposes
+      real(WP), dimension(:,:,:), allocatable :: d1,d2,d3            !< Tmp film_type for output purposes
+      real(WP), dimension(:,:,:), allocatable :: l1,l2,l3            !< Tmp film_type for output purposes
+      real(WP), dimension(:,:,:), allocatable :: d3_d1,d3_d2,d2_d1            !< Tmp film_type for output purposes
       
    contains
       procedure :: init                            !< Initialize simplex simulation
@@ -120,11 +128,13 @@ module simplex_class
       procedure :: get_thickness_unfiltered
       procedure :: get_cclstats
       procedure :: get_structminthickness
+      procedure :: get_localfilmtype
    end type simplex
 
    ! Temp arrays for ligament transfer
    real(WP), dimension(:,:,:), allocatable :: tmpthickness
-   real(WP) :: min_ligamentthickness  =1.0_WP
+   integer, dimension(:,:,:), allocatable :: tmpfilm_type
+   real(WP) :: min_ligamentthickness=1.1_WP
    
    
 contains
@@ -621,7 +631,7 @@ contains
          implicit none
          integer, intent(in) :: i,j,k
          ! ZZ original value = 1.5
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.2.6_WP*this%vf%cfg%min_meshsize) then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.10_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -875,7 +885,18 @@ contains
          allocate(this%Vib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(tmpthickness(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(tmpfilm_type(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%unfiltered_thickness(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%unfiltered_thickness=0.0_WP
+         allocate(this%film_type(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%film_type=0.0_WP
+         allocate(this%d1(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%d1=0.0_WP
+         allocate(this%d2(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%d2=0.0_WP
+         allocate(this%d3(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%d3=0.0_WP
+         allocate(this%l1(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%l1=0.0_WP
+         allocate(this%l2(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%l2=0.0_WP
+         allocate(this%l3(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%l3=0.0_WP
+         allocate(this%d3_d1(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%d3_d1=0.0_WP
+         allocate(this%d3_d2(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%d3_d2=0.0_WP
+         allocate(this%d2_d1(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%d2_d1=0.0_WP
       end block allocate_work_arrays
       
       
@@ -1029,7 +1050,6 @@ contains
             this%vof_transfered=0.0_WP
          end if
       end block prepare_transfer
-
 
       ! Prepare ligament breakup model
       prepare_ligament_breakup: block
@@ -1677,6 +1697,7 @@ contains
       call this%ttrans%stop() ! Stop transfer timer
 
       ! Transfer ligament to droplets
+      call this%get_localfilmtype()
       call this%get_thickness_unfiltered()
       call this%transfer_ligaments()
       
@@ -1859,6 +1880,85 @@ contains
       deallocate(this%gradU,this%Uib,this%Vib,this%Wib,this%SR)
    end subroutine final
 
+   !> Detect edge-like regions of the interface
+   subroutine get_localfilmtype(this)
+      implicit none
+      class(simplex), intent(inout) :: this
+      integer , parameter        :: order = 3
+      integer :: ii,jj,kk,i,j,k,lwork,info
+      real(WP) :: lvol,ratio
+      real(WP), dimension(:), allocatable :: work
+      real(WP), dimension(1)   :: lwork_query
+      real(WP), dimension(3) :: lx_vol, Ltmp,d
+      real(WP), dimension(3,3) :: Imom
+      this%film_type=0.0_WP
+      this%d1= 0.0_WP;this%d2=0.0_WP;this%d3=0.0_WP
+      this%l1= 0.0_WP;this%l2=0.0_WP;this%l3=0.0_WP
+      this%d3_d1= 0.0_WP;this%d3_d2=0.0_WP;this%d2_d1=0.0_WP
+      tmpfilm_type = 0; ratio=1.5_WP
+      call dsyev('V','U',order,Imom,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+      ! Traverse domain and compute sensors
+      do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+         do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+            do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+               Imom = 0.0_WP; lvol = 0.0_WP; lx_vol=0.0_WP
+               do kk = k-2,k+2
+                  do jj = j-2,j+2
+                     do ii = i-2,i+2
+                        ! Volume
+                        lvol = lvol + this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                        ! Center of gravity
+                        lx_vol = lx_vol + this%vf%Lbary(:,ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                     end do
+                  end do
+               end do
+
+               lx_vol = lx_vol/lvol
+               do kk = k-2,k+2
+                  do jj = j-2,j+2
+                     do ii = i-2,i+2
+                        ! Location of film node
+                        Ltmp = this%vf%Lbary(:,ii,jj,kk) - lx_vol
+                        Imom(1,1) = Imom(1,1) + (Ltmp(2)**2 + Ltmp(3)**2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                        Imom(2,2) = Imom(2,2) + (Ltmp(1)**2 + Ltmp(3)**2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                        Imom(3,3) = Imom(3,3) + (Ltmp(1)**2 + Ltmp(2)**2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                        
+                        Imom(1,2) = Imom(1,2) - Ltmp(1)*Ltmp(2)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                        Imom(1,3) = Imom(1,3) - Ltmp(1)*Ltmp(3)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
+                        Imom(2,3) = Imom(2,3) - Ltmp(2)*Ltmp(3)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)   
+                     end do
+                  end do
+               end do
+               call dsyev('V','U',order,Imom,order,d,work,lwork,info)
+               d = max(0.0_WP,d)
+      
+               ! if (lvol .gt. 0.0_WP) then
+               if (d(3).gt.(ratio*d(1))) tmpfilm_type(i,j,k) = tmpfilm_type(i,j,k) + 1
+               if (d(3).gt.(ratio*d(2))) tmpfilm_type(i,j,k) = tmpfilm_type(i,j,k) + 1
+
+               if (d(3).gt.(ratio*d(1))) this%film_type(i,j,k) = this%film_type(i,j,k) + 1.0_WP
+               if (d(3).gt.(ratio*d(2))) this%film_type(i,j,k) = this%film_type(i,j,k) + 1.0_WP
+
+               this%d1(i,j,k)=d(1)
+               this%d2(i,j,k)=d(2)
+               this%d3(i,j,k)=d(3)
+               this%l1(i,j,k)=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/(lvol+tiny(1.0_WP)))
+               this%l2(i,j,k)=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/(lvol+tiny(1.0_WP)))
+               this%l3(i,j,k)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/(lvol+tiny(1.0_WP)))
+               ! print *,d(3)/(d(1)+tiny(1.0_WP)),d(3)/(d(2)+tiny(1.0_WP)),d(2)/(d(1)+tiny(1.0_WP))
+               this%d3_d1(i,j,k)=d(3)/(d(1)+tiny(1.0_WP))
+               this%d3_d2(i,j,k)=d(3)/(d(2)+tiny(1.0_WP))
+               this%d2_d1(i,j,k)=d(2)/(d(1)+tiny(1.0_WP))
+               ! this%film_type(i,j,k) = tmpfilm_type(i,j,k)
+               ! end if
+            end do 
+         end do 
+      end do 
+      deallocate(work)
+      call this%vf%cfg%sync(tmpfilm_type)
+      call this%vf%cfg%sync(this%film_type)
+   end subroutine get_localfilmtype
+
 
    subroutine get_cclstats(this,ccl,x,y,z,u,v,w,vol,lengths,maxlength,axes,f_ligament)
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MIN,MPI_MAX,MPI_INTEGER
@@ -1925,7 +2025,7 @@ contains
             v_vol_(i) = v_vol_(i) + this%fs%V(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
             w_vol_(i) = w_vol_(i) + this%fs%W(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
 
-            ! if(tmpfilm_type(ii,jj,kk).eq.1) n_ligament_(i)=n_ligament_(i)+1
+            if(tmpfilm_type(ii,jj,kk).eq.1) n_ligament_(i)=n_ligament_(i)+1
          end do
       end do
       ! Sum parallel stats
