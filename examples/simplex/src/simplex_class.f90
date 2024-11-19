@@ -483,9 +483,9 @@ contains
          ! Set a minimum breakup criteria for volume
          if (min_thickness(n) .gt. min_ligamentthickness*this%vf%cfg%min_meshsize) cycle
          if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) cycle
-         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent ,"f_ligament is:", f_ligament(n)
-         if (f_ligament(n).lt.0.5_WP) cycle
-         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent
+         ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent ,"f_ligament is:", f_ligament(n)
+         if (f_ligament(n).lt.0.9_WP) cycle
+         ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent
          ! Assume a cylinder ligament
          Lrim=maxlength(n)
          Vrim=vol(n)
@@ -494,6 +494,7 @@ contains
          nmain=floor(dimless_wavenumber*Lrim/twoPi/minor_radius)
          ! Skip if not a droplet is formed
          ! if (this%vf%cfg%amRoot) print *, "Pre check if droplet is formed and nmain=",nmain
+         if (this%vf%cfg%amRoot) print *, "Lrim=", Lrim, "Vrim=", Vrim, "minor=", minor_radius, "nmain=", nmain,"and this is id:", this%ccl_ligament%struct(n)%parent
          if (nmain.lt.1) cycle
    
          nsat=nmain+1
@@ -503,7 +504,7 @@ contains
          ! if (this%vf%cfg%amRoot) print *, "This is the nsat", nsat, "and this is id:", n
          ! Restriction on the smallest droplet diameter via breakup
          diam=max(diam,min_diam)
-         if (this%vf%cfg%amRoot) print *, "This is the diameter post check", diam, "and this is id:", n
+         if (this%vf%cfg%amRoot) print *, "This is the diameter post check", diam, "and this is id:", this%ccl_ligament%struct(n)%parent
    
          if (nmain.gt.1) then
             Vd=pi/6.0_WP*(diam**3+(size_ratio*diam)**3)
@@ -1202,11 +1203,12 @@ contains
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          use vfs_class, only: r2p,plicnet,r2pnet,lvira
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=4,name='plic')
+         this%smesh=surfmesh(nvar=5,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='id_ccl_ligament'
          this%smesh%varname(4)='unf_filt'
+         this%smesh%varname(5)='film_type'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -1226,6 +1228,7 @@ contains
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                         this%smesh%var(3,np)=real(this%ccl_ligament%id(i,j,k),WP)
                         this%smesh%var(4,np)=this%unfiltered_thickness(i,j,k)
+                        this%smesh%var(5,np)=real(this%film_type(i,j,k),WP)
                      end if
                   end do
                end do
