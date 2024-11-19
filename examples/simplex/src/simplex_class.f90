@@ -458,7 +458,7 @@ contains
       real(WP) :: Vt,Vl,Vd,minor_radius,diam,Vrim,Lrim
       integer  :: nmain,nsat,np_old,np_start
       ! Prescribe inviscid breakup parameters
-      real(WP), parameter :: min_diam=1.0e-2_WP
+      real(WP), parameter :: min_diam=1.0e-6_WP
       real(WP), parameter :: dimless_wavenumber=0.697_WP
       real(WP), parameter :: size_ratio=0.707_WP !0.015_WP
 
@@ -483,9 +483,9 @@ contains
          ! Set a minimum breakup criteria for volume
          if (min_thickness(n) .gt. min_ligamentthickness*this%vf%cfg%min_meshsize) cycle
          if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) cycle
-         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", n ,"f_ligament is:", f_ligament(n)
-         if (f_ligament(n).lt.0.9_WP) cycle
-         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", n
+         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent ,"f_ligament is:", f_ligament(n)
+         if (f_ligament(n).lt.0.5_WP) cycle
+         if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent
          ! Assume a cylinder ligament
          Lrim=maxlength(n)
          Vrim=vol(n)
@@ -493,12 +493,17 @@ contains
          ! Drop size method from Kim & Moin (2011)
          nmain=floor(dimless_wavenumber*Lrim/twoPi/minor_radius)
          ! Skip if not a droplet is formed
+         ! if (this%vf%cfg%amRoot) print *, "Pre check if droplet is formed and nmain=",nmain
          if (nmain.lt.1) cycle
    
          nsat=nmain+1
          diam=(6.0_WP*Vrim/pi/(real(nmain,WP)+size_ratio**3*real(nsat,WP)))**(1.0_WP/3.0_WP)
+         ! if (this%vf%cfg%amRoot) print *, "This is the diameter pre check", diam, "and this is id:", n
+         ! if (this%vf%cfg%amRoot) print *, "This is the Vrim", Vrim, "and this is id:", n
+         ! if (this%vf%cfg%amRoot) print *, "This is the nsat", nsat, "and this is id:", n
          ! Restriction on the smallest droplet diameter via breakup
          diam=max(diam,min_diam)
+         if (this%vf%cfg%amRoot) print *, "This is the diameter post check", diam, "and this is id:", n
    
          if (nmain.gt.1) then
             Vd=pi/6.0_WP*(diam**3+(size_ratio*diam)**3)
@@ -631,7 +636,7 @@ contains
          implicit none
          integer, intent(in) :: i,j,k
          ! ZZ original value = 1.5
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.10_WP*this%vf%cfg%min_meshsize) then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -2038,6 +2043,7 @@ contains
       call MPI_ALLREDUCE(w_vol_,w,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
 
       call MPI_ALLREDUCE(ncell_,ncell,ccl%nstruct,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
+      
       call MPI_ALLREDUCE(n_ligament_,n_ligament,ccl%nstruct,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
       do i=1,ccl%nstruct
          ! Periodicity
