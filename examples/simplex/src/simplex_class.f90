@@ -134,7 +134,7 @@ module simplex_class
    ! Temp arrays for ligament transfer
    real(WP), dimension(:,:,:), allocatable :: tmpthickness
    integer, dimension(:,:,:), allocatable :: tmpfilm_type
-   real(WP) :: min_ligamentthickness=1.1_WP
+   real(WP) :: min_ligamentthickness=1.0_WP
    
    
 contains
@@ -494,7 +494,7 @@ contains
          nmain=floor(dimless_wavenumber*Lrim/twoPi/minor_radius)
          ! Skip if not a droplet is formed
          ! if (this%vf%cfg%amRoot) print *, "Pre check if droplet is formed and nmain=",nmain
-         if (this%vf%cfg%amRoot) print *, "Lrim=", Lrim, "Vrim=", Vrim, "minor=", minor_radius, "nmain=", nmain,"and this is id:", this%ccl_ligament%struct(n)%parent
+         ! if (this%vf%cfg%amRoot) print *, "Lrim=", Lrim, "Vrim=", Vrim, "minor=", minor_radius, "nmain=", nmain,"and this is id:", this%ccl_ligament%struct(n)%parent
          if (nmain.lt.1) cycle
    
          nsat=nmain+1
@@ -504,7 +504,7 @@ contains
          ! if (this%vf%cfg%amRoot) print *, "This is the nsat", nsat, "and this is id:", n
          ! Restriction on the smallest droplet diameter via breakup
          diam=max(diam,min_diam)
-         if (this%vf%cfg%amRoot) print *, "This is the diameter post check", diam, "and this is id:", this%ccl_ligament%struct(n)%parent
+         ! if (this%vf%cfg%amRoot) print *, "This is the diameter post check", diam, "and this is id:", this%ccl_ligament%struct(n)%parent
    
          if (nmain.gt.1) then
             Vd=pi/6.0_WP*(diam**3+(size_ratio*diam)**3)
