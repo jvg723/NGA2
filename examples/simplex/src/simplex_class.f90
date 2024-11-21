@@ -487,7 +487,7 @@ contains
          if (f_ligament(n).lt.0.9_WP) cycle
          ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent
          ! Assume a cylinder ligament
-         Lrim=maxlength(n)
+         Lrim=maxlength(n) !/Lrim=length(n,1)
          Vrim=vol(n)
          minor_radius=sqrt(Vrim/pi/Lrim)                  
          ! Drop size method from Kim & Moin (2011)
@@ -519,7 +519,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(8,8)                                                                                          !< Give id 
+                  this%lp%p(np)%id  =int(2,8)                                                                                          !< Give id 
                   this%lp%p(np)%dt  =0.0_WP                                                                                            !< Let the drop find it own integration time
                   this%lp%p(np)%Acol=0.0_WP                                                                                            !< Give zero collision force
                   this%lp%p(np)%Tcol=0.0_WP                                                                                            !< Give zero collision force
@@ -533,7 +533,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(9,8)                                                                                   
+                  this%lp%p(np)%id  =int(2,8)                                                                                   
                   this%lp%p(np)%dt  =0.0_WP                                                                                     
                   this%lp%p(np)%Acol=0.0_WP                                                                                     
                   this%lp%p(np)%Tcol=0.0_WP                                                                                     
@@ -558,7 +558,7 @@ contains
                   ! Add one last drop for remaining liquid volume
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(10,8)                                 
+                  this%lp%p(np)%id  =int(2,8)                                 
                   this%lp%p(np)%dt  =0.0_WP                                    
                   this%lp%p(np)%Acol=0.0_WP                                    
                   this%lp%p(np)%Tcol=0.0_WP                                    
@@ -581,7 +581,7 @@ contains
                ! Make room for new drop
                np=this%lp%np_+1; call this%lp%resize(np)
                ! Add the drop
-               this%lp%p(np)%id  =int(11,8)                                                                               
+               this%lp%p(np)%id  =int(3,8)                                                                               
                this%lp%p(np)%dt  =0.0_WP                                                                                  
                this%lp%p(np)%Acol=0.0_WP                                                                                  
                this%lp%p(np)%Tcol=0.0_WP                                                                                  
@@ -596,7 +596,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(12,8)                                                                               
+                  this%lp%p(np)%id  =int(3,8)                                                                               
                   this%lp%p(np)%dt  =0.0_WP                                                                                  
                   this%lp%p(np)%Acol=0.0_WP                                                                                  
                   this%lp%p(np)%Tcol=0.0_WP                                                                                  
@@ -1238,16 +1238,21 @@ contains
       
       
       ! Create partmesh object for particle output
+      ! id=1, transfer drops
+      ! id=2, transfer_ligaments (nmain>1)
+      ! id=3, transfer_ligaments (nmain=1)
       if (this%use_drop_transfer) then
          create_pmesh: block
             integer :: i
-            this%pmesh=partmesh(nvar=1,nvec=1,name='lpt')
+            this%pmesh=partmesh(nvar=3,nvec=1,name='lpt')
             this%pmesh%varname(1)='radius'
             this%pmesh%vecname(1)='velocity'
+            this%pmesh%varname(2)='id'
             call this%lp%update_partmesh(this%pmesh)
             do i=1,this%lp%np_
                this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
                this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+               this%pmesh%var(2,i)=this%lp%p(i)%id
             end do
          end block create_pmesh
       end if
