@@ -1244,7 +1244,7 @@ contains
       if (this%use_drop_transfer) then
          create_pmesh: block
             integer :: i
-            this%pmesh=partmesh(nvar=3,nvec=1,name='lpt')
+            this%pmesh=partmesh(nvar=2,nvec=1,name='lpt')
             this%pmesh%varname(1)='radius'
             this%pmesh%vecname(1)='velocity'
             this%pmesh%varname(2)='id'
@@ -1358,7 +1358,7 @@ contains
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
          call this%timefile%add_column(this%ttrans%time,trim(this%ttrans%name))
       end block create_timing
-      
+
       
       ! Create an event for flow rate analysis
       flowrate_analysis_prep: block
@@ -1797,6 +1797,7 @@ contains
                do i=1,this%lp%np_
                   this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
                   this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
+                  this%pmesh%var(2,i)=this%lp%p(i)%id
                end do
             end block update_pmesh 
          end if
@@ -1992,7 +1993,7 @@ contains
       real(WP), dimension(:), allocatable :: z_min_,z_min,z_max_,z_max
       real(WP), dimension(:,:,:), allocatable :: Imom_,Imom
       ! For ligament type
-      integer(WP), dimension(:), allocatable :: ncell_,ncell,n_ligament_,n_ligament
+      real(WP), dimension(:), allocatable :: ncell_,ncell,n_ligament_,n_ligament
       real(WP) :: xtmp,ytmp,ztmp
       ! Moment of inertia variable
       real(WP), dimension(:), allocatable :: work
@@ -2001,7 +2002,6 @@ contains
       real(WP), dimension(3,3) :: A
       integer , parameter :: order = 3
       integer  :: lwork,info
-
       allocate(vol_(1:ccl%nstruct));vol_=0.0_WP
       allocate(x_min(1:ccl%nstruct),x_min_(1:ccl%nstruct));x_min=0.0_WP;x_min_= 10000.0_WP
       allocate(x_max(1:ccl%nstruct),x_max_(1:ccl%nstruct));x_max=0.0_WP;x_max_=-10000.0_WP
@@ -2013,14 +2013,14 @@ contains
       allocate(u_vol_(1:ccl%nstruct),v_vol_(1:ccl%nstruct),w_vol_(1:ccl%nstruct));u_vol_=0.0_WP;v_vol_=0.0_WP;w_vol_=0.0_WP
       allocate(Imom(1:ccl%nstruct,3,3),Imom_(1:ccl%nstruct,3,3));Imom=0.0_WP;Imom_=0.0_WP
       allocate(ncell(1:ccl%nstruct),ncell_(1:ccl%nstruct),n_ligament_(1:ccl%nstruct),n_ligament(1:ccl%nstruct))
-      ncell=0;ncell_=0;n_ligament=0;n_ligament_=0
+      ncell=0.0_WP;ncell_=0.0_WP;n_ligament=0.0_WP;n_ligament_=0.0_WP
       ! Query optimal work array size
       call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
       do i=1,ccl%nstruct
          ! Periodicity
          per_x = ccl%struct(i)%per(1); per_y = ccl%struct(i)%per(2); per_z = ccl%struct(i)%per(3)
          ! get number of local cells
-         ncell_(i) = ccl%struct(i)%n_
+         ncell_(i) = ccl%struct(i)%n_*1.0_WP
          do j=1,ccl%struct(i)%n_
             ii=ccl%struct(i)%map(1,j); jj=ccl%struct(i)%map(2,j); kk=ccl%struct(i)%map(3,j)
             ! Location of struct node
@@ -2037,8 +2037,7 @@ contains
             u_vol_(i) = u_vol_(i) + this%fs%U(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
             v_vol_(i) = v_vol_(i) + this%fs%V(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
             w_vol_(i) = w_vol_(i) + this%fs%W(ii,jj,kk)*this%vf%cfg%vol(ii,jj,kk)*this%vf%VF(ii,jj,kk)
-
-            if(tmpfilm_type(ii,jj,kk).eq.1) n_ligament_(i)=n_ligament_(i)+1
+            if(tmpfilm_type(ii,jj,kk).eq.1) n_ligament_(i)=n_ligament_(i)+1.0_WP
          end do
       end do
       ! Sum parallel stats
@@ -2049,10 +2048,8 @@ contains
       call MPI_ALLREDUCE(u_vol_,u,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(v_vol_,v,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(w_vol_,w,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-
-      call MPI_ALLREDUCE(ncell_,ncell,ccl%nstruct,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
-      
-      call MPI_ALLREDUCE(n_ligament_,n_ligament,ccl%nstruct,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(ncell_,ncell,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(n_ligament_,n_ligament,ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
       do i=1,ccl%nstruct
          ! Periodicity
          per_x = ccl%struct(i)%per(1); per_y = ccl%struct(i)%per(2); per_z = ccl%struct(i)%per(3)
@@ -2079,7 +2076,7 @@ contains
             end do
             ! ! Min thickness
             ! min_thickness_(i) = min(min_thickness_(i),this%struct_thickness(ii,jj,kk))
-         end do 
+         end do
       end do
       ! Sum parallel stat on Imom
       do i=1,3
@@ -2122,13 +2119,11 @@ contains
          axes(i,:,:) = A
          ! Use max of bounding box and MoI-derived lengths as length
          maxlength(i) = max(maxlength(i),lengths(i,1))
-         
-         if (ncell(i).eq.0) then 
+         if (ncell(i).eq.0) then
             f_ligament(i) = 0.0_WP
-         else 
-            f_ligament(i) = 1.0_WP*n_ligament(i)/(1.0_WP*ncell(i)) 
+         else
+            f_ligament(i) = 1.0_WP*n_ligament(i)/(1.0_WP*ncell(i))
          end if
-
       end do
       ! Deallocate arrays
       deallocate(vol_,x_vol_,y_vol_,z_vol_,u_vol_,v_vol_,w_vol_,Imom_,Imom)
