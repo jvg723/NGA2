@@ -1062,9 +1062,7 @@ contains
       ! Prepare ligament breakup model
       prepare_ligament_breakup: block
          call this%input%read('Breakup ligaments',this%use_ligament_breakup,default=.true.)
-         if (this%use_ligament_breakup) then
-            call this%ccl_ligament%initialize(pg=this%cfg%pgrid,name='ccl_ligament')
-         end if
+         call this%ccl_ligament%initialize(pg=this%cfg%pgrid,name='ccl_ligament')
       end block prepare_ligament_breakup
       
       
