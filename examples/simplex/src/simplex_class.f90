@@ -84,16 +84,17 @@ module simplex_class
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
       
       !> Drop transfer modeling
-      logical :: use_drop_transfer !< Do we use droplet transfer
-      type(lpt)      :: lp         !< Lagrangian particle tracking
-      type(monitor)  :: pfile      !< Particle monitoring
-      type(partmesh) :: pmesh      !< Particle mesh for lpt
-      real(WP) :: dmax             !< Maximum diameter for transfer
-      real(WP) :: dmin             !< Minimum diameter below which transfer is automatic
-      real(WP) :: ddel             !< Minimum diameter below which structure is directly deleted
-      real(WP) :: emax             !< Maximum eccentricity for transfer
-      real(WP) :: vof_transfered   !< Integral of VOF transfered
-      real(WP) :: vof_deleted      !< Integral of VOF deleted
+      logical :: use_drop_transfer    !< Do we use droplet transfer
+      logical :: use_ligament_breakup !< Do we breakup ligaments
+      type(lpt)      :: lp            !< Lagrangian particle tracking
+      type(monitor)  :: pfile         !< Particle monitoring
+      type(partmesh) :: pmesh         !< Particle mesh for lpt
+      real(WP) :: dmax                !< Maximum diameter for transfer
+      real(WP) :: dmin                !< Minimum diameter below which transfer is automatic
+      real(WP) :: ddel                !< Minimum diameter below which structure is directly deleted
+      real(WP) :: emax                !< Maximum eccentricity for transfer
+      real(WP) :: vof_transfered      !< Integral of VOF transfered
+      real(WP) :: vof_deleted         !< Integral of VOF deleted
 
       !> Ligament transfer
       type(cclabel) :: ccl_ligament
@@ -1059,7 +1060,10 @@ contains
 
       ! Prepare ligament breakup model
       prepare_ligament_breakup: block
-         call this%ccl_ligament%initialize(pg=this%cfg%pgrid,name='ccl_ligament')
+         call this%input%read('Breakup ligaments',this%use_ligament_breakup,default=.true.)
+         if (this%use_ligament_breakup) then
+            call this%ccl_ligament%initialize(pg=this%cfg%pgrid,name='ccl_ligament')
+         end if
       end block prepare_ligament_breakup
       
       
@@ -1710,9 +1714,11 @@ contains
       call this%ttrans%stop() ! Stop transfer timer
 
       ! Transfer ligament to droplets
-      call this%get_localfilmtype()
-      call this%get_thickness_unfiltered()
-      call this%transfer_ligaments()
+      if (this%use_ligament_breakup) then 
+         call this%get_localfilmtype()
+         call this%get_thickness_unfiltered()
+         call this%transfer_ligaments()
+      end if
       
       ! Remove VOF at edge of domain
       remove_vof: block
