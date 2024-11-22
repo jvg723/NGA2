@@ -447,12 +447,11 @@ contains
       implicit none
       class(simplex), intent(inout) :: this
       integer  :: n,nn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank
-      character(len=str_medium) :: filename
       ! Stats of the ccl objects
-      real(WP), dimension(:), allocatable :: x,y,z,u,v,w,vol,maxlength
+      real(WP), dimension(:)    , allocatable :: x,y,z,u,v,w,vol,maxlength
       real(WP), dimension(:,:,:), allocatable :: axes
-      real(WP), dimension(:,:), allocatable :: lengths
-      real(WP), dimension(:), allocatable :: min_thickness,f_ligament
+      real(WP), dimension(:,:)  , allocatable :: lengths
+      real(WP), dimension(:)    , allocatable :: min_thickness,f_ligament
       real(WP) :: myint,integral
       
       ! Varaibles determing transfer
@@ -472,6 +471,7 @@ contains
       allocate(maxlength(1:this%ccl_ligament%nstruct),lengths(1:this%ccl_ligament%nstruct,1:3));maxlength=0.0_WP;lengths=0.0_WP
       allocate(vol(1:this%ccl_ligament%nstruct),axes(1:this%ccl_ligament%nstruct,1:3,1:3));vol=0.0_WP;axes=0.0_WP
       allocate(min_thickness(1:this%ccl_ligament%nstruct),f_ligament(1:this%ccl_ligament%nstruct)); min_thickness = this%vf%cfg%min_meshsize; f_ligament=0.0_WP
+      
       myint =0.0_WP; integral =0.0_WP
    
       ! if (this%vf%cfg%amRoot) print *, "breakup1"
@@ -1207,12 +1207,13 @@ contains
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          use vfs_class, only: r2p,plicnet,r2pnet,lvira
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=5,name='plic')
+         this%smesh=surfmesh(nvar=6,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='id_ccl_ligament'
          this%smesh%varname(4)='unf_filt'
          this%smesh%varname(5)='film_type'
+         this%smesh%varname(6)='id_ccl_drop'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -1233,6 +1234,7 @@ contains
                         this%smesh%var(3,np)=real(this%ccl_ligament%id(i,j,k),WP)
                         this%smesh%var(4,np)=this%unfiltered_thickness(i,j,k)
                         this%smesh%var(5,np)=real(this%film_type(i,j,k),WP)
+                        this%smesh%var(6,np)=real(this%ccl%id(i,j,k),WP)
                      end if
                   end do
                end do
@@ -1789,6 +1791,8 @@ contains
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                            this%smesh%var(3,np)=real(this%ccl_ligament%id(i,j,k),WP)
                            this%smesh%var(4,np)=this%unfiltered_thickness(i,j,k)
+                           this%smesh%var(5,np)=real(this%film_type(i,j,k),WP)
+                           this%smesh%var(6,np)=real(this%ccl%id(i,j,k),WP)
                         end if
                      end do
                   end do
