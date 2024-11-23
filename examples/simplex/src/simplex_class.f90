@@ -72,13 +72,14 @@ module simplex_class
       integer        :: nlayer=4           !< Size of buffer layer for VOF removal
       
       !> Timing info
-      type(monitor) :: timefile !< Timing monitoring
-      type(timer)   :: tstep    !< Timer for step
-      type(timer)   :: tsgs     !< Timer for SGS
-      type(timer)   :: tvel     !< Timer for velocity
-      type(timer)   :: tpres    !< Timer for pressure
-      type(timer)   :: tvof     !< Timer for VOF
-      type(timer)   :: ttrans   !< Timer for VOF transfer
+      type(monitor) :: timefile     !< Timing monitoring
+      type(timer)   :: tstep        !< Timer for step
+      type(timer)   :: tsgs         !< Timer for SGS
+      type(timer)   :: tvel         !< Timer for velocity
+      type(timer)   :: tpres        !< Timer for pressure
+      type(timer)   :: tvof         !< Timer for VOF
+      type(timer)   :: ttrans       !< Timer for VOF transfer
+      type(timer)   :: ttrans_lig   !< Timer for ligament VOF transfer
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -1346,12 +1347,13 @@ contains
       ! Create a timing monitor
       create_timing: block
          ! Create timers
-         this%tstep =timer(comm=this%cfg%comm,name='Timestep')
-         this%tvof  =timer(comm=this%cfg%comm,name='VOFsolve')
-         this%tvel  =timer(comm=this%cfg%comm,name='Velocity')
-         this%tpres =timer(comm=this%cfg%comm,name='Pressure')
-         this%tsgs  =timer(comm=this%cfg%comm,name='SGSmodel')
-         this%ttrans=timer(comm=this%cfg%comm,name='Transfer')
+         this%tstep     =timer(comm=this%cfg%comm,name='Timestep')
+         this%tvof      =timer(comm=this%cfg%comm,name='VOFsolve')
+         this%tvel      =timer(comm=this%cfg%comm,name='Velocity')
+         this%tpres     =timer(comm=this%cfg%comm,name='Pressure')
+         this%tsgs      =timer(comm=this%cfg%comm,name='SGSmodel')
+         this%ttrans    =timer(comm=this%cfg%comm,name='Transfer')
+         this%ttrans_lig=timer(comm=this%cfg%comm,name='Transfer_lig')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
          call this%timefile%add_column(this%time%n,'Timestep number')
@@ -1362,6 +1364,7 @@ contains
          call this%timefile%add_column(this%tpres%time ,trim(this%tpres%name))
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
          call this%timefile%add_column(this%ttrans%time,trim(this%ttrans%name))
+         call this%timefile%add_column(this%ttrans_lig%time,trim(this%ttrans_lig%name))
       end block create_timing
 
       
@@ -1510,6 +1513,7 @@ contains
       call this%tvel%reset()
       call this%tpres%reset()
       call this%ttrans%reset()
+      call this%ttrans_lig%reset()
       call this%tstep%start()
       
       ! Increment time
@@ -1715,11 +1719,13 @@ contains
       call this%ttrans%stop() ! Stop transfer timer
 
       ! Transfer ligament to droplets
+      call this%ttrans_lig%start() ! Start transfer timer
       if (this%use_ligament_breakup) then 
          call this%get_localfilmtype()
          call this%get_thickness_unfiltered()
          call this%transfer_ligaments()
       end if
+      call this%ttrans_lig%stop() ! Stop transfer timer
       
       ! Remove VOF at edge of domain
       remove_vof: block
