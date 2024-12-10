@@ -1,6 +1,9 @@
 # Parallelization
 Partition :	8 1 1
 
+# Are we using log conformation stabilzation 
+Stabilization : .true.
+
 # Mesh definition
 Lx :	      32
 Liquid Ly :	4
@@ -16,6 +19,10 @@ Gas Weber number :     10
 Viscosity ratio :      10      !< This is mu_l/mu_g
 Density ratio :        40      !< This is rho_l/rho_g
 Velocity ratio :       0.1     !< This is U_l/U_g
+
+# Non-Newtonian modeling                      
+Polymer viscosity :             1.483     
+Polymer relaxation time :       0.203        
 
 # Time integration
 Max timestep size : 1e-1
