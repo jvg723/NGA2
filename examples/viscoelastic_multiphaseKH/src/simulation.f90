@@ -1,42 +1,51 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
-   use precision,         only: WP
-   use geometry,          only: cfg
-   use hypre_str_class,   only: hypre_str
-   use ddadi_class,       only: ddadi
-   use tpns_class,        only: tpns
-   use vfs_class,         only: vfs
-   use timetracker_class, only: timetracker
-   use ensight_class,     only: ensight
-   use event_class,       only: event
-   use monitor_class,     only: monitor
+   use precision,            only: WP
+   use geometry,             only: cfg
+   use hypre_str_class,      only: hypre_str
+   use ddadi_class,          only: ddadi
+   use tpns_class,           only: tpns
+   use vfs_class,            only: vfs
+   use tpviscoelastic_class, only: tpviscoelastic
+   use timetracker_class,    only: timetracker
+   use ensight_class,        only: ensight
+   use surfmesh_class,       only: surfmesh
+   use event_class,          only: event
+   use monitor_class,        only: monitor
    implicit none
    private
    
    !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
-   type(hypre_str),   public :: ps
-   type(ddadi),       public :: vs
-   type(tpns),        public :: fs
-   type(vfs),         public :: vf
-   type(timetracker), public :: time
+   type(hypre_str),      public :: ps
+   type(ddadi),          public :: vs
+   type(tpns),           public :: fs
+   type(vfs),            public :: vf
+   type(tpviscoelastic), public :: ve
+   type(timetracker),    public :: time
    
    !> Ensight postprocessing
-   type(ensight) :: ens_out
-   type(event)   :: ens_evt
+   type(surfmesh) :: smesh
+   type(ensight)  :: ens_out
+   type(event)    :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile
+   type(monitor) :: mfile,cflfile,scfile
    
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    
    !> Problem definition
    real(WP) :: Reg,Weg,r_visc,r_rho,r_vel,delta_l
    integer :: nwaveX,nwaveZ
    real(WP), dimension(:), allocatable :: wnumbX,wshiftX,wampX,wnumbZ,wshiftZ,wampZ
+
+   !> Check for stabilization 
+   logical :: stabilization 
    
 contains
    
@@ -539,6 +548,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi)
+      deallocate(resSC,SCtmp,gradU)
       
    end subroutine simulation_final
    
