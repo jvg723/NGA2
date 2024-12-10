@@ -410,14 +410,36 @@ contains
          fs%Vold=fs%V
          fs%Wold=fs%W
          
-         ! Apply time-varying Dirichlet conditions
-         ! This is where time-dpt Dirichlet would be enforced
-         
          ! Prepare old staggered density (at n)
          call fs%get_olddensity(vf=vf)
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
+
+         ! Calculate grad(U)
+         call fs%get_gradU(gradU)
+
+         ! Transport our liquid conformation tensor using log conformation
+         advance_scalar: block
+            integer :: ierr
+            integer :: i,j,k,nsc
+            ! Add streching source term for constitutive model
+            if (stabilization) then 
+               call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
+            end if
+            ve%SC=ve%SC+time%dt*resSC
+            call ve%apply_bcond(time%t,time%dt)
+            ve%SCold=ve%SC
+            ! Explicit calculation of dSC/dt from scalar equation
+            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Update our scalars
+            do nsc=1,ve%nscalar
+               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+            end do
+            ! Apply boundary conditions
+            call ve%apply_bcond(time%t,time%dt)
+         end block advance_scalar
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf)
@@ -484,8 +506,12 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+         end if
          call mfile%write()
          call cflfile%write()
+         call scfile%write()
          
       end do
       
