@@ -306,10 +306,47 @@ contains
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
-         smesh=surfmesh(nvar=0,name='plic')
+         use irl_fortran_interface
+         integer :: i,j,k,nplane,np
+         ! Include an extra variable for number of planes
+         smesh=surfmesh(nvar=7,name='plic')
+         smesh%varname(1)='trC'
+         smesh%varname(2)='Cxx'
+         smesh%varname(3)='Cxy'
+         smesh%varname(4)='Cxz'
+         smesh%varname(5)='Cyy'
+         smesh%varname(6)='Cyz'
+         smesh%varname(7)='Czz'
+         ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
+         ! Initalize variables to 0
+         smesh%var(1,:)=0.0_WP
+         smesh%var(2,:)=0.0_WP
+         smesh%var(3,:)=0.0_WP
+         smesh%var(4,:)=0.0_WP
+         smesh%var(5,:)=0.0_WP
+         smesh%var(6,:)=0.0_WP
+         smesh%var(7,:)=0.0_WP
+         np=0
+         do k=vf%cfg%kmin_,vf%cfg%kmax_
+            do j=vf%cfg%jmin_,vf%cfg%jmax_
+               do i=vf%cfg%imin_,vf%cfg%imax_
+                  do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; 
+                        smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                        smesh%var(2,np)=ve%SCrec(i,j,k,1)
+                        smesh%var(3,np)=ve%SCrec(i,j,k,2)
+                        smesh%var(4,np)=ve%SCrec(i,j,k,3)
+                        smesh%var(5,np)=ve%SCrec(i,j,k,4)
+                        smesh%var(6,np)=ve%SCrec(i,j,k,5)
+                        smesh%var(7,np)=ve%SCrec(i,j,k,6)
+                     end if
+                  end do
+               end do
+            end do
+         end do
       end block create_smesh
-      
       
       
       ! Add Ensight output
@@ -324,6 +361,7 @@ contains
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
+         call ens_out%add_surface('plic',smesh)
          if (stabilization) then
             do nsc=1,ve%nscalar
                call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
@@ -501,8 +539,45 @@ contains
          call fs%get_div()
          
          ! Output to ensight
-         if (ens_evt%occurs()) call ens_out%write_data(time%t)
-         
+         if (ens_evt%occurs()) then
+            ! Update surfmesh object
+            create_smesh: block
+               use irl_fortran_interface
+               integer :: i,j,k,nplane,np
+               ! Transfer polygons to smesh
+               call vf%update_surfmesh(smesh)
+               ! Initalize variables to 0
+               smesh%var(1,:)=0.0_WP
+               smesh%var(2,:)=0.0_WP
+               smesh%var(3,:)=0.0_WP
+               smesh%var(4,:)=0.0_WP
+               smesh%var(5,:)=0.0_WP
+               smesh%var(6,:)=0.0_WP
+               smesh%var(7,:)=0.0_WP
+               np=0
+               do k=vf%cfg%kmin_,vf%cfg%kmax_
+                  do j=vf%cfg%jmin_,vf%cfg%jmax_
+                     do i=vf%cfg%imin_,vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; 
+                              smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                              smesh%var(2,np)=ve%SCrec(i,j,k,1)
+                              smesh%var(3,np)=ve%SCrec(i,j,k,2)
+                              smesh%var(4,np)=ve%SCrec(i,j,k,3)
+                              smesh%var(5,np)=ve%SCrec(i,j,k,4)
+                              smesh%var(6,np)=ve%SCrec(i,j,k,5)
+                              smesh%var(7,np)=ve%SCrec(i,j,k,6)
+                           end if
+                        end do
+                     end do
+                  end do
+               end do
+            end block create_smesh
+            ! Perform ensight output
+            call ens_out%write_data(time%t)
+         end if 
+
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
