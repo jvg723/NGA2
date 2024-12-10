@@ -271,9 +271,9 @@ contains
          ! Create viscoelastic model solver
          call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
-         call param_read('Polymer relaxation time',ve%trelax)
+         call param_read('Weissenberg Number',ve%trelax)
          ! Polymer viscosity
-         call param_read('Polymer viscosity',ve%visc_p)
+         call param_read('Polymer viscosity ratio',ve%visc_p); ve%visc_p=ve%visc_p*fs%visc_l
          ! Setup without an implicit solver
          call ve%setup()
          ! Check first if we use stabilization

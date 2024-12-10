@@ -6,8 +6,8 @@ Stabilization : .true.
 
 # Mesh definition
 Lx :	      32
-Liquid Ly :	4
-Gas Ly :	   12
+Liquid Ly :	  4
+Gas Ly :	  12
 Lz :	      16!1e-1
 nx :	      160!320
 ny :	      80!160
@@ -21,8 +21,8 @@ Density ratio :        40      !< This is rho_l/rho_g
 Velocity ratio :       0.1     !< This is U_l/U_g
 
 # Non-Newtonian modeling                      
-Polymer viscosity :             1.483     
-Polymer relaxation time :       0.203        
+Polymer viscosity ratio : 1
+Weissenberg Number      : 1      
 
 # Time integration
 Max timestep size : 1e-1
