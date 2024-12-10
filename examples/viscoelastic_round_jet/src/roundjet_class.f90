@@ -8,6 +8,7 @@ module roundjet_class
    use hypre_str_class,   only: hypre_str
    use ddadi_class,       only: ddadi
    use vfs_class,         only: vfs
+   use tpviscoelastic_class, only: tpviscoelastic
    use tpns_class,        only: tpns
    use sgsmodel_class,    only: sgsmodel
    use timetracker_class, only: timetracker
@@ -27,10 +28,11 @@ module roundjet_class
       type(config) :: cfg
       
       !> Flow solver
-      type(vfs)         :: vf     !< Volume fraction solver
-      type(tpns)        :: fs     !< Two-phase flow solver
-      type(hypre_str)   :: ps     !< Structured Hypre linear solver for pressure
-      type(timetracker) :: time   !< Time info
+      type(vfs)            :: vf     !< Volume fraction solver
+      type(tpns)           :: fs     !< Two-phase flow solver
+      type(hypre_str)      :: ps     !< Structured Hypre linear solver for pressure
+      type(tpviscoelastic) :: ve
+      type(timetracker)    :: time   !< Time info
       
       !> Implicit solver
       logical     :: use_implicit !< Is an implicit solver used?
@@ -48,11 +50,13 @@ module roundjet_class
       !> Simulation monitoring files
       type(monitor) :: mfile      !< General simulation monitoring
       type(monitor) :: cflfile    !< CFL monitoring
+      type(monitor) :: scfile     !< Monitor for conformation tensor
       
       !> Work arrays
       real(WP), dimension(:,:,:,:,:), allocatable :: gradU           !< Velocity gradient
-      real(WP), dimension(:,:,:), allocatable :: resU,resV,resW      !< Residuals
-      real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
+      real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW  !< Residuals
+      real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi        !< Cell-centered velocities
+      real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp     !< Residuals for scalar solver
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -1142,6 +1146,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%gradU)
+      deallocate(this%resSC,this%SCtmp)
       
    end subroutine final
    
