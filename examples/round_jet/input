@@ -21,7 +21,7 @@
 
 # Restart handling
 [Pipe] Restart output period : 10
-[Pipe] Restart from : restart/pipe_Re5000
+[Pipe] Restart from : !restart/pipe_Re5000
 
 
 ########################
