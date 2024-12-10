@@ -671,6 +671,52 @@ contains
          ! Compute divergence
          call this%fs%get_div()
       end block initialize_velocity
+
+      ! Create a viscoleastic model with log conformation stablization method
+      create_viscoelastic: block
+         use tpviscoelastic_class, only: oldroydb
+         use tpscalar_class,       only: bcond,neumann
+         type(bcond), pointer :: mybc
+         integer :: i,j,k
+         ! Create viscoelastic model solver
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         ! Relaxation time for polymer
+         call param_read('Polymer relaxation time',ve%trelax)
+         ! Polymer viscosity
+         call param_read('Polymer viscosity',ve%visc_p)
+         ! Apply boundary conditions
+         if (moving_domain) then
+            call ve%add_bcond(name='yp_sc',type=neumann,locator=yp_locator_sc,dir='yp')
+            call ve%add_bcond(name='ym_sc',type=neumann,locator=ym_locator_sc,dir='ym')
+         end if
+         ! Setup without an implicit solver
+         call ve%setup()
+         ! Check first if we use stabilization
+         call param_read('Stabilization',stabilization,default=.false.)
+         ! Initialize C scalar fields
+         if (stabilization) then 
+            !> Allocate storage fo eigenvalues and vectors
+            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+            !> Allocate storage for reconstructured C
+            allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+         end if
+         ! Apply boundary conditions
+         call ve%apply_bcond(time%t,time%dt)
+      end block create_viscoelastic
       
       
       ! Create an LES model
