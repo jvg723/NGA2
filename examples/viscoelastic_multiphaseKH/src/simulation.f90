@@ -454,6 +454,9 @@ contains
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
+         ! Prepare new staggered viscosity (at n+1)
+         call fs%get_viscosity(vf=vf)
+
          ! Calculate grad(U)
          call fs%get_gradU(gradU)
 
@@ -478,9 +481,23 @@ contains
             ! Apply boundary conditions
             call ve%apply_bcond(time%t,time%dt)
          end block advance_scalar
-         
-         ! Prepare new staggered viscosity (at n+1)
-         call fs%get_viscosity(vf=vf)
+
+         ! Add in relaxation forcing and reconstruct C
+         if (stabilization) then 
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation(vf%VF)
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt,vf%VF)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec(vf%VF)
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation(vf%VF)
+            ! Take exp(eigenvalues) to use in next time-step
+            ve%eigenval=exp(ve%eigenval)
+         end if
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
