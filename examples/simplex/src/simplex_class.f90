@@ -691,13 +691,16 @@ contains
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
       use parallel,  only: MPI_REAL_WP
       use mathtools, only: pi
+      use filesys,   only: makedir,isdir
+      implicit none
       class(simplex), intent(inout) :: this
+      character(len=str_medium) :: filename,timestamp
       real(WP), dimension(:)    , allocatable :: dvol
       real(WP), dimension(:,:)  , allocatable :: dpos
       real(WP), dimension(:,:)  , allocatable :: dvel
       real(WP), dimension(:,:,:), allocatable :: dmoi
       real(WP), dimension(:)    , allocatable :: drem
-      integer :: n,m,ierr,i,j,k,nmax
+      integer :: iunit,n,m,ierr,i,j,k,nmax
       real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
       logical :: transfer, write_stats
       ! Moment of inertia calculation using lapack
@@ -707,6 +710,17 @@ contains
       real(WP), dimension(3) :: d
       real(WP), dimension(3,3) :: A
       integer :: info
+      
+      ! File to record stats of non-converted structures
+      ! Only root process outputs to a file
+      if (this%cfg%amRoot) then
+         if (.not.isdir('struct_stats')) call makedir('struct_stats')
+         filename='structures_'; write(timestamp,'(es12.5)') this%time%t
+         open(newunit=iunit,file='struct_stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'vol','lmax','lmid','lmin','ecc','xbc','ybc','zbc'
+         close(iunit)
+      end if
+
       
       ! Query optimal work array size
       if (.not.allocated(work)) then
@@ -804,7 +818,7 @@ contains
       ! Transfer drops based on our criteria
       do n=1,this%ccl_buffer%nstruct
 
-         ! Cycle if struct in NOT in buffer layer
+         ! Cycle if struct is NOT in buffer layer
          if (drem(n).lt.1.0_WP) cycle
          
          ! Compute diameter
@@ -885,6 +899,14 @@ contains
 
          ! Write stats if struct cannot be transfered and zero out VF in struct
          if (write_stats) then
+
+            ! Only root process outputs to a file
+            if (this%cfg%amRoot) then
+               open(newunit=iunit,file='struct_stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',position='append',status='old',access='stream',iostat=ierr)
+               ! Output stats about structs not converted
+               write(iunit,'(999999(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5))') dvol(n),lmax,lmid,lmin,ecc,x0,y0,z0
+               close(iunit)
+            end if
 
             ! Zero out VF in the structure
             do m=1,this%ccl_buffer%struct(n)%n_
