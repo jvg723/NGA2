@@ -136,7 +136,7 @@ module simplex_class
    ! Temp arrays for ligament transfer
    real(WP), dimension(:,:,:), allocatable :: tmpthickness
    integer, dimension(:,:,:), allocatable :: tmpfilm_type
-   real(WP) :: min_ligamentthickness=1.0_WP
+   real(WP) :: min_ligamentthickness=1.1_WP
    
    
 contains
@@ -262,12 +262,12 @@ contains
             dvol(n  )=dvol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
             dpos(n,:)=dpos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
             dvel(n,:)=dvel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
-            ! Check if struct touches auto-transfer layer
-            if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
-            &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
-            &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
-            &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
-            &   k.ge.this%vf%cfg%kmax-this%nlayer) drem(n)=1.0_WP
+            ! ! Check if struct touches auto-transfer layer
+            ! if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
+            ! &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
+            ! &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
+            ! &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
+            ! &   k.ge.this%vf%cfg%kmax-this%nlayer) drem(n)=1.0_WP
          end do
       end do
       call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,1*this%ccl%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
@@ -365,13 +365,10 @@ contains
          end if
          
          ! Force transfer if drop touches auto-transfer layer
-         if (drem(n).gt.0.0_WP) auto_transfer=.true.
+         ! if (drem(n).gt.0.0_WP) transfer=.true.
          
          ! But prevent transfer if that's the core
-         if (n.eq.nmax) then 
-            transfer=.false.
-            auto_transfer=.false.
-         end if
+         if (n.eq.nmax) transfer=.false.
 
          ! Perform transfer
          if (transfer) then
@@ -384,39 +381,6 @@ contains
                call this%lp%resize(this%lp%np_)
                ! Add the drop
                this%lp%p(this%lp%np_)%id  =int(1,8)
-               this%lp%p(this%lp%np_)%d   =diam
-               this%lp%p(this%lp%np_)%pos =dpos(n,:)
-               this%lp%p(this%lp%np_)%vel =dvel(n,:)
-               this%lp%p(this%lp%np_)%ind =this%lp%cfg%get_ijk_global(dpos(n,:),[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
-               this%lp%p(this%lp%np_)%flag=0
-               this%lp%p(this%lp%np_)%dt  =0.0_WP
-               this%lp%p(this%lp%np_)%Acol=0.0_WP
-               this%lp%p(this%lp%np_)%Tcol=0.0_WP
-            end if
-            
-            ! Zero out VF in the structure
-            do m=1,this%ccl%struct(n)%n_
-               this%vf%VF(this%ccl%struct(n)%map(1,m),this%ccl%struct(n)%map(2,m),this%ccl%struct(n)%map(3,m))=0.0_WP
-            end do
-            
-            ! Increment monitoring variables
-            this%vof_transfered=this%vof_transfered+dvol(n)
-            this%lp%np_new=this%lp%np_new+1
-            this%lp%vp_new=this%lp%vp_new+dvol(n)
-
-         end if
-
-         ! Auto-transfer and output information for structs touching the auto-transfer layer that have not been converted
-         if (auto_transfer) then 
-
-            ! Root creates a new Lagrangian drop
-            if (this%vf%cfg%amRoot) then
-               ! Increment particle counter
-               this%lp%np_=this%lp%np_+1
-               ! Make room for new drop
-               call this%lp%resize(this%lp%np_)
-               ! Add the drop
-               this%lp%p(this%lp%np_)%id  =int(2,8)
                this%lp%p(this%lp%np_)%d   =diam
                this%lp%p(this%lp%np_)%pos =dpos(n,:)
                this%lp%p(this%lp%np_)%vel =dvel(n,:)
@@ -477,7 +441,7 @@ contains
    !> Transfer ligaments to Lagrangian representation
    subroutine transfer_ligaments(this)
       use mathtools, only: pi,twoPi
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
       use parallel,  only: MPI_REAL_WP
       use messager, only: die
       use irl_fortran_interface
@@ -489,7 +453,9 @@ contains
       real(WP), dimension(:,:,:), allocatable :: axes
       real(WP), dimension(:,:)  , allocatable :: lengths
       real(WP), dimension(:)    , allocatable :: min_thickness,f_ligament
+      real(WP), dimension(:)    , allocatable :: drem
       real(WP) :: myint,integral
+      logical :: transfer
       
       ! Varaibles determing transfer
       real(WP) :: Vt,Vl,Vd,minor_radius,diam,Vrim,Lrim
@@ -508,6 +474,7 @@ contains
       allocate(maxlength(1:this%ccl_ligament%nstruct),lengths(1:this%ccl_ligament%nstruct,1:3));maxlength=0.0_WP;lengths=0.0_WP
       allocate(vol(1:this%ccl_ligament%nstruct),axes(1:this%ccl_ligament%nstruct,1:3,1:3));vol=0.0_WP;axes=0.0_WP
       allocate(min_thickness(1:this%ccl_ligament%nstruct),f_ligament(1:this%ccl_ligament%nstruct)); min_thickness = this%vf%cfg%min_meshsize; f_ligament=0.0_WP
+      allocate(drem(1:this%ccl_ligament%nstruct)); drem=0.0_WP
       
       myint =0.0_WP; integral =0.0_WP
    
@@ -516,34 +483,54 @@ contains
       ! if (this%vf%cfg%amRoot) print *, "breakup2"
       call this%get_structminthickness(this%ccl_ligament,min_thickness,1)
 
+      ! Tag ligaments touching buffer layer
+      do n=1,this%ccl_ligament%nstruct
+         ! Loop over cells in structure
+         do m=1,this%ccl_ligament%struct(n)%n_
+            ! Get cell indices
+            i=this%ccl_ligament%struct(n)%map(1,m)
+            j=this%ccl_ligament%struct(n)%map(2,m)
+            k=this%ccl_ligament%struct(n)%map(3,m)
+            ! Check if struct touches auto-transfer layer
+            if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
+            &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
+            &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
+            &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
+            &   k.ge.this%vf%cfg%kmax-this%nlayer) drem(n)=1.0_WP
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,drem,1*this%ccl_ligament%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+
       np_start=this%lp%np_
       do n=1,this%ccl_ligament%nstruct
-         ! Set a minimum breakup criteria for volume
-         if (min_thickness(n) .gt. min_ligamentthickness*this%vf%cfg%min_meshsize) cycle
-         if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) cycle
-         ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent ,"f_ligament is:", f_ligament(n)
-         if (f_ligament(n).lt.0.9_WP) cycle
-         ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", min_thickness(n), "and this is id:", this%ccl_ligament%struct(n)%parent
-         ! Assume a cylinder ligament
-         Lrim=maxlength(n) !/Lrim=length(n,1)
-         Vrim=vol(n)
-         minor_radius=sqrt(Vrim/pi/Lrim)                  
+         
+         ! Tag if struct is eligible to be broken up
+         transfer=.true.
+         if (min_thickness(n).gt.min_ligamentthickness*this%vf%cfg%min_meshsize) then 
+            transfer=.false.
+         else if (vol(n).lt.1.0_WP*this%vf%cfg%min_meshsize**3) then
+            transfer=.false.
+         else if (drem(n).gt.0.0_WP) then ! If its in the butter automatically break it
+            transfer=.true.
+         else if (f_ligament(n).lt.0.9_WP) then 
+            transfer=.false.
+         end if 
+
+         ! Cycle if not being transfered
+         if (transfer.eqv..false.) cycle 
+
          ! Drop size method from Kim & Moin (2011)
+         Lrim=maxlength(n) ! Assume a cylinder ligament
+         Vrim=vol(n)
+         minor_radius=sqrt(Vrim/pi/Lrim)                 
          nmain=floor(dimless_wavenumber*Lrim/twoPi/minor_radius)
          ! Skip if not a droplet is formed
-         ! if (this%vf%cfg%amRoot) print *, "Pre check if droplet is formed and nmain=",nmain
-         ! if (this%vf%cfg%amRoot) print *, "Lrim=", Lrim, "Vrim=", Vrim, "minor=", minor_radius, "nmain=", nmain,"and this is id:", this%ccl_ligament%struct(n)%parent
          if (nmain.lt.1) cycle
-   
          nsat=nmain+1
          diam=(6.0_WP*Vrim/pi/(real(nmain,WP)+size_ratio**3*real(nsat,WP)))**(1.0_WP/3.0_WP)
-         ! if (this%vf%cfg%amRoot) print *, "This is the diameter pre check", diam, "and this is id:", n
-         ! if (this%vf%cfg%amRoot) print *, "This is the Vrim", Vrim, "and this is id:", n
-         ! if (this%vf%cfg%amRoot) print *, "This is the nsat", nsat, "and this is id:", n
          ! Restriction on the smallest droplet diameter via breakup
          diam=max(diam,min_diam)
-         ! if (this%vf%cfg%amRoot) print *, "This is the diameter post check", diam, "and this is id:", this%ccl_ligament%struct(n)%parent
-   
+
          if (nmain.gt.1) then
             Vd=pi/6.0_WP*(diam**3+(size_ratio*diam)**3)
             Vt=0.0_WP; Vl=0.0_WP     
@@ -557,7 +544,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(3,8)                                                                                          !< Give id 
+                  this%lp%p(np)%id  =int(2,8)                                                                                          !< Give id 
                   this%lp%p(np)%dt  =0.0_WP                                                                                            !< Let the drop find it own integration time
                   this%lp%p(np)%Acol=0.0_WP                                                                                            !< Give zero collision force
                   this%lp%p(np)%Tcol=0.0_WP                                                                                            !< Give zero collision force
@@ -571,7 +558,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(3,8)                                                                                   
+                  this%lp%p(np)%id  =int(2,8)                                                                                   
                   this%lp%p(np)%dt  =0.0_WP                                                                                     
                   this%lp%p(np)%Acol=0.0_WP                                                                                     
                   this%lp%p(np)%Tcol=0.0_WP                                                                                     
@@ -596,7 +583,7 @@ contains
                   ! Add one last drop for remaining liquid volume
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(3,8)                                 
+                  this%lp%p(np)%id  =int(2,8)                                 
                   this%lp%p(np)%dt  =0.0_WP                                    
                   this%lp%p(np)%Acol=0.0_WP                                    
                   this%lp%p(np)%Tcol=0.0_WP                                    
@@ -619,7 +606,7 @@ contains
                ! Make room for new drop
                np=this%lp%np_+1; call this%lp%resize(np)
                ! Add the drop
-               this%lp%p(np)%id  =int(4,8)                                                                               
+               this%lp%p(np)%id  =int(3,8)                                                                               
                this%lp%p(np)%dt  =0.0_WP                                                                                  
                this%lp%p(np)%Acol=0.0_WP                                                                                  
                this%lp%p(np)%Tcol=0.0_WP                                                                                  
@@ -634,7 +621,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(4,8)                                                                               
+                  this%lp%p(np)%id  =int(3,8)                                                                               
                   this%lp%p(np)%dt  =0.0_WP                                                                                  
                   this%lp%p(np)%Acol=0.0_WP                                                                                  
                   this%lp%p(np)%Tcol=0.0_WP                                                                                  
@@ -655,6 +642,7 @@ contains
                this%vf%VF(i,j,k)=0.0_WP
             end do    
          end if
+
       end do
       call this%vf%cfg%sync(this%vf%VF)
       call this%vf%clean_irl_and_band()
@@ -663,7 +651,7 @@ contains
       ! this%vol_convert = this%vol_convert + integral 
 
       call this%lp%sync()
-      deallocate(x,y,z,u,v,w,vol,lengths,maxlength,axes)
+      deallocate(x,y,z,u,v,w,vol,lengths,maxlength,axes,drem)
       
       
       contains
@@ -675,7 +663,9 @@ contains
          implicit none
          integer, intent(in) :: i,j,k
          ! ZZ original value = 1.5
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+         ! Try 3.584
+         ! if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.3.584_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -1283,9 +1273,8 @@ contains
       
       ! Create partmesh object for particle output
       ! id=1, transfer drops
-      ! id=2, auto transfer struct to drops touching buffer layer
-      ! id=3, transfer_ligaments (nmain>1)
-      ! id=4, transfer_ligaments (nmain=1)
+      ! id=2, transfer_ligaments (nmain>1)
+      ! id=3, transfer_ligaments (nmain=1)
       if (this%use_drop_transfer) then
          create_pmesh: block
             integer :: i
@@ -2144,7 +2133,8 @@ contains
          if (y(i).lt.this%vf%cfg%y(this%vf%cfg%jmin)) y(i) = y(i)+this%vf%cfg%yL
          if (z(i).lt.this%vf%cfg%z(this%vf%cfg%kmin)) z(i) = z(i)+this%vf%cfg%zL
          u(i)=u(i)/vol(i); v(i)=v(i)/vol(i); w(i)=w(i)/vol(i)
-         maxlength(i) = hypot(hypot(x_max(i)-x_min(i),y_max(i)-y_min(i))**2,z_max(i)-z_min(i))
+         ! maxlength(i) = hypot(hypot(x_max(i)-x_min(i),y_max(i)-y_min(i))**2,z_max(i)-z_min(i))
+         maxlength(i) = sqrt((x_max(i)-x_min(i))**2+(y_max(i)-y_min(i))**2+(z_max(i)-z_min(i))**2)
          ! Eigenvalues/eigenvectors of moments of inertia tensor
          A = Imom(i,:,:); n = 3
          ! On exit, A contains eigenvectors, and d contains eigenvalues in ascending order
