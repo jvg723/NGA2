@@ -221,7 +221,7 @@ contains
       real(WP), dimension(:)    , allocatable :: drem
       integer :: n,m,ierr,i,j,k,nmax
       real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
-      logical :: transfer
+      logical :: transfer, auto_transfer
       ! Moment of inertia calculation using lapack
       real(WP), dimension(:), allocatable, save :: work !< Saved!
       integer, save :: lwork                            !< Saved!
@@ -262,7 +262,7 @@ contains
             dvol(n  )=dvol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
             dpos(n,:)=dpos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
             dvel(n,:)=dvel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
-            ! Check if drop touches auto-transfer layer
+            ! Check if struct touches auto-transfer layer
             if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
             &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
             &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
@@ -365,11 +365,14 @@ contains
          end if
          
          ! Force transfer if drop touches auto-transfer layer
-         if (drem(n).gt.0.0_WP) transfer=.true.
+         if (drem(n).gt.0.0_WP) auto_transfer=.true.
          
          ! But prevent transfer if that's the core
-         if (n.eq.nmax) transfer=.false.
-         
+         if (n.eq.nmax) then 
+            transfer=.false.
+            auto_transfer=.false.
+         end if
+
          ! Perform transfer
          if (transfer) then
             
@@ -381,6 +384,39 @@ contains
                call this%lp%resize(this%lp%np_)
                ! Add the drop
                this%lp%p(this%lp%np_)%id  =int(1,8)
+               this%lp%p(this%lp%np_)%d   =diam
+               this%lp%p(this%lp%np_)%pos =dpos(n,:)
+               this%lp%p(this%lp%np_)%vel =dvel(n,:)
+               this%lp%p(this%lp%np_)%ind =this%lp%cfg%get_ijk_global(dpos(n,:),[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+               this%lp%p(this%lp%np_)%flag=0
+               this%lp%p(this%lp%np_)%dt  =0.0_WP
+               this%lp%p(this%lp%np_)%Acol=0.0_WP
+               this%lp%p(this%lp%np_)%Tcol=0.0_WP
+            end if
+            
+            ! Zero out VF in the structure
+            do m=1,this%ccl%struct(n)%n_
+               this%vf%VF(this%ccl%struct(n)%map(1,m),this%ccl%struct(n)%map(2,m),this%ccl%struct(n)%map(3,m))=0.0_WP
+            end do
+            
+            ! Increment monitoring variables
+            this%vof_transfered=this%vof_transfered+dvol(n)
+            this%lp%np_new=this%lp%np_new+1
+            this%lp%vp_new=this%lp%vp_new+dvol(n)
+
+         end if
+
+         ! Auto-transfer and output information for structs touching the auto-transfer layer that have not been converted
+         if (auto_transfer) then 
+
+            ! Root creates a new Lagrangian drop
+            if (this%vf%cfg%amRoot) then
+               ! Increment particle counter
+               this%lp%np_=this%lp%np_+1
+               ! Make room for new drop
+               call this%lp%resize(this%lp%np_)
+               ! Add the drop
+               this%lp%p(this%lp%np_)%id  =int(2,8)
                this%lp%p(this%lp%np_)%d   =diam
                this%lp%p(this%lp%np_)%pos =dpos(n,:)
                this%lp%p(this%lp%np_)%vel =dvel(n,:)
@@ -521,7 +557,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(2,8)                                                                                          !< Give id 
+                  this%lp%p(np)%id  =int(3,8)                                                                                          !< Give id 
                   this%lp%p(np)%dt  =0.0_WP                                                                                            !< Let the drop find it own integration time
                   this%lp%p(np)%Acol=0.0_WP                                                                                            !< Give zero collision force
                   this%lp%p(np)%Tcol=0.0_WP                                                                                            !< Give zero collision force
@@ -535,7 +571,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(2,8)                                                                                   
+                  this%lp%p(np)%id  =int(3,8)                                                                                   
                   this%lp%p(np)%dt  =0.0_WP                                                                                     
                   this%lp%p(np)%Acol=0.0_WP                                                                                     
                   this%lp%p(np)%Tcol=0.0_WP                                                                                     
@@ -560,7 +596,7 @@ contains
                   ! Add one last drop for remaining liquid volume
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(2,8)                                 
+                  this%lp%p(np)%id  =int(3,8)                                 
                   this%lp%p(np)%dt  =0.0_WP                                    
                   this%lp%p(np)%Acol=0.0_WP                                    
                   this%lp%p(np)%Tcol=0.0_WP                                    
@@ -583,7 +619,7 @@ contains
                ! Make room for new drop
                np=this%lp%np_+1; call this%lp%resize(np)
                ! Add the drop
-               this%lp%p(np)%id  =int(3,8)                                                                               
+               this%lp%p(np)%id  =int(4,8)                                                                               
                this%lp%p(np)%dt  =0.0_WP                                                                                  
                this%lp%p(np)%Acol=0.0_WP                                                                                  
                this%lp%p(np)%Tcol=0.0_WP                                                                                  
@@ -598,7 +634,7 @@ contains
                   ! Make room for new drop
                   np=this%lp%np_+1; call this%lp%resize(np)
                   ! Add the drop
-                  this%lp%p(np)%id  =int(3,8)                                                                               
+                  this%lp%p(np)%id  =int(4,8)                                                                               
                   this%lp%p(np)%dt  =0.0_WP                                                                                  
                   this%lp%p(np)%Acol=0.0_WP                                                                                  
                   this%lp%p(np)%Tcol=0.0_WP                                                                                  
@@ -1247,8 +1283,9 @@ contains
       
       ! Create partmesh object for particle output
       ! id=1, transfer drops
-      ! id=2, transfer_ligaments (nmain>1)
-      ! id=3, transfer_ligaments (nmain=1)
+      ! id=2, auto transfer struct to drops touching buffer layer
+      ! id=3, transfer_ligaments (nmain>1)
+      ! id=4, transfer_ligaments (nmain=1)
       if (this%use_drop_transfer) then
          create_pmesh: block
             integer :: i
