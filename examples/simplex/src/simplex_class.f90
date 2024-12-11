@@ -100,6 +100,9 @@ module simplex_class
       !> Ligament transfer
       type(cclabel) :: ccl_ligament
       real(WP), dimension(:,:,:), allocatable :: unfiltered_thickness            !< Tmp film_type for output purposes
+
+      !> Additional CCL for transfering droplets in buffer layer
+      type(cclabel) :: ccl_buffer
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -126,6 +129,7 @@ module simplex_class
       procedure :: final                           !< Finalize simplex simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
       procedure :: transfer_ligaments              !< Transfer ligaments to a Lagrangian representation
+      procedure :: transfer_buffer                 !< Transfer structs in the buffer layer
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
       procedure :: get_thickness_unfiltered
       procedure :: get_cclstats
@@ -221,7 +225,7 @@ contains
       real(WP), dimension(:)    , allocatable :: drem
       integer :: n,m,ierr,i,j,k,nmax
       real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
-      logical :: transfer, auto_transfer
+      logical :: transfer
       ! Moment of inertia calculation using lapack
       real(WP), dimension(:), allocatable, save :: work !< Saved!
       integer, save :: lwork                            !< Saved!
@@ -682,6 +686,251 @@ contains
 
    end subroutine transfer_ligaments
 
+   !> Transfer structs in the buffer layer
+   subroutine transfer_buffer(this)
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
+      use mathtools, only: pi
+      class(simplex), intent(inout) :: this
+      real(WP), dimension(:)    , allocatable :: dvol
+      real(WP), dimension(:,:)  , allocatable :: dpos
+      real(WP), dimension(:,:)  , allocatable :: dvel
+      real(WP), dimension(:,:,:), allocatable :: dmoi
+      real(WP), dimension(:)    , allocatable :: drem
+      integer :: n,m,ierr,i,j,k,nmax
+      real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
+      logical :: transfer, write_stats
+      ! Moment of inertia calculation using lapack
+      real(WP), dimension(:), allocatable, save :: work !< Saved!
+      integer, save :: lwork                            !< Saved!
+      real(WP), dimension(1) :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer :: info
+      
+      ! Query optimal work array size
+      if (.not.allocated(work)) then
+         call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+         lwork=int(lwork_query(1)); allocate(work(lwork))
+      end if
+      
+      ! Start by performing a CCL
+      call this%ccl_buffer%build(make_label_buffer,same_label)
+      
+      ! Allocate droplet stats arrays
+      allocate(dvol(1:this%ccl_buffer%nstruct        )); dvol=0.0_WP
+      allocate(dpos(1:this%ccl_buffer%nstruct,1:3    )); dpos=0.0_WP
+      allocate(dvel(1:this%ccl_buffer%nstruct,1:3    )); dvel=0.0_WP
+      allocate(dmoi(1:this%ccl_buffer%nstruct,1:3,1:3)); dmoi=0.0_WP
+      allocate(drem(1:this%ccl_buffer%nstruct        )); drem=0.0_WP
+      
+      ! First pass to accumulate volume, position, and velocity
+      do n=1,this%ccl_buffer%nstruct
+         ! Loop over cells in structure
+         do m=1,this%ccl_buffer%struct(n)%n_
+            ! Get cell indices
+            i=this%ccl_buffer%struct(n)%map(1,m)
+            j=this%ccl_buffer%struct(n)%map(2,m)
+            k=this%ccl_buffer%struct(n)%map(3,m)
+            ! Get cell position, accounting for periodicity
+            x=this%vf%cfg%xm(i)-this%ccl_buffer%struct(n)%per(1)*this%vf%cfg%xL
+            y=this%vf%cfg%ym(j)-this%ccl_buffer%struct(n)%per(2)*this%vf%cfg%yL
+            z=this%vf%cfg%zm(k)-this%ccl_buffer%struct(n)%per(3)*this%vf%cfg%zL
+            ! Accumulate volume, position, and velocity
+            dvol(n  )=dvol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+            dpos(n,:)=dpos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
+            dvel(n,:)=dvel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
+            ! Check if struct touches auto-transfer layer
+            if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
+            &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
+            &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
+            &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
+            &   k.ge.this%vf%cfg%kmax-this%nlayer) drem(n)=1.0_WP
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dpos,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dvel,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,drem,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+
+      
+      ! Second pass to accumulate moment of inertia
+      do n=1,this%ccl_buffer%nstruct
+         ! Get drop barycenter
+         x0=dpos(n,1)/dvol(n)
+         y0=dpos(n,2)/dvol(n)
+         z0=dpos(n,3)/dvol(n)
+         ! Loop over cells in structure
+         do m=1,this%ccl_buffer%struct(n)%n_
+            ! Get cell indices
+            i=this%ccl_buffer%struct(n)%map(1,m)
+            j=this%ccl_buffer%struct(n)%map(2,m)
+            k=this%ccl_buffer%struct(n)%map(3,m)
+            ! Get cell position relative to drop barycenter, accounting for periodicity
+            x=this%vf%cfg%xm(i)-this%ccl_buffer%struct(n)%per(1)*this%vf%cfg%xL-x0
+            y=this%vf%cfg%ym(j)-this%ccl_buffer%struct(n)%per(2)*this%vf%cfg%yL-y0
+            z=this%vf%cfg%zm(k)-this%ccl_buffer%struct(n)%per(3)*this%vf%cfg%zL-z0
+            ! Accumulate moment of inertia
+            dmoi(n,1,1)=dmoi(n,1,1)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y**2+z**2)
+            dmoi(n,2,2)=dmoi(n,2,2)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(z**2+x**2)
+            dmoi(n,3,3)=dmoi(n,3,3)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x**2+y**2)
+            dmoi(n,1,2)=dmoi(n,1,2)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x*y)
+            dmoi(n,1,3)=dmoi(n,1,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x*z)
+            dmoi(n,2,3)=dmoi(n,2,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y*z)
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,dmoi,9*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+      
+      ! Third pass to generate normalized drop stats
+      do n=1,this%ccl_buffer%nstruct
+         ! Get drop barycenter, accounting for periodicity
+         dpos(n,:)=dpos(n,:)/dvol(n)
+         if (this%vf%cfg%xper.and.dpos(n,1).lt.this%vf%cfg%x(this%vf%cfg%imin)) dpos(n,1)=dpos(n,1)+this%vf%cfg%xL
+         if (this%vf%cfg%yper.and.dpos(n,2).lt.this%vf%cfg%y(this%vf%cfg%jmin)) dpos(n,2)=dpos(n,2)+this%vf%cfg%yL
+         if (this%vf%cfg%zper.and.dpos(n,3).lt.this%vf%cfg%z(this%vf%cfg%kmin)) dpos(n,3)=dpos(n,3)+this%vf%cfg%zL
+         ! Get drop velocity
+         dvel(n,:)=dvel(n,:)/dvol(n)
+      end do
+      
+      ! Find the liquid core
+      nmax=maxloc(dvol,dim=1)
+      
+      ! Zero out monitoring variables
+      this%vof_transfered=0.0_WP
+      this%vof_deleted=0.0_WP
+      this%lp%np_new=0
+      this%lp%vp_new=0.0_WP
+      
+      ! Transfer drops based on our criteria
+      do n=1,this%ccl_buffer%nstruct
+
+         ! Cycle if struct in NOT in buffer layer
+         if (drem(n).lt.1.0_WP) cycle
+         
+         ! Compute diameter
+         diam=(6.0_WP*dvol(n)/pi)**(1.0_WP/3.0_WP)
+         
+         ! Decide whether to transfer based on diameter
+         if (diam.gt.this%dmax) then
+            ! Too big to transfer
+            transfer=.false.
+         else if (diam.le.this%ddel) then
+            ! Too small to track, delete immediately
+            transfer=.false.
+            ! Zero out VF in the structure
+            do m=1,this%ccl_buffer%struct(n)%n_
+               this%vf%VF(this%ccl_buffer%struct(n)%map(1,m),this%ccl_buffer%struct(n)%map(2,m),this%ccl_buffer%struct(n)%map(3,m))=0.0_WP
+            end do
+            ! Increment monitoring variables
+            this%vof_deleted=this%vof_deleted+dvol(n)
+         else if (diam.gt.this%ddel.and.diam.le.this%dmin) then
+            ! Small enough to transfer automatically
+            transfer=.true.
+         else
+            ! In between, check eccentricity from moment of inertia tensor
+            A=dmoi(n,:,:)
+            call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
+            d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
+            ! Get characteristic lengths of drop
+            lmax=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/dvol(n))
+            lmid=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/dvol(n))
+            lmin=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/dvol(n))
+            if (lmin.eq.0.0_WP) lmin=lmid ! Handle 2D case
+            ecc=sqrt(1.0_WP-lmin**2/(lmax**2+epsilon(1.0_WP)))
+            if (ecc.gt.this%emax) then
+               ! Too eccentric to transfer yet
+               transfer=.false.
+               write_stats=.true.
+            else
+               ! Spherical enough to transfer
+               transfer=.true.
+            end if
+         end if
+         
+         ! But prevent transfer if that's the core
+         if (n.eq.nmax) transfer=.false.
+
+         ! Perform transfer
+         if (transfer) then
+            
+            ! Root creates a new Lagrangian drop
+            if (this%vf%cfg%amRoot) then
+               ! Increment particle counter
+               this%lp%np_=this%lp%np_+1
+               ! Make room for new drop
+               call this%lp%resize(this%lp%np_)
+               ! Add the drop
+               this%lp%p(this%lp%np_)%id  =int(4,8)
+               this%lp%p(this%lp%np_)%d   =diam
+               this%lp%p(this%lp%np_)%pos =dpos(n,:)
+               this%lp%p(this%lp%np_)%vel =dvel(n,:)
+               this%lp%p(this%lp%np_)%ind =this%lp%cfg%get_ijk_global(dpos(n,:),[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+               this%lp%p(this%lp%np_)%flag=0
+               this%lp%p(this%lp%np_)%dt  =0.0_WP
+               this%lp%p(this%lp%np_)%Acol=0.0_WP
+               this%lp%p(this%lp%np_)%Tcol=0.0_WP
+            end if
+            
+            ! Zero out VF in the structure
+            do m=1,this%ccl_buffer%struct(n)%n_
+               this%vf%VF(this%ccl_buffer%struct(n)%map(1,m),this%ccl_buffer%struct(n)%map(2,m),this%ccl_buffer%struct(n)%map(3,m))=0.0_WP
+            end do
+            
+            ! Increment monitoring variables
+            this%vof_transfered=this%vof_transfered+dvol(n)
+            this%lp%np_new=this%lp%np_new+1
+            this%lp%vp_new=this%lp%vp_new+dvol(n)
+
+         end if
+
+         ! Write stats if struct cannot be transfered and zero out VF in struct
+         if (write_stats) then
+
+            ! Zero out VF in the structure
+            do m=1,this%ccl_buffer%struct(n)%n_
+               this%vf%VF(this%ccl_buffer%struct(n)%map(1,m),this%ccl_buffer%struct(n)%map(2,m),this%ccl_buffer%struct(n)%map(3,m))=0.0_WP
+            end do
+            
+            ! Increment monitoring variables
+            this%vof_transfered=this%vof_transfered+dvol(n)
+            
+         end if
+         
+      end do
+      
+      ! Synchronize VF fields
+      call this%vf%sync_interface()
+      call this%vf%clean_irl_and_band()
+      
+      ! Synchronize particles
+      call this%lp%sync()
+      
+      ! Deallocate all but work array
+      deallocate(dvol,dpos,dvel,dmoi,drem)
+      
+   contains
+      
+      !> Function that identifies cells that need a label
+      logical function make_label_buffer(i,j,k)
+         implicit none
+         integer, intent(in) :: i,j,k
+         if (this%vf%VF(i,j,k).gt.0.0_WP) then
+            make_label_buffer=.true.
+         else
+            make_label_buffer=.false.
+         end if
+      end function make_label_buffer
+      
+
+      !> Function that identifies if cell pairs have same label
+      logical function same_label(i1,j1,k1,i2,j2,k2)
+         implicit none
+         integer, intent(in) :: i1,j1,k1,i2,j2,k2
+         same_label=.true.
+      end function same_label
+      
+   end subroutine transfer_buffer
+
    !> Measure local thickness of multiphasic structure
    subroutine get_thickness_unfiltered(this)
       use vfs_class, only: VFlo,VFhi
@@ -1092,6 +1341,7 @@ contains
       prepare_ligament_breakup: block
          call this%input%read('Breakup ligaments',this%use_ligament_breakup,default=.true.)
          call this%ccl_ligament%initialize(pg=this%cfg%pgrid,name='ccl_ligament')
+         call this%ccl_buffer%initialize(pg=this%cfg%pgrid,name='ccl_buffer')
       end block prepare_ligament_breakup
       
       
@@ -1275,6 +1525,7 @@ contains
       ! id=1, transfer drops
       ! id=2, transfer_ligaments (nmain>1)
       ! id=3, transfer_ligaments (nmain=1)
+      ! id=4, Auto transfer droplets in buffer
       if (this%use_drop_transfer) then
          create_pmesh: block
             integer :: i
