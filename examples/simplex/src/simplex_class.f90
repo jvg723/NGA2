@@ -140,7 +140,7 @@ module simplex_class
    ! Temp arrays for ligament transfer
    real(WP), dimension(:,:,:), allocatable :: tmpthickness
    integer, dimension(:,:,:), allocatable :: tmpfilm_type
-   real(WP) :: min_ligamentthickness=1.1_WP
+   real(WP) :: min_ligamentthickness=1.0_WP
    
    
 contains
@@ -451,7 +451,7 @@ contains
       use irl_fortran_interface
       implicit none
       class(simplex), intent(inout) :: this
-      integer  :: n,nn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank
+      integer  :: n,nn,i,j,k,ii,jj,kk,ierr,np,ip,m,iunit,rank,nmax
       ! Stats of the ccl objects
       real(WP), dimension(:)    , allocatable :: x,y,z,u,v,w,vol,maxlength
       real(WP), dimension(:,:,:), allocatable :: axes
@@ -505,6 +505,10 @@ contains
       end do
       call MPI_ALLREDUCE(MPI_IN_PLACE,drem,1*this%ccl_ligament%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
 
+      ! Find the liquid core
+      nmax=maxloc(vol,dim=1)
+      if (this%vf%cfg%amRoot) print *, "this nmax:", nmax
+
       np_start=this%lp%np_
       do n=1,this%ccl_ligament%nstruct
          
@@ -518,10 +522,14 @@ contains
             transfer=.true.
          else if (f_ligament(n).lt.0.9_WP) then 
             transfer=.false.
+         else if (n.eq.nmax) then ! Don't transfer if its the core
+            transfer=.false.
          end if 
 
          ! Cycle if not being transfered
+         ! if (this%vf%cfg%amRoot) print *, "pre skip, this is id:", n
          if (transfer.eqv..false.) cycle 
+         if (this%vf%cfg%amRoot) print *, "post skip, this is id:", n
 
          ! Drop size method from Kim & Moin (2011)
          Lrim=maxlength(n) ! Assume a cylinder ligament
@@ -668,8 +676,8 @@ contains
          integer, intent(in) :: i,j,k
          ! ZZ original value = 1.5
          ! Try 3.584
-         ! if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.3.584_WP*this%vf%cfg%min_meshsize) then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.1.5_WP*this%vf%cfg%min_meshsize) then
+         ! if ((this%vf%VF(i,j,k).gt.VFlo).and.this%unfiltered_thickness(i,j,k).lt.3.584_WP*this%vf%cfg%min_meshsize) then
             make_label_ligament=.true.
          else
             make_label_ligament=.false.
@@ -2007,6 +2015,7 @@ contains
          call this%get_localfilmtype()
          call this%get_thickness_unfiltered()
          call this%transfer_ligaments()
+         ! call this%transfer_buffer()
       end if
       call this%ttrans_lig%stop() ! Stop transfer timer
       
