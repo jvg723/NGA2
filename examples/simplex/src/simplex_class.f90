@@ -341,7 +341,7 @@ contains
          end if
          
          ! Force transfer if drop touches auto-transfer layer
-         if (drem(n).gt.0.0_WP) transfer=.true.
+         ! if (drem(n).gt.0.0_WP) transfer=.true.
          
          ! But prevent transfer if that's the core
          if (n.eq.nmax) transfer=.false.
