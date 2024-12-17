@@ -14,6 +14,7 @@ module simplex_class
    use vfs_class,         only: vfs
    use lpt_class,         only: lpt
    use stokeslet_class,   only: stokeslet
+   use breakup_class,     only: breakup
    use cclabel_class,     only: cclabel
    use iterator_class,    only: iterator
    use sgsmodel_class,    only: sgsmodel
@@ -100,6 +101,7 @@ module simplex_class
       !> Film retraction modeling
       type(stokeslet)   :: ss
       type(partmesh)    :: pmesh_stk    !< For spray conversion
+      type(breakup)     :: bu           !< SGS break-up model
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -986,6 +988,12 @@ contains
             this%pmesh_stk%vec(:,1,i)=this%ss%p(i)%nedge
          end do
       end block create_pmesh_stk
+
+      ! Create breakup model
+      create_breakup: block
+        call this%bu%initialize(vf=this%vf,fs=this%fs,lp=this%lp)
+        this%vf%thin_thld_min=this%bu%min_filmthickness/this%vf%cfg%min_meshsize
+      end block create_breakup
       
       
       ! Add Ensight output
@@ -1251,10 +1259,22 @@ contains
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
-      
+
+      ! Get slip velocity
+      if (this%bu%edge_exist) then
+         call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
+         this%Uslip = this%Uslip + this%fs%U
+         this%Vslip = this%Vslip + this%fs%V
+         this%Wslip = this%Wslip + this%fs%W
+      else
+         this%Uslip = this%fs%U
+         this%Vslip = this%fs%V
+         this%Wslip = this%fs%W
+      end if
+
       ! VOF solver step
       call this%tvof%start() ! Start VOF timer
-      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,div=this%fs%div)
+      call this%vf%advance(dt=this%time%dt,U=this%Uslip,V=this%Vslip,W=this%Wslip,div=this%fs%div)
       call this%tvof%stop() ! Stop VOF timer
       
       ! Prepare new staggered viscosity (at n+1)
@@ -1322,12 +1342,16 @@ contains
          this%resW=-2.0_WP*this%fs%rho_W*this%fs%W+(this%fs%rho_Wold+this%fs%rho_W)*this%fs%Wold+this%time%dt*this%resW   
          
          ! Form implicit residuals
-         call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
-         
-         ! Apply these residuals
-         this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU
-         this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV
-         this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW
+         ! call this%fs%solve_implicit(this%time%dt,this%resU,this%resV,this%resW)
+
+         ! ! Apply these residuals -> For implicit
+         ! this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU
+         ! this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV
+         ! this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW
+         ! Apply these residuals -> For explcit
+         this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU/this%fs%rho_U
+         this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV/this%fs%rho_V
+         this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW/this%fs%rho_W
          
          ! Apply IB forcing to enforce wall boundary conditions
          ibforcing: block
@@ -1407,6 +1431,9 @@ contains
       ! Recompute interpolated velocity and divergence
       call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       call this%fs%get_div()
+      
+      ! Locate edges
+      call this%bu%attempt_breakup()
       
       ! Transfer VOF into droplets
       call this%ttrans%start() ! Start transfer timer
