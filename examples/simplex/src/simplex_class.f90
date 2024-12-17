@@ -1254,7 +1254,7 @@ contains
       
       ! VOF solver step
       call this%tvof%start() ! Start VOF timer
-      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,div=this%fs%div)
       call this%tvof%stop() ! Stop VOF timer
       
       ! Prepare new staggered viscosity (at n+1)
