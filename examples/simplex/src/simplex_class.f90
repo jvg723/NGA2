@@ -641,11 +641,11 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: remap,plicnet,r2pnet
+         use vfs_class, only: remap,plicnet,r2pnet,flux
          integer :: i,j,k
          real(WP) :: rad
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=flux,name='VOF')
          this%vf%thin_thld_min=0.0_WP
          this%vf%flotsam_thld=0.0_WP
          this%vf%maxcurv_times_mesh=1.0_WP
@@ -971,6 +971,21 @@ contains
             end do
          end block create_pmesh
       end if
+
+      create_pmesh_stk: block
+         integer :: i
+         call this%ss%initialize(cfg=this%cfg,name='stokeslet')
+         this%pmesh_stk=partmesh(nvar=1,nvec=1,name='stokeslet')
+         ! this%pmesh%varname(1)='id'
+         this%pmesh_stk%varname(1)='fcoeff'
+         this%pmesh_stk%vecname(1)='nedge'
+         call this%ss%update_partmesh(this%pmesh_stk)
+         do i=1,this%ss%np_
+            ! this%pmesh%var(1,i)=ss%p(i)%id
+            this%pmesh_stk%var(1,i)=this%ss%p(i)%fcoeff
+            this%pmesh_stk%vec(:,1,i)=this%ss%p(i)%nedge
+         end do
+      end block create_pmesh_stk
       
       
       ! Add Ensight output
@@ -986,6 +1001,7 @@ contains
          call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
          if (this%use_drop_transfer) call this%ens_out%add_particle('part',this%pmesh)
+         call this%ens_out%add_particle('stokeslet',this%pmesh_stk)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -1469,6 +1485,16 @@ contains
                end do
             end do
          end block update_smesh
+
+         update_pmesh_stk: block
+            integer :: i
+            call this%ss%update_partmesh(this%pmesh_stk)
+            do i=1,this%ss%np_
+               this%pmesh_stk%var(1,i)=this%ss%p(i)%fcoeff
+               this%pmesh_stk%vec(:,1,i)=this%ss%p(i)%nedge
+            end do
+         end block update_pmesh_stk  
+
          ! Update particle mesh object
          if (this%use_drop_transfer) then
             update_pmesh: block
