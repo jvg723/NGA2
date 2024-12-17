@@ -101,7 +101,7 @@ contains
       allocate(tmpfilm_type(this%vf%cfg%imino_:this%vf%cfg%imaxo_,this%vf%cfg%jmino_:this%vf%cfg%jmaxo_,this%vf%cfg%kmino_:this%vf%cfg%kmaxo_))
       allocate(tmpthin_sensor(this%vf%cfg%imino_:this%vf%cfg%imaxo_,this%vf%cfg%jmino_:this%vf%cfg%jmaxo_,this%vf%cfg%kmino_:this%vf%cfg%kmaxo_))
       allocate(tmpedge_sensor(this%vf%cfg%imino_:this%vf%cfg%imaxo_,this%vf%cfg%jmino_:this%vf%cfg%jmaxo_,this%vf%cfg%kmino_:this%vf%cfg%kmaxo_))
-      call this%spray_statistics_setup()
+      ! call this%spray_statistics_setup()
    end subroutine initialize
 
    !> Setup spray statistics folders

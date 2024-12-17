@@ -927,38 +927,6 @@ contains
       end block handle_restart
       
       
-      ! Create surfmesh object for interface polygon output
-      create_smesh: block
-         use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
-         integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=2,name='plic')
-         this%smesh%varname(1)='nplane'
-         this%smesh%varname(2)='thickness'
-         ! Transfer polygons to smesh
-         call this%vf%update_surfmesh_nowall(this%smesh)
-         ! Calculate thickness even for plic
-         if (.not.this%vf%two_planes) then
-            allocate(this%vf%thickness(this%vf%cfg%imino_:this%vf%cfg%imaxo_,this%vf%cfg%jmino_:this%vf%cfg%jmaxo_,this%vf%cfg%kmino_:this%vf%cfg%kmaxo_)); this%vf%thickness=0.0_WP
-         end if
-         call this%vf%get_thickness()
-         ! Populate surface variables
-         np=0
-         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                  if (this%cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
-                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
-                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
-                        this%smesh%var(2,np)=this%vf%thickness(i,j,k)
-                     end if
-                  end do
-               end do
-            end do
-         end do
-      end block create_smesh
-      
-      
       ! Create partmesh object for particle output
       if (this%use_drop_transfer) then
          create_pmesh: block
@@ -994,6 +962,47 @@ contains
         call this%bu%initialize(vf=this%vf,fs=this%fs,lp=this%lp)
         this%vf%thin_thld_min=this%bu%min_filmthickness/this%vf%cfg%min_meshsize
       end block create_breakup
+
+      ! Create surfmesh object for interface polygon output
+      create_smesh: block
+         use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+         integer :: i,j,k,np,nplane
+         this%smesh=surfmesh(nvar=7,name='plic')
+         this%smesh%varname(1)='nplane'
+         this%smesh%varname(2)='thickness'
+         this%smesh%varname(3)='film_type'
+         this%smesh%varname(4)='id_ccl_edge'
+         this%smesh%varname(5)='id_ccl_ligament'
+         this%smesh%varname(6)='id_ccl'
+         this%smesh%varname(7)='lig_ind'
+         ! Transfer polygons to smesh
+         call this%vf%update_surfmesh_nowall(this%smesh)
+         ! Calculate thickness even for plic
+         if (.not.this%vf%two_planes) then
+            allocate(this%vf%thickness(this%vf%cfg%imino_:this%vf%cfg%imaxo_,this%vf%cfg%jmino_:this%vf%cfg%jmaxo_,this%vf%cfg%kmino_:this%vf%cfg%kmaxo_)); this%vf%thickness=0.0_WP
+         end if
+         call this%vf%get_thickness()
+         ! Populate surface variables
+         np=0
+         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                  if (this%cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                        this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
+                        this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
+                        this%smesh%var(5,np)=real(this%vf%ccl%id(i,j,k),WP)
+                        this%smesh%var(6,np)=real(this%bu%ccl%id(i,j,k),WP)
+                        this%smesh%var(7,np)=real(this%vf%lig_ind(i,j,k),WP)
+                     end if
+                  end do
+               end do
+            end do
+         end do
+      end block create_smesh
       
       
       ! Add Ensight output
@@ -1431,7 +1440,7 @@ contains
       ! Recompute interpolated velocity and divergence
       call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       call this%fs%get_div()
-      
+
       ! Locate edges
       call this%bu%attempt_breakup()
       
@@ -1506,6 +1515,11 @@ contains
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                           this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
+                           this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
+                           this%smesh%var(5,np)=real(this%vf%ccl%id(i,j,k),WP)
+                           this%smesh%var(6,np)=real(this%bu%ccl%id(i,j,k),WP)
+                           this%smesh%var(7,np)=real(this%vf%lig_ind(i,j,k),WP)
                         end if
                      end do
                   end do
