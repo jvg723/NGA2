@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 2 4
+Partition :	1 4 42
 I/O partition : 1 1 1
 
 # Mesh definition
@@ -7,9 +7,9 @@ X shift : 0.005
 Lx :  0.01
 Ly :  0.01
 Lz :  0.01
-nx :  128
-ny :  128
-nz :  128
+nx :  256
+ny :  256
+nz :  256
 Stretched cells in x :  !32
 Stretched cells in yz : !32
 Stretch ratio in x :    1.05
@@ -40,8 +40,8 @@ Pressure tolerance : 1e-5
 Pressure iteration : 50
 
 # Data output
-Ensight output period : 1e-4
+Ensight output period : 1e-5
 Restart output period : 1e-3
 
 # Data restart
-Restart from : ! 3.50007E-02
+Restart from : 2.00006E-02

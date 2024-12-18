@@ -643,7 +643,7 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: remap,plicnet,r2pnet,flux
+         use vfs_class, only: remap,plicnet,r2pnet,flux,r2p
          integer :: i,j,k
          real(WP) :: rad
          ! Create a VOF solver with plicnet
