@@ -960,7 +960,6 @@ contains
       ! Create breakup model
       create_breakup: block
         call this%bu%initialize(vf=this%vf,fs=this%fs,lp=this%lp)
-        this%vf%thin_thld_min=this%bu%min_filmthickness/this%vf%cfg%min_meshsize
       end block create_breakup
 
       ! Create surfmesh object for interface polygon output
@@ -1271,14 +1270,14 @@ contains
 
       ! Get slip velocity
       if (this%bu%edge_exist) then
-         ! call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
-         ! this%Uslip = this%Uslip + this%fs%U
-         ! this%Vslip = this%Vslip + this%fs%V
-         ! this%Wslip = this%Wslip + this%fs%W
+         call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
+         this%Uslip = this%Uslip + this%fs%U
+         this%Vslip = this%Vslip + this%fs%V
+         this%Wslip = this%Wslip + this%fs%W
       else
-         ! this%Uslip = this%fs%U
-         ! this%Vslip = this%fs%V
-         ! this%Wslip = this%fs%W
+         this%Uslip = this%fs%U
+         this%Vslip = this%fs%V
+         this%Wslip = this%fs%W
       end if
 
       ! VOF solver step
@@ -1516,11 +1515,11 @@ contains
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
-                           ! this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
-                           ! this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                           ! this%smesh%var(5,np)=real(this%vf%ccl%id(i,j,k),WP)
-                           ! this%smesh%var(6,np)=real(this%bu%ccl%id(i,j,k),WP)
-                           ! this%smesh%var(7,np)=real(this%vf%lig_ind(i,j,k),WP)
+                           this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
+                           this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
+                           this%smesh%var(5,np)=real(this%vf%ccl%id(i,j,k),WP)
+                           this%smesh%var(6,np)=real(this%bu%ccl%id(i,j,k),WP)
+                           this%smesh%var(7,np)=real(this%vf%lig_ind(i,j,k),WP)
                         end if
                      end do
                   end do
