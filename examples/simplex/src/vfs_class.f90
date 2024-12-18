@@ -1338,20 +1338,20 @@ contains
          Lvolnew=Lvolold+Lvolinc
          Gvolnew=Gvolold+Gvolinc
          ! Compute new liquid volume fraction
+         ! Conservative form
          this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k))
          
-         ! temp_VF=Lvolnew/(Lvolnew+Gvolnew)
+         ! Version 1
+         ! this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k))
          
+         ! Version 2
          ! this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k)*(1.0_WP-div(i,j,k)*dt))
+
          ! Only work on higher order moments if VF is in [VFlo,VFhi]
          if (this%VF(i,j,k).lt.VFlo) then
             this%VF(i,j,k)=0.0_WP
-            ! this%Lbary(:,i,j,k)=0.0_WP
-            ! this%Gbary(:,i,j,k)=0.0_WP
          else if (this%VF(i,j,k).gt.VFhi) then
             this%VF(i,j,k)=1.0_WP
-            ! this%Lbary(:,i,j,k)=0.0_WP
-            ! this%Gbary(:,i,j,k)=0.0_WP
          else
             ! Compute old phase barycenters
             this%Lbary(:,i,j,k)=(this%Lbary(:,i,j,k)*Lvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),0)+getCentroidPtr(this%face_flux(1,i,j,k),0) &
@@ -1362,101 +1362,21 @@ contains
             &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),1)+getCentroidPtr(this%face_flux(3,i,j,k),1))/Gvolnew
             ! Project forward in time
             this%Lbary(:,i,j,k)=this%project(this%Lbary(:,i,j,k),i,j,k,dt,U,V,W)
+
+            ! Original bary center
             this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
-            ! G_temp=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
+            ! One possible version that doesn't work as well
             ! this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
-            ! if (abs(this%Gbary(1,i,j,k)-G_temp(1)).gt.1e-5) then
-            !    this%Gbary(1,i,j,k) = G_temp(1)
-            ! end if
-            ! if (abs(this%Gbary(2,i,j,k)-G_temp(2)).gt.1e-5) then
-            !    this%Gbary(2,i,j,k) = G_temp(2)
-            ! end if
-            ! if (abs(this%Gbary(3,i,j,k)-G_temp(3)).gt.1e-5) then
-            !    this%Gbary(3,i,j,k) = G_temp(3)
+
+            ! Another possible approach
+            ! if (this%VF(i,j,k).gt.0.9_WP) then
+            !    this%Gbary(:,i,j,k)= [this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]
+            ! else 
+            !    this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
             ! end if
          end if
       end do
-         ! ! Only work on higher order moments if VF is in [VFlo,VFhi]
-         ! if (this%VF(i,j,k).lt.VFlo) then
-         !    this%VF(i,j,k)=0.0_WP
-         ! else if (this%VF(i,j,k).gt.VFhi) then
-         !    this%VF(i,j,k)=1.0_WP
-         ! else
-         !    ! Compute old phase barycenters
-         !    this%Lbary(:,i,j,k)=(this%Lbary(:,i,j,k)*Lvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),0)+getCentroidPtr(this%face_flux(1,i,j,k),0) &
-         !    &                                               -getCentroidPtr(this%face_flux(2,i,j+1,k),0)+getCentroidPtr(this%face_flux(2,i,j,k),0) &
-         !    &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),0)+getCentroidPtr(this%face_flux(3,i,j,k),0))/Lvolnew
-         !    this%Gbary(:,i,j,k)=(this%Gbary(:,i,j,k)*Gvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),1)+getCentroidPtr(this%face_flux(1,i,j,k),1) &
-         !    &                                               -getCentroidPtr(this%face_flux(2,i,j+1,k),1)+getCentroidPtr(this%face_flux(2,i,j,k),1) &
-         !    &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),1)+getCentroidPtr(this%face_flux(3,i,j,k),1))/Gvolnew
-         !    ! Project forward in time
-         !    this%Lbary(:,i,j,k)=this%project(this%Lbary(:,i,j,k),i,j,k,dt,U,V,W)
-         !    ! this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
-         !    if (this%VF(i,j,k).gt.0.9_WP) then
-         !       this%Gbary(:,i,j,k)=[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]
-         !    else
-         !       this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
-         !    end if
-            
-         ! end if
-         ! Compute new liquid volume fraction
-      !    ! this%VF(i,j,k)=Lvolnew/(Lvolnew+Gvolnew)
-      !    this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k)*(1.0_WP-div(i,j,k)*dt))
-      !    ! Only work on higher order moments if VF is in [VFlo,VFhi]
-      !    if (this%VF(i,j,k).lt.VFlo) then
-      !       this%VF(i,j,k)=0.0_WP
-      !    else if (this%VF(i,j,k).gt.VFhi) then
-      !       this%VF(i,j,k)=1.0_WP
-      !    else
-      !       ! Compute old phase barycenters
-      !       this%Lbary(:,i,j,k)=(this%Lbary(:,i,j,k)*Lvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),0)+getCentroidPtr(this%face_flux(1,i,j,k),0) &
-      !       &                                               -getCentroidPtr(this%face_flux(2,i,j+1,k),0)+getCentroidPtr(this%face_flux(2,i,j,k),0) &
-      !       &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),0)+getCentroidPtr(this%face_flux(3,i,j,k),0))/Lvolnew
-      !       this%Gbary(:,i,j,k)=(this%Gbary(:,i,j,k)*Gvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),1)+getCentroidPtr(this%face_flux(1,i,j,k),1) &
-      !       &                                               -getCentroidPtr(this%face_flux(2,i,j+1,k),1)+getCentroidPtr(this%face_flux(2,i,j,k),1) &
-      !       &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),1)+getCentroidPtr(this%face_flux(3,i,j,k),1))/Gvolnew
-      !       ! Project forward in time
-      !       this%Lbary(:,i,j,k)=this%project(this%Lbary(:,i,j,k),i,j,k,dt,U,V,W)
-      !       ! this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
-      !       this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
 
-      !       temp_VF=Lvolnew/(Lvolnew+Gvolnew)
-      !    this%VF(i,j,k)=Lvolnew/this%cfg%vol(i,j,k)
-      !    ! Only work on higher order moments if VF is in [VFlo,VFhi]
-      !    if (temp_VF.lt.VFlo.or.this%VF(i,j,k).lt.VFlo) then
-      !       this%VF(i,j,k)=0.0_WP
-      !       this%Lbary(:,i,j,k)=0.0_WP
-      !       this%Gbary(:,i,j,k)=0.0_WP
-      !    else if (temp_VF.gt.VFhi.or.this%VF(i,j,k).gt.VFhi) then
-      !       this%VF(i,j,k)=1.0_WP
-      !       this%Lbary(:,i,j,k)=0.0_WP
-      !       this%Gbary(:,i,j,k)=0.0_WP
-      !    else
-      !       ! Compute old phase barycenters
-      !       this%Lbary(:,i,j,k)=(this%Lbary(:,i,j,k)*Lvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),0)+getCentroidPtr(this%face_flux(1,i,j,k),0) &
-      !       &                                               -getCentroidPtr(this%face_flux(2,i,j+1,k),0)+getCentroidPtr(this%face_flux(2,i,j,k),0) &
-      !       &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),0)+getCentroidPtr(this%face_flux(3,i,j,k),0))/Lvolnew
-      !       this%Gbary(:,i,j,k)=(this%Gbary(:,i,j,k)*Gvolold-getCentroidPtr(this%face_flux(1,i+1,j,k),1)+getCentroidPtr(this%face_flux(1,i,j,k),1) &
-      !       &                                               -getCentroidPtr(this%face_flux(2,i,j+1,k),1)+getCentroidPtr(this%face_flux(2,i,j,k),1) &
-      !       &                                               -getCentroidPtr(this%face_flux(3,i,j,k+1),1)+getCentroidPtr(this%face_flux(3,i,j,k),1))/Gvolnew
-      !       ! Project forward in time
-      !       this%Lbary(:,i,j,k)=this%project(this%Lbary(:,i,j,k),i,j,k,dt,U,V,W)
-      !       !this%Gbary(:,i,j,k)=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
-      !       G_temp=this%project(this%Gbary(:,i,j,k),i,j,k,dt,U,V,W)
-      !       this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
-      !       if (abs(this%Gbary(1,i,j,k)-G_temp(1)).gt.1e-5) then
-      !          this%Gbary(1,i,j,k) = G_temp(1)
-      !       end if
-      !       if (abs(this%Gbary(2,i,j,k)-G_temp(2)).gt.1e-5) then
-      !          this%Gbary(2,i,j,k) = G_temp(2)
-      !       end if
-      !       if (abs(this%Gbary(3,i,j,k)-G_temp(3)).gt.1e-5) then
-      !          this%Gbary(3,i,j,k) = G_temp(3)
-      !       end if
-      !    end if
-      ! end do
-      
-         ! end if
       
       ! Synchronize VF and barycenter fields
       call this%cfg%sync(this%VF)
