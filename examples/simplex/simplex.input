@@ -29,8 +29,8 @@ Liquid dynamic viscosity :    0.924e-3      # 0.594e-3    # 1.137e-3
 Surface tension coefficient : 0.024         # 0.0225      # 0.0728
 
 # Break-up model
-Transfer drops : .true.
-Transfer ligaments : .true.
+Transfer drops : .false.
+Transfer ligaments : .false.
 
 # Time integration
 Max timestep size : 2e-6

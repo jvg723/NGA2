@@ -1379,24 +1379,24 @@ contains
             this%pmesh_stk%vec(:,1,i)=this%ss%p(i)%nedge
          end do
       end block create_pmesh_stk
-
+   
       ! Create breakup model
       create_breakup: block
         call this%bu%initialize(vf=this%vf,fs=this%fs,lp=this%lp)
       end block create_breakup
-
+   
       ! Create surfmesh object for interface polygon output
       create_smesh: block
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=7,name='plic')
+         this%smesh=surfmesh(nvar=5,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='film_type'
          this%smesh%varname(4)='id_ccl_edge'
-         this%smesh%varname(5)='ccl_lig'
-         this%smesh%varname(6)='thickness_unfilt'
-         this%smesh%varname(7)='struct_type'
+         ! this%smesh%varname(5)='ccl_lig'
+         ! this%smesh%varname(6)='thickness_unfilt'
+         this%smesh%varname(5)='struct_type'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -1416,16 +1416,16 @@ contains
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                         this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
                         this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                        this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
-                        this%smesh%var(6,np)=this%thickness(i,j,k)
-                        this%smesh%var(7,np)=this%struct_type(i,j,k)
+                        ! this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
+                        ! this%smesh%var(6,np)=this%thickness(i,j,k)
+                        this%smesh%var(5,np)=this%struct_type(i,j,k)
                      end if
                   end do
                end do
             end do
          end do
       end block create_smesh
-      
+     
       
       ! Add Ensight output
       create_ensight: block
@@ -1698,16 +1698,16 @@ contains
       call this%fs%get_olddensity(vf=this%vf)
 
       ! Get slip velocity
-      if (this%bu%edge_exist) then
+      ! if (this%bu%edge_exist) then
          ! call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
-         this%Uslip = this%Uslip + this%fs%U
-         this%Vslip = this%Vslip + this%fs%V
-         this%Wslip = this%Wslip + this%fs%W
-      else
+         ! this%Uslip = this%Uslip + this%fs%U
+         ! this%Vslip = this%Vslip + this%fs%V
+         ! this%Wslip = this%Wslip + this%fs%W
+      ! else
          this%Uslip = this%fs%U
          this%Vslip = this%fs%V
          this%Wslip = this%fs%W
-      end if
+      ! end if
 
       ! VOF solver step
       call this%tvof%start() ! Start VOF timer
@@ -1956,9 +1956,9 @@ contains
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                            this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
                            this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                           this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
-                           this%smesh%var(6,np)=this%thickness(i,j,k)
-                           this%smesh%var(7,np)=this%struct_type(i,j,k)
+                           ! this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
+                           ! this%smesh%var(6,np)=this%thickness(i,j,k)
+                           this%smesh%var(5,np)=this%struct_type(i,j,k)
                         end if
                      end do
                   end do
