@@ -650,9 +650,9 @@ contains
            same_label=.true.
            end function same_label
         
-     end subroutine transfer_films
+   end subroutine transfer_films
 
-     subroutine transfer_ligs(this)
+   subroutine transfer_ligs(this)
       use vfs_class, only: VFlo,VFhi
       use mathtools, only: pi,twoPi
       use mpi_f08
@@ -1185,7 +1185,7 @@ contains
       integer, intent(in) :: i1,j1,k1,i2,j2,k2
       same_label=.true.
       end function same_label
-      end subroutine transfer_ligs
+   end subroutine transfer_ligs
    
 
    !> Initialization of ligament simulation
