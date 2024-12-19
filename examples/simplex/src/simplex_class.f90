@@ -82,7 +82,8 @@ module simplex_class
       type(timer)   :: tvel     !< Timer for velocity
       type(timer)   :: tpres    !< Timer for pressure
       type(timer)   :: tvof     !< Timer for VOF
-      type(timer)   :: ttrans   !< Timer for VOF transfer
+      type(timer)   :: ttrans   !< Timer for droplet transfer
+      type(timer)   :: tltrans  !< Timer for ligament transfer
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -1499,7 +1500,8 @@ contains
          this%tvel  =timer(comm=this%cfg%comm,name='Velocity')
          this%tpres =timer(comm=this%cfg%comm,name='Pressure')
          this%tsgs  =timer(comm=this%cfg%comm,name='SGSmodel')
-         this%ttrans=timer(comm=this%cfg%comm,name='Transfer')
+         this%ttrans=timer(comm=this%cfg%comm,name='Transferdrop')
+         this%tltrans=timer(comm=this%cfg%comm,name='Transferlig')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
          call this%timefile%add_column(this%time%n,'Timestep number')
@@ -1510,6 +1512,7 @@ contains
          call this%timefile%add_column(this%tpres%time ,trim(this%tpres%name))
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
          call this%timefile%add_column(this%ttrans%time,trim(this%ttrans%name))
+         call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
       end block create_timing
       
       
@@ -1657,7 +1660,7 @@ contains
       call this%time%increment()
       
       ! Advance lagrangian droplets
-      if (this%use_drop_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer) then
          this%resU=this%fs%rho_g
          this%resV=this%fs%visc_g
          call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
@@ -1850,10 +1853,20 @@ contains
       ! Locate edges
       call this%bu%attempt_breakup()
       
-      ! Transfer VOF into droplets
-      call this%ttrans%start() ! Start transfer timer
-      if (this%use_drop_transfer) call this%transfer_drops()
-      call this%ttrans%stop() ! Stop transfer timer
+      ! attempt transfter
+      attempt_transfer : block
+         ! Zero out monitoring variables
+         this%lp%np_new=0
+         this%lp%vp_new=0.0_WP
+         ! Transfer via droplet conversion
+         call this%ttrans%start() ! Start transfer timer
+         if (this%use_drop_transfer) call this%transfer_drops()
+         call this%ttrans%stop() ! Stop transfer timer
+         ! Transfer via ligament break-up
+         call this%tltrans%start() ! Start burst timer
+         ! if (this%use_lig_transfer) call this%transfer_ligs()
+         call this%tltrans%stop() ! Stop burst timer
+      end block attempt_transfer
       
       ! Remove VOF at edge of domain
       remove_vof: block
