@@ -1029,7 +1029,8 @@ contains
          integer :: i,j,k
          real(WP) :: rad
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=flux,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         ! call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
          this%vf%thin_thld_min=0.0_WP
          this%vf%flotsam_thld=0.0_WP
          this%vf%maxcurv_times_mesh=1.0_WP
@@ -1698,7 +1699,7 @@ contains
 
       ! Get slip velocity
       if (this%bu%edge_exist) then
-         call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
+         ! call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
          this%Uslip = this%Uslip + this%fs%U
          this%Vslip = this%Vslip + this%fs%V
          this%Wslip = this%Wslip + this%fs%W
@@ -1870,7 +1871,7 @@ contains
       call this%fs%get_div()
 
       ! Locate edges
-      call this%bu%attempt_breakup()
+      ! call this%bu%attempt_breakup()
       
       ! attempt transfter
       attempt_transfer : block
