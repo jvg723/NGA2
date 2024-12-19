@@ -1337,6 +1337,14 @@ contains
          ! Compute new liquid and gas volumes
          Lvolnew=Lvolold+Lvolinc
          Gvolnew=Gvolold+Gvolinc
+         
+         ! compute VF based upon edge
+         if (this%edge_sensor(i,j,k).ge.0.3_WP) then
+            this%VF(i,j,k) =Lvolnew/(this%cfg%vol(i,j,k)*(1.0_WP-div(i,j,k)*dt))
+         else
+            this%VF(i,j,k)=Lvolnew/(Lvolnew+Gvolnew)
+         end if
+
          ! Compute new liquid volume fraction
          ! Conservative form
          ! this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k))
@@ -1375,6 +1383,7 @@ contains
                this%Gbary(:,i,j,k)=([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]-this%VF(i,j,k)*this%Lbary(:,i,j,k))/(1-this%VF(i,j,k))
             end if
          end if
+         
       end do
 
       
