@@ -88,6 +88,7 @@ module simplex_class
       
       !> Drop transfer modeling
       logical :: use_drop_transfer !< Do we use droplet transfer
+      logical :: use_lig_transfer  !< Do we use ligament transfer
       type(lpt)      :: lp         !< Lagrangian particle tracking
       type(monitor)  :: pfile      !< Particle monitoring
       type(partmesh) :: pmesh      !< Particle mesh for lpt
@@ -95,8 +96,18 @@ module simplex_class
       real(WP) :: dmin             !< Minimum diameter below which transfer is automatic
       real(WP) :: ddel             !< Minimum diameter below which structure is directly deleted
       real(WP) :: emax             !< Maximum eccentricity for transfer
-      real(WP) :: vof_transfered   !< Integral of VOF transfered
+      real(WP) :: vof_tf_drop      !< Integral of VOF transfered by conversion to droplet
       real(WP) :: vof_deleted      !< Integral of VOF deleted
+      integer  :: np_drop
+      real(WP) :: lmin
+      real(WP) :: lmake
+      real(WP) :: lper
+      real(WP) :: lstratio
+      real(WP) :: dw
+      real(WP) :: ldmin
+      real(WP) :: size_ratio
+      real(WP) :: vof_tf_lig
+      integer  :: np_lig
 
       !> Film retraction modeling
       type(stokeslet)   :: ss
@@ -119,6 +130,7 @@ module simplex_class
       procedure :: step                            !< Advance simplex simulation by one time step
       procedure :: final                           !< Finalize simplex simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
+      ! procedure :: transfer_ligs                   !< Transfer ligaments to Lagrangian drops based on Kim and Moin's model
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
    end type simplex
    
@@ -301,10 +313,9 @@ contains
       nmax=maxloc(dvol,dim=1)
       
       ! Zero out monitoring variables
-      this%vof_transfered=0.0_WP
+      this%vof_tf_drop=0.0_WP
       this%vof_deleted=0.0_WP
-      this%lp%np_new=0
-      this%lp%vp_new=0.0_WP
+      this%np_drop=0
       
       ! Transfer drops based on our criteria
       do n=1,this%ccl%nstruct
@@ -381,7 +392,8 @@ contains
             end do
             
             ! Increment monitoring variables
-            this%vof_transfered=this%vof_transfered+dvol(n)
+            this%vof_tf_drop=this%vof_tf_drop+dvol(n)
+            this%np_drop=this%np_drop+1
             this%lp%np_new=this%lp%np_new+1
             this%lp%vp_new=this%lp%vp_new+dvol(n)
 
@@ -786,8 +798,9 @@ contains
             this%dmin=1.5_WP*this%cfg%min_meshsize
             this%dmax=1.0e-3_WP
             this%emax=0.8_WP
-            ! Zero out transfered volume
-            this%vof_transfered=0.0_WP
+            ! Zero out monitoring variables
+            this%vof_tf_drop=0.0_WP
+            this%np_drop=0
          end if
       end block prepare_transfer
       
@@ -1042,7 +1055,8 @@ contains
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
          call this%mfile%add_column(this%vof_removed,'VOF removed')
          call this%mfile%add_column(this%vof_deleted,'VOF deleted')
-         call this%mfile%add_column(this%vof_transfered,'VOF transfered')
+         call this%mfile%add_column(this%vof_tf_drop,'VOF tf drop')
+         call this%mfile%add_column(this%vof_tf_lig ,'VOF tf lig')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
