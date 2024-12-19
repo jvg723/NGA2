@@ -1353,7 +1353,7 @@ contains
          ! this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k))
          
          ! Version 2
-         this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k)*(1.0_WP-div(i,j,k)*dt))
+         ! this%VF(i,j,k)=Lvolnew/(this%cfg%vol(i,j,k)*(1.0_WP-div(i,j,k)*dt))
 
          ! Only work on higher order moments if VF is in [VFlo,VFhi]
          if (this%VF(i,j,k).lt.VFlo) then
