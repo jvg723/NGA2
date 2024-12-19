@@ -681,7 +681,7 @@ contains
                ! Make room for new drop
                call this%lp%resize(this%lp%np_)
                ! Add the drop
-               this%lp%p(this%lp%np_)%id  =int(11,8)                                                                               
+               this%lp%p(this%lp%np_)%id  =int(2,8)                                                                               
                if (mod(l,2).eq.1) then
                   this%lp%p(this%lp%np_)%d=diam*this%size_ratio                                                                                    
                else
@@ -1149,7 +1149,9 @@ contains
       end block create_sgs
       
       
-       ! Prepare Lagrangian drop model
+      ! Prepare Lagrangian drop model
+      ! id=1, transfer_drops
+      ! id=2, transfer_ligs
       prepare_transfer: block
          use messager,  only: die
          use filesys,  only: makedir,isdir
