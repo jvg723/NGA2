@@ -983,6 +983,7 @@ contains
          this%time=timetracker(amRoot=this%cfg%amRoot)
          call this%input%read('Max timestep size',this%time%dtmax)
          call this%input%read('Max cfl number',this%time%cflmax)
+         call this%input%read('Max time',this%time%tmax)
          this%time%dt=this%time%dtmax
          this%time%itmax=2
       end block initialize_timetracker
@@ -1312,7 +1313,7 @@ contains
             this%time%told=this%time%t-this%time%dt
             !this%time%dt=this%time%dtmax !< Force max timestep size anyway
             ! Finally, handle particle I/O
-            if (this%use_drop_transfer) then
+            if (this%use_drop_transfer.or.this%use_lig_transfer) then
                ! Check if particle file exists
                inquire(file='restart/part_'//trim(timestamp),exist=partfile_exists)
                ! If so, read it
@@ -1476,6 +1477,8 @@ contains
             call this%pfile%add_column(this%lp%np,'Particle number')
             call this%pfile%add_column(this%lp%vp_tot,'Particle volume')
             call this%pfile%add_column(this%lp%np_new,'Npart new')
+            call this%pfile%add_column(this%np_drop,'Npart new drop')
+            call this%pfile%add_column(this%np_lig, 'Npart new lig')
             call this%pfile%add_column(this%lp%vp_new,'Vpart new')
             call this%pfile%add_column(this%lp%np_out,'Npart removed')
             call this%pfile%add_column(this%lp%vp_out,'Vpart removed')
@@ -1652,6 +1655,7 @@ contains
       call this%tvel%reset()
       call this%tpres%reset()
       call this%ttrans%reset()
+      call this%tltrans%reset()
       call this%tstep%start()
       
       ! Increment time
@@ -1956,12 +1960,13 @@ contains
          end block update_pmesh_stk  
 
          ! Update particle mesh object
-         if (this%use_drop_transfer) then
+         if (this%use_drop_transfer.or.this%use_lig_transfer) then
             update_pmesh: block
                integer :: i
                call this%lp%update_partmesh(this%pmesh)
                do i=1,this%lp%np_
                   this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
+                  this%pmesh%var(2,i)=this%lp%p(i)%id
                   this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
                end do
             end block update_pmesh 
@@ -1982,7 +1987,7 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%timefile%write()
-      if (this%use_drop_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer) then
          call this%lp%get_max()
          call this%pfile%write()
       end if
@@ -2043,7 +2048,7 @@ contains
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
             ! Finally, handle particle I/O
-            if (this%use_drop_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
+            if (this%use_drop_transfer.or.this%use_lig_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
          end block save_restart
       end if
       
