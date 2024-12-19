@@ -132,7 +132,7 @@ module simplex_class
       procedure :: step                            !< Advance simplex simulation by one time step
       procedure :: final                           !< Finalize simplex simulation
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
-      ! procedure :: transfer_ligs                   !< Transfer ligaments to Lagrangian drops based on Kim and Moin's model
+      procedure :: transfer_ligs                   !< Transfer ligaments to Lagrangian drops based on Kim and Moin's model
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
    end type simplex
    
