@@ -1884,7 +1884,7 @@ contains
          call this%ttrans%stop() ! Stop transfer timer
          ! Transfer via ligament break-up
          call this%tltrans%start() ! Start burst timer
-         ! if (this%use_lig_transfer) call this%transfer_ligs()
+         if (this%use_lig_transfer) call this%transfer_ligs()
          call this%tltrans%stop() ! Stop burst timer
       end block attempt_transfer
       
