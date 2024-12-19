@@ -1331,15 +1331,17 @@ contains
       
       
       ! Create partmesh object for particle output
-      if (this%use_drop_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer) then
          create_pmesh: block
             integer :: i
-            this%pmesh=partmesh(nvar=1,nvec=1,name='lpt')
+            this%pmesh=partmesh(nvar=2,nvec=1,name='lpt')
             this%pmesh%varname(1)='radius'
+            this%pmesh%varname(2)='id'
             this%pmesh%vecname(1)='velocity'
             call this%lp%update_partmesh(this%pmesh)
             do i=1,this%lp%np_
                this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
+               this%pmesh%var(2,i)=this%lp%p(i)%id
                this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
             end do
          end block create_pmesh
@@ -1374,9 +1376,9 @@ contains
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='film_type'
          this%smesh%varname(4)='id_ccl_edge'
-         this%smesh%varname(5)='id_ccl_ligament'
-         this%smesh%varname(6)='id_ccl'
-         this%smesh%varname(7)='lig_ind'
+         this%smesh%varname(5)='ccl_lig'
+         this%smesh%varname(6)='thickness_unfilt'
+         this%smesh%varname(7)='struct_type'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -1396,9 +1398,9 @@ contains
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                         this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
                         this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                        this%smesh%var(5,np)=real(this%vf%ccl%id(i,j,k),WP)
-                        this%smesh%var(6,np)=real(this%bu%ccl%id(i,j,k),WP)
-                        this%smesh%var(7,np)=real(this%vf%lig_ind(i,j,k),WP)
+                        this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
+                        this%smesh%var(6,np)=this%thickness(i,j,k)
+                        this%smesh%var(7,np)=this%struct_type(i,j,k)
                      end if
                   end do
                end do
@@ -1419,7 +1421,7 @@ contains
          call this%ens_out%add_scalar('VOF',this%vf%VF)
          call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
-         if (this%use_drop_transfer) call this%ens_out%add_particle('part',this%pmesh)
+         if (this%use_drop_transfer.or.this%use_lig_transfer) call this%ens_out%add_particle('part',this%pmesh)
          call this%ens_out%add_particle('stokeslet',this%pmesh_stk)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
@@ -1465,7 +1467,7 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
          ! Create particle monitor
-         if (this%use_drop_transfer) then
+         if (this%use_drop_transfer.or.this%use_lig_transfer) then
             call this%lp%get_max()
             this%pfile=monitor(amroot=this%lp%cfg%amRoot,name='particles')
             call this%pfile%add_column(this%time%n,'Timestep number')
@@ -1921,9 +1923,9 @@ contains
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                            this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
                            this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                           this%smesh%var(5,np)=real(this%vf%ccl%id(i,j,k),WP)
-                           this%smesh%var(6,np)=real(this%bu%ccl%id(i,j,k),WP)
-                           this%smesh%var(7,np)=real(this%vf%lig_ind(i,j,k),WP)
+                           this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
+                           this%smesh%var(6,np)=this%thickness(i,j,k)
+                           this%smesh%var(7,np)=this%struct_type(i,j,k)
                         end if
                      end do
                   end do
