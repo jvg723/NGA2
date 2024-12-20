@@ -1389,14 +1389,13 @@ contains
       create_smesh: block
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=5,name='plic')
+         this%smesh=surfmesh(nvar=6,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='film_type'
          this%smesh%varname(4)='id_ccl_edge'
-         ! this%smesh%varname(5)='ccl_lig'
-         ! this%smesh%varname(6)='thickness_unfilt'
-         this%smesh%varname(5)='struct_type'
+         this%smesh%varname(5)='thickness_unfilt'
+         this%smesh%varname(6)='struct_type'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -1416,9 +1415,8 @@ contains
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                         this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
                         this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                        ! this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
-                        ! this%smesh%var(6,np)=this%thickness(i,j,k)
-                        this%smesh%var(5,np)=this%struct_type(i,j,k)
+                        this%smesh%var(5,np)=this%thickness(i,j,k)
+                        this%smesh%var(6,np)=this%struct_type(i,j,k)
                      end if
                   end do
                end do
@@ -1956,9 +1954,8 @@ contains
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                            this%smesh%var(3,np)=this%bu%film_type(i,j,k)!real(this%bu%film_type(i,j,k),WP)
                            this%smesh%var(4,np)=real(this%bu%ccl_edge%id(i,j,k),WP)
-                           ! this%smesh%var(5,np)=real(this%ccl_lig%id(i,j,k),WP)
-                           ! this%smesh%var(6,np)=this%thickness(i,j,k)
-                           this%smesh%var(5,np)=this%struct_type(i,j,k)
+                           this%smesh%var(5,np)=this%thickness(i,j,k)
+                           this%smesh%var(6,np)=this%struct_type(i,j,k)
                         end if
                      end do
                   end do
