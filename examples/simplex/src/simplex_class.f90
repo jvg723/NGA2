@@ -511,39 +511,39 @@ contains
       call this%fs%get_strainrate(SR)
       ! First pass to accumulate volume, position, min thickness and ligament percentage
       do n=1,this%ccl_lig%nstruct
-      ! Loop over cells in structure
-      lnum(n)=lnum(n)+1.0_WP*this%ccl_lig%struct(n)%n_
-      do m=1,this%ccl_lig%struct(n)%n_
-          ! Get cell indices
-          i=this%ccl_lig%struct(n)%map(1,m)
-          j=this%ccl_lig%struct(n)%map(2,m)
-          k=this%ccl_lig%struct(n)%map(3,m)
-          ! Get cell position, accounting for periodicity
-          x=this%vf%cfg%xm(i)-this%ccl_lig%struct(n)%per(1)*this%vf%cfg%xL
-          y=this%vf%cfg%ym(j)-this%ccl_lig%struct(n)%per(2)*this%vf%cfg%yL
-          z=this%vf%cfg%zm(k)-this%ccl_lig%struct(n)%per(3)*this%vf%cfg%zL
-          ! Accumulate volume and position. Get min thickness and ligament percentage
-          lvol(n  )=lvol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
-          lpos(n,:)=lpos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
-          lvel(n,:)=lvel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
-          lthc(n)=min(lthc(n),thickness(i,j,k))
-          if (struct_type(i,j,k).eq.1) lper(n)=lper(n)+1.0_WP
-          ! Check if ligament touches auto-transfer layer
-          if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
-          &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
-          &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
-          &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
-          &   k.ge.this%vf%cfg%kmax-this%nlayer) lrem(n)=1.0_WP
-          ! Get the structures's locally largest and smallest x,y,z locations
-          do l=1,2
-            if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
-               d = calculateCentroid(this%vf%interface_polygon(l,i,j,k))
-               xmin(n)=min(xmin(n),d(1)); xmax(n)=max(xmax(n),d(1))
-               ymin(n)=min(ymin(n),d(2)); ymax(n)=max(ymax(n),d(2))
-               zmin(n)=min(zmin(n),d(3)); zmax(n)=max(zmax(n),d(3))
-            end if
+         ! Loop over cells in structure
+         lnum(n)=lnum(n)+1.0_WP*this%ccl_lig%struct(n)%n_
+         do m=1,this%ccl_lig%struct(n)%n_
+             ! Get cell indices
+             i=this%ccl_lig%struct(n)%map(1,m)
+             j=this%ccl_lig%struct(n)%map(2,m)
+             k=this%ccl_lig%struct(n)%map(3,m)
+             ! Get cell position, accounting for periodicity
+             x=this%vf%cfg%xm(i)-this%ccl_lig%struct(n)%per(1)*this%vf%cfg%xL
+             y=this%vf%cfg%ym(j)-this%ccl_lig%struct(n)%per(2)*this%vf%cfg%yL
+             z=this%vf%cfg%zm(k)-this%ccl_lig%struct(n)%per(3)*this%vf%cfg%zL
+             ! Accumulate volume and position. Get min thickness and ligament percentage
+             lvol(n  )=lvol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+             lpos(n,:)=lpos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
+             lvel(n,:)=lvel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
+             lthc(n)=min(lthc(n),thickness(i,j,k))
+             if (struct_type(i,j,k).eq.1) lper(n)=lper(n)+1.0_WP
+             ! Check if ligament touches auto-transfer layer
+             if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
+             &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
+             &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
+             &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
+             &   k.ge.this%vf%cfg%kmax-this%nlayer) lrem(n)=1.0_WP
+             ! Get the structures's locally largest and smallest x,y,z locations
+             do l=1,2
+               if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
+                  d = calculateCentroid(this%vf%interface_polygon(l,i,j,k))
+                  xmin(n)=min(xmin(n),d(1)); xmax(n)=max(xmax(n),d(1))
+                  ymin(n)=min(ymin(n),d(2)); ymax(n)=max(ymax(n),d(2))
+                  zmin(n)=min(zmin(n),d(3)); zmax(n)=max(zmax(n),d(3))
+               end if
+            end do
          end do
-      end do
       end do
       call MPI_ALLREDUCE(MPI_IN_PLACE,lvol,1*this%ccl_lig%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(MPI_IN_PLACE,lpos,3*this%ccl_lig%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
