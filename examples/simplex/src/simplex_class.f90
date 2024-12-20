@@ -1168,8 +1168,8 @@ contains
             ! Set parameters for transfer
             this%ddel=0.2_WP*this%cfg%min_meshsize
             this%dmin=1.5_WP*this%cfg%min_meshsize
-            this%dmax=7.0e-1_WP!1.0e-3_WP
-            this%emax=0.75_WP
+            this%dmax=1.0e-3_WP
+            this%emax=0.8_WP
             ! Zero out monitoring variables
             this%vof_tf_drop=0.0_WP
             this%np_drop=0
