@@ -672,9 +672,9 @@ contains
          ! Only the main processor is in charge of creating droplets
          if (this%cfg%amRoot) then
             Lrp = twoPi*minor_radius/this%dw
-            filename='spray-all/droplets'
-            open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
-            if (ierr.ne.0) call die('[transfermodel write spray stats] Could not open file: '//trim(filename))
+            ! filename='spray-all/droplets'
+            ! open(newunit=iunit,file=trim(filename),form='formatted',status='old',access='stream',position='append',iostat=ierr)
+            ! if (ierr.ne.0) call die('[transfermodel write spray stats] Could not open file: '//trim(filename))
             do l=1,nsat+nmain+1
                ! Increment particle counter
                this%lp%np_=this%lp%np_+1
@@ -1029,8 +1029,8 @@ contains
          integer :: i,j,k
          real(WP) :: rad
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
-         ! call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
+         ! call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=flux,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
          this%vf%thin_thld_min=0.0_WP
          this%vf%flotsam_thld=0.0_WP
          this%vf%maxcurv_times_mesh=1.0_WP
@@ -1198,16 +1198,16 @@ contains
             this%lp%filter_width=3.5_WP*this%cfg%min_meshsize
             call this%lp%resize(0)
 
-            if (this%lp%cfg%amroot) then
-                if (.not.isdir('spray-all')) call makedir('spray-all')
-                filename='spray-all/droplets'
-                open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
-                if (ierr.ne.0) call die('[transfermodel write spray stats] Could not open file: '//trim(filename))
-                ! Write the header
-                write(iunit,*) 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z ','origin','id'
-                ! Close the file
-                close(iunit)         
-             end if
+            ! if (this%lp%cfg%amroot) then
+            !     if (.not.isdir('spray-all')) call makedir('spray-all')
+            !     filename='spray-all/droplets'
+            !     open(newunit=iunit,file=trim(filename),form='formatted',status='replace',access='stream',iostat=ierr)
+            !     if (ierr.ne.0) call die('[transfermodel write spray stats] Could not open file: '//trim(filename))
+            !     ! Write the header
+            !     write(iunit,*) 'Diameter ','U ','V ','W ','Total velocity ','X ','Y ','Z ','origin','id'
+            !     ! Close the file
+            !     close(iunit)         
+            !  end if
 
          end if
       end block prepare_transfer
