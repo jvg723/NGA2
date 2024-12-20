@@ -694,20 +694,31 @@ contains
                this%lp%p(this%lp%np_)%dt  =0.0_WP                                                                                  
                this%lp%p(this%lp%np_)%Acol=0.0_WP                                                                                  
                this%lp%p(this%lp%np_)%Tcol=0.0_WP
-               ! Output diameter, velocity, and position
-               write(iunit,*) this%lp%p(this%lp%np_)%d,this%lp%p(this%lp%np_)%vel(1),this%lp%p(this%lp%np_)%vel(2),this%lp%p(this%lp%np_)%vel(3),&
-               &norm2([this%lp%p(this%lp%np_)%vel(1),this%lp%p(this%lp%np_)%vel(2),this%lp%p(this%lp%np_)%vel(3)]),this%lp%p(this%lp%np_)%pos(1),&
-               &this%lp%p(this%lp%np_)%pos(2),this%lp%p(this%lp%np_)%pos(3),this%lp%p(this%lp%np_)%id  
+               ! ! Output diameter, velocity, and position
+               ! write(iunit,*) this%lp%p(this%lp%np_)%d,this%lp%p(this%lp%np_)%vel(1),this%lp%p(this%lp%np_)%vel(2),this%lp%p(this%lp%np_)%vel(3),&
+               ! &norm2([this%lp%p(this%lp%np_)%vel(1),this%lp%p(this%lp%np_)%vel(2),this%lp%p(this%lp%np_)%vel(3)]),this%lp%p(this%lp%np_)%pos(1),&
+               ! &this%lp%p(this%lp%np_)%pos(2),this%lp%p(this%lp%np_)%pos(3),this%lp%p(this%lp%np_)%id  
             end do
             ! Close the file
-            close(iunit)
+            ! close(iunit)
             ! Increment monitoring variables
             this%lp%np_new=this%lp%np_new+nmain+nsat
             this%np_lig=this%np_lig+nmain+nsat
             this%vof_tf_lig=this%vof_tf_lig+lvol(n)
             this%lp%vp_new=this%lp%vp_new+lvol(n)
          end if
+
+         ! empty out the VF
+         do m=1,this%ccl_lig%struct(n)%n_
+            i=this%ccl_lig%struct(n)%map(1,m); j=this%ccl_lig%struct(n)%map(2,m); k=this%ccl_lig%struct(n)%map(3,m)
+            this%vf%VF(i,j,k)=0.0_WP
+         end do  
+
       end do
+
+      call this%vf%cfg%sync(this%vf%VF)
+      call this%vf%clean_irl_and_band()
+
       end if
 
       contains 
