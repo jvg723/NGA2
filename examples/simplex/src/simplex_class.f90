@@ -82,8 +82,10 @@ module simplex_class
       type(timer)   :: tvel     !< Timer for velocity
       type(timer)   :: tpres    !< Timer for pressure
       type(timer)   :: tvof     !< Timer for VOF
-      type(timer)   :: ttrans   !< Timer for droplet transfer
+      type(timer)   :: tdtrans  !< Timer for droplet transfer
       type(timer)   :: tltrans  !< Timer for ligament transfer
+      type(timer)   :: tslpvel  !< Timer for adding slip velocity
+      type(timer)   :: tbreak   !< Timer for attempting breakup
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -1528,19 +1530,23 @@ contains
          this%tvel  =timer(comm=this%cfg%comm,name='Velocity')
          this%tpres =timer(comm=this%cfg%comm,name='Pressure')
          this%tsgs  =timer(comm=this%cfg%comm,name='SGSmodel')
-         this%ttrans=timer(comm=this%cfg%comm,name='Transferdrop')
+         this%tdtrans=timer(comm=this%cfg%comm,name='Transferdrop')
          this%tltrans=timer(comm=this%cfg%comm,name='Transferlig')
+         this%tslpvel=timer(comm=this%cfg%comm,name='SlipVelocity')
+         this%tbreak=timer(comm=this%cfg%comm,name='AttemptBreakup')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
          call this%timefile%add_column(this%time%n,'Timestep number')
          call this%timefile%add_column(this%time%t,'Time')
-         call this%timefile%add_column(this%tstep%time ,trim(this%tstep%name))
-         call this%timefile%add_column(this%tvof%time  ,trim(this%tvof%name))
-         call this%timefile%add_column(this%tvel%time  ,trim(this%tvel%name))
-         call this%timefile%add_column(this%tpres%time ,trim(this%tpres%name))
-         call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
-         call this%timefile%add_column(this%ttrans%time,trim(this%ttrans%name))
+         call this%timefile%add_column(this%tstep%time  ,trim(this%tstep%name))
+         call this%timefile%add_column(this%tvof%time   ,trim(this%tvof%name))
+         call this%timefile%add_column(this%tvel%time   ,trim(this%tvel%name))
+         call this%timefile%add_column(this%tpres%time  ,trim(this%tpres%name))
+         call this%timefile%add_column(this%tsgs%time   ,trim(this%tsgs%name))
+         call this%timefile%add_column(this%tdtrans%time,trim(this%tdtrans%name))
          call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
+         call this%timefile%add_column(this%tslpvel%time,trim(this%tslpvel%name))
+         call this%timefile%add_column(this%tbreak%time ,trim(this%tbreak%name))
       end block create_timing
       
       
@@ -1679,8 +1685,10 @@ contains
       call this%tsgs%reset()
       call this%tvel%reset()
       call this%tpres%reset()
-      call this%ttrans%reset()
+      call this%tdtrans%reset()
       call this%tltrans%reset()
+      call this%tslpvel%reset()
+      call this%tbreak%reset()
       call this%tstep%start()
       
       ! Increment time
@@ -1708,7 +1716,9 @@ contains
 
       ! Get slip velocity
       if (this%bu%edge_exist) then
+         call this%tslpvel%start()
          call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
+         call this%tslpvel%stop()
          this%Uslip = this%Uslip + this%fs%U
          this%Vslip = this%Vslip + this%fs%V
          this%Wslip = this%Wslip + this%fs%W
@@ -1880,7 +1890,9 @@ contains
       call this%fs%get_div()
 
       ! Locate edges
+      call this%tbreak%start()
       call this%bu%attempt_breakup()
+      call this%tbreak%stop()
       
       ! attempt transfter
       attempt_transfer : block
@@ -1888,9 +1900,9 @@ contains
          this%lp%np_new=0
          this%lp%vp_new=0.0_WP
          ! Transfer via droplet conversion
-         call this%ttrans%start() ! Start transfer timer
+         call this%tdtrans%start() ! Start transfer timer
          if (this%use_drop_transfer) call this%transfer_drops()
-         call this%ttrans%stop() ! Stop transfer timer
+         call this%tdtrans%stop() ! Stop transfer timer
          ! Transfer via ligament break-up
          call this%tltrans%start() ! Start burst timer
          if (this%use_lig_transfer) call this%transfer_ligs()

@@ -1,5 +1,5 @@
 # Parallelization
-Partition :	1 4 42
+Partition :	1 2 4
 I/O partition : 1 1 1
 
 # Mesh definition
@@ -46,4 +46,4 @@ Ensight output period : 1e-4
 Restart output period : 1e-3
 
 # Data restart
-Restart from : 2.00011E-02
+Restart from : !2.00011E-02
