@@ -1691,162 +1691,276 @@ contains
    end subroutine get_div
    
    
-   ! Stokeslet implementation
-   subroutine add_slipvel(this,vf,ss,Uslip,Vslip,Wslip,Hfilm)
+   ! ! Stokeslet implementation
+   ! subroutine add_slipvel(this,vf,ss,Uslip,Vslip,Wslip,Hfilm)
+   !    use irl_fortran_interface
+   !    use vfs_class, only: vfs,VFlo,VFhi
+   !    use stokeslet_class, only: stokeslet
+   !    use mpi_f08
+   !    use parallel,   only: MPI_REAL_WP
+   !    implicit none
+   !    class(tpns),      intent(inout) :: this
+   !    class(vfs),       intent(inout) :: vf
+   !    class(stokeslet), intent(inout) :: ss     
+   !    real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Uslip 
+   !    real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Vslip 
+   !    real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Wslip 
+   !    real(WP), intent(in) :: Hfilm
+   !    integer, dimension(:), allocatable :: Nedge_list,dispels
+   !    real(WP), dimension(:,:), allocatable:: Loc_,Loc,EdgeN_,EdgeN
+   !    real(WP), dimension(:), allocatable:: fcoeff
+   !    real(WP), dimension(3) :: ftemp,pos,c1,c2
+   !    real(WP) :: a,b,dx,xscale,epsilon,Utc,r,threshold
+   !    integer :: Nedge_,Nedge,count,info,i,j,k,ind,ierr,n
+   !    ! Empty out slip velocities
+   !    Uslip = 0.0_WP; Vslip = 0.0_WP; Wslip = 0.0_WP
+   !    ! a is the ratio to scale distance
+   !    ! b is the ratio to scale regularized stokeslet distance
+   !    ! dx assumes uniform grid for now
+   !    ! threshold is set for edge identification
+   !    a=0.45_WP; b=0.3_WP; dx=maxval(this%cfg%dx); Nedge_ = 0; threshold = 0.3_WP; 
+   !    xscale=a*dx; epsilon=b*dx
+   !    Utc = sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))
+   !    ! First pass to identify the number of edge cell in the current processor
+   !    do k=this%cfg%kmin_,this%cfg%kmax_
+   !       do j=this%cfg%jmin_,this%cfg%jmax_
+   !          do i=this%cfg%imin_,this%cfg%imax_
+   !             if (vf%edge_sensor(i,j,k).gt.threshold.and.vf%thin_sensor(i,j,k).eq.1.0_WP.and.vf%VF(i,j,k).gt.VFlo.and.vf%VF(i,j,k).lt.VFhi) then   
+   !               Nedge_ = Nedge_+1
+   !             end if
+   !          end do
+   !       end do
+   !    end do
+   !    ! Communicate the total number of edges to all processors
+   !    allocate(Nedge_list(0:this%cfg%nproc-1))
+   !    call MPI_AllGATHER(Nedge_,1,MPI_INTEGER,Nedge_list,1,MPI_INTEGER,this%cfg%comm,ierr)
+   !    Nedge = sum(Nedge_list)
+   !    ! If there is an edge somewhere
+   !    if (Nedge .gt. 0) then 
+   !       allocate(Loc_(1:3,1:Nedge_))
+   !       allocate(EdgeN_(1:3,1:Nedge_))
+   !      !  allocate(FilmThick_(Nedge_))
+   !       Nedge_ = 0
+   !       ! Second pass to write down the the barycenters and the edge normal for cells with an edge
+   !       do k=this%cfg%kmin_,this%cfg%kmax_
+   !          do j=this%cfg%jmin_,this%cfg%jmax_
+   !             do i=this%cfg%imin_,this%cfg%imax_
+   !                if (vf%edge_sensor(i,j,k).gt.threshold.and.vf%thin_sensor(i,j,k).eq.1.0_WP.and.vf%VF(i,j,k).gt.VFlo.and.vf%VF(i,j,k).lt.VFhi) then   
+   !                  ! For each edge, write down the location of the stokeslet and the corresponding edge normal direction
+   !                  Nedge_ = Nedge_+1
+   !                  Loc_(:,Nedge_) = [this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]
+   !                  EdgeN_(:,Nedge_) = vf%edge_normal(:,i,j,k)
+   !                end if
+   !             end do
+   !          end do
+   !       end do
+
+   !       allocate(dispels(0:this%cfg%nproc-1))
+   !       allocate(Loc(1:3,1:Nedge))
+   !       allocate(EdgeN(1:3,1:Nedge))
+   !       allocate(fcoeff(1:Nedge))
+   !       count = 0
+   !       do i = 0,this%cfg%nproc-1
+   !          dispels(i)= count
+   !          count = count+Nedge_list(i)
+   !       end do
+
+   !       ! Communicate source barycenters and edge normals
+   !       call MPI_ALLGATHERV(Loc_(1,:),Nedge_,MPI_REAL_WP,Loc(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+   !       call MPI_ALLGATHERV(Loc_(2,:),Nedge_,MPI_REAL_WP,Loc(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+   !       call MPI_ALLGATHERV(Loc_(3,:),Nedge_,MPI_REAL_WP,Loc(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+   !       call MPI_ALLGATHERV(EdgeN_(1,:),Nedge_,MPI_REAL_WP,EdgeN(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+   !       call MPI_ALLGATHERV(EdgeN_(2,:),Nedge_,MPI_REAL_WP,EdgeN(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+   !       call MPI_ALLGATHERV(EdgeN_(3,:),Nedge_,MPI_REAL_WP,EdgeN(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+   !       fcoeff = Utc
+         
+   !       ss%np_ = Nedge_; ss%np = Nedge
+   !       call ss%resize(Nedge_)
+   !       do n = 1, Nedge_
+   !          ss%p(n)%pos = Loc_(:,n)
+   !          ss%p(n)%fcoeff = Utc
+   !          ss%p(n)%nedge = EdgeN_(:,n)
+   !          ss%p(n)%VF = 0.0_WP
+   !       end do
+
+   !       do k=this%cfg%kmino_,this%cfg%kmaxo_
+   !          do j=this%cfg%jmino_,this%cfg%jmaxo_
+   !             do i=this%cfg%imino_,this%cfg%imaxo_
+   !                ! For each of edge, apply a contribution
+   !                do n =1, Nedge
+   !                   pos = ([this%cfg%x(i),this%cfg%ym(j),this%cfg%zm(k)]-Loc(:,n))/xscale
+   !                   ftemp = EdgeN(:,n)
+   !                   ! ftemp = stokeslet_force()
+   !                   ftemp = doublet_stokes()
+   !                   Uslip(i,j,k)=Uslip(i,j,k)+ftemp(1)*fcoeff(n)
+
+   !                   pos = ([this%cfg%xm(i),this%cfg%y(j),this%cfg%zm(k)]-Loc(:,n))/xscale
+   !                   ftemp = EdgeN(:,n)
+   !                   ! ftemp = stokeslet_force()
+   !                   ftemp = doublet_stokes()
+   !                   Vslip(i,j,k)=Vslip(i,j,k)+ftemp(2)*fcoeff(n)
+
+   !                   pos = ([this%cfg%xm(i),this%cfg%ym(j),this%cfg%z(k)]-Loc(:,n))/xscale
+   !                   ftemp = EdgeN(:,n)
+   !                   ! ftemp = stokeslet_force()
+   !                   ftemp = doublet_stokes()
+   !                   Wslip(i,j,k)=Wslip(i,j,k)+ftemp(3)*fcoeff(n)
+   !                end do
+   !             end do
+   !          end do
+   !       end do
+   !       deallocate(Loc_,EdgeN_,dispels,Loc,EdgeN,fcoeff)
+   !      else
+   !         ss%np_=0;ss%np = 0
+   !         call ss%resize(0)
+   !    end if
+   !    deallocate(Nedge_list)
+
+   !    contains
+
+   !       function  stokeslet_force() result(vel)
+   !          implicit none
+   !          real(WP), dimension(3) :: vel
+   !          r = norm2(pos)
+   !          c1 =(r**2+2.0_WP*epsilon**2)
+   !          c2 = dot_product(ftemp,pos)
+   !          vel = ((c1*ftemp) + c2*pos)/(r**2+epsilon**2)**(1.5_WP)
+   !       end function stokeslet_force
+
+   !       function  doublet_stokes() result(vel)
+   !          implicit none
+   !          real(WP), dimension(3) :: vel
+   !          r = norm2(pos)
+   !          vel = (-ftemp + 3.0_WP*dot_product(pos,ftemp)*pos/r**2)/r**3
+   !       end function doublet_stokes
+
+   !       function doublet_potential() result(vel)
+   !          implicit none
+   !          real(WP), dimension(3) :: vel
+   !          real(WP), dimension(3) :: etheta,pos_n
+   !          r = norm2(pos)
+   !          pos_n = pos/r
+   !          c1 = dot_product(pos_n, ftemp)
+   !          c2 = sin(acos(c1))
+   !          etheta =[-pos_n(3)*pos_n(1)/cos(asin(pos_n(3))),-pos_n(3)*pos_n(2)/cos(asin(pos_n(3))), cos(asin(pos_n(3)))] 
+   !          vel = (2.0_WP*c1*pos_n + c2*etheta)/r**(3.0_WP)
+   !       end function doublet_potential
+
+   ! end subroutine add_slipvel
+
+   subroutine add_slipvel(this, vf, ss, Uslip, Vslip, Wslip, Hfilm)
       use irl_fortran_interface
-      use vfs_class, only: vfs,VFlo,VFhi
+      use vfs_class, only: vfs, VFlo, VFhi
       use stokeslet_class, only: stokeslet
       use mpi_f08
-      use parallel,   only: MPI_REAL_WP
+      use parallel, only: MPI_REAL_WP
       implicit none
-      class(tpns),      intent(inout) :: this
-      class(vfs),       intent(inout) :: vf
+      class(tpns), intent(inout) :: this
+      class(vfs), intent(inout) :: vf
       class(stokeslet), intent(inout) :: ss     
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Uslip 
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Vslip 
       real(WP), dimension(this%cfg%imino_:,this%cfg%jmino_:,this%cfg%kmino_:), intent(inout) :: Wslip 
       real(WP), intent(in) :: Hfilm
-      integer, dimension(:), allocatable :: Nedge_list,dispels
-      real(WP), dimension(:,:), allocatable:: Loc_,Loc,EdgeN_,EdgeN
-      real(WP), dimension(:), allocatable:: fcoeff
-      real(WP), dimension(3) :: ftemp,pos,c1,c2
-      real(WP) :: a,b,dx,xscale,epsilon,Utc,r,threshold
-      integer :: Nedge_,Nedge,count,info,i,j,k,ind,ierr,n
-      ! Empty out slip velocities
+      integer, allocatable :: Nedge_list(:), dispels(:)
+      real(WP), allocatable :: Loc(:,:), EdgeN(:,:), buffer(:)
+      real(WP), dimension(3) :: pos, ftemp
+      real(WP) :: a, b, dx, xscale, epsilon, Utc, r, threshold
+      integer :: Nedge_, Nedge, count, ierr, n, total_size, offset, i, j, k
+      
+      ! Initialize parameters
       Uslip = 0.0_WP; Vslip = 0.0_WP; Wslip = 0.0_WP
-      ! a is the ratio to scale distance
-      ! b is the ratio to scale regularized stokeslet distance
-      ! dx assumes uniform grid for now
-      ! threshold is set for edge identification
-      a=0.45_WP; b=0.3_WP; dx=maxval(this%cfg%dx); Nedge_ = 0; threshold = 0.3_WP; 
-      xscale=a*dx; epsilon=b*dx
-      Utc = sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))
-      ! First pass to identify the number of edge cell in the current processor
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               if (vf%edge_sensor(i,j,k).gt.threshold.and.vf%thin_sensor(i,j,k).eq.1.0_WP.and.vf%VF(i,j,k).gt.VFlo.and.vf%VF(i,j,k).lt.VFhi) then   
-                 Nedge_ = Nedge_+1
-               end if
-            end do
-         end do
-      end do
-      ! Communicate the total number of edges to all processors
-      allocate(Nedge_list(0:this%cfg%nproc-1))
-      call MPI_AllGATHER(Nedge_,1,MPI_INTEGER,Nedge_list,1,MPI_INTEGER,this%cfg%comm,ierr)
-      Nedge = sum(Nedge_list)
-      ! If there is an edge somewhere
-      if (Nedge .gt. 0) then 
-         allocate(Loc_(1:3,1:Nedge_))
-         allocate(EdgeN_(1:3,1:Nedge_))
-        !  allocate(FilmThick_(Nedge_))
-         Nedge_ = 0
-         ! Second pass to write down the the barycenters and the edge normal for cells with an edge
-         do k=this%cfg%kmin_,this%cfg%kmax_
-            do j=this%cfg%jmin_,this%cfg%jmax_
-               do i=this%cfg%imin_,this%cfg%imax_
-                  if (vf%edge_sensor(i,j,k).gt.threshold.and.vf%thin_sensor(i,j,k).eq.1.0_WP.and.vf%VF(i,j,k).gt.VFlo.and.vf%VF(i,j,k).lt.VFhi) then   
-                    ! For each edge, write down the location of the stokeslet and the corresponding edge normal direction
-                    Nedge_ = Nedge_+1
-                    Loc_(:,Nedge_) = [this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]
-                    EdgeN_(:,Nedge_) = vf%edge_normal(:,i,j,k)
+      a = 0.45_WP; b = 0.3_WP; dx = maxval(this%cfg%dx)
+      xscale = a * dx; epsilon = b * dx
+      Utc = sqrt(2.0_WP * this%sigma / (this%rho_l * Hfilm))
+      threshold = 0.3_WP
+      Nedge_ = 0
+  
+      ! First pass to identify edges
+      do k = this%cfg%kmin_, this%cfg%kmax_
+          do j = this%cfg%jmin_, this%cfg%jmax_
+              do i = this%cfg%imin_, this%cfg%imax_
+                  if (vf%edge_sensor(i, j, k) > threshold .and. &
+                      vf%thin_sensor(i, j, k) == 1.0_WP .and. &
+                      vf%VF(i, j, k) > VFlo .and. vf%VF(i, j, k) < VFhi) then
+                      Nedge_ = Nedge_ + 1
                   end if
-               end do
-            end do
-         end do
-
-         allocate(dispels(0:this%cfg%nproc-1))
-         allocate(Loc(1:3,1:Nedge))
-         allocate(EdgeN(1:3,1:Nedge))
-         allocate(fcoeff(1:Nedge))
-         count = 0
-         do i = 0,this%cfg%nproc-1
-            dispels(i)= count
-            count = count+Nedge_list(i)
-         end do
-
-         ! Communicate source barycenters and edge normals
-         call MPI_ALLGATHERV(Loc_(1,:),Nedge_,MPI_REAL_WP,Loc(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
-         call MPI_ALLGATHERV(Loc_(2,:),Nedge_,MPI_REAL_WP,Loc(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
-         call MPI_ALLGATHERV(Loc_(3,:),Nedge_,MPI_REAL_WP,Loc(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
-         call MPI_ALLGATHERV(EdgeN_(1,:),Nedge_,MPI_REAL_WP,EdgeN(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
-         call MPI_ALLGATHERV(EdgeN_(2,:),Nedge_,MPI_REAL_WP,EdgeN(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
-         call MPI_ALLGATHERV(EdgeN_(3,:),Nedge_,MPI_REAL_WP,EdgeN(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
-         fcoeff = Utc
-         
-         ss%np_ = Nedge_; ss%np = Nedge
-         call ss%resize(Nedge_)
-         do n = 1, Nedge_
-            ss%p(n)%pos = Loc_(:,n)
-            ss%p(n)%fcoeff = Utc
-            ss%p(n)%nedge = EdgeN_(:,n)
-            ss%p(n)%VF = 0.0_WP
-         end do
-
-         do k=this%cfg%kmino_,this%cfg%kmaxo_
-            do j=this%cfg%jmino_,this%cfg%jmaxo_
-               do i=this%cfg%imino_,this%cfg%imaxo_
-                  ! For each of edge, apply a contribution
-                  do n =1, Nedge
-                     pos = ([this%cfg%x(i),this%cfg%ym(j),this%cfg%zm(k)]-Loc(:,n))/xscale
-                     ftemp = EdgeN(:,n)
-                     ! ftemp = stokeslet_force()
-                     ftemp = doublet_stokes()
-                     Uslip(i,j,k)=Uslip(i,j,k)+ftemp(1)*fcoeff(n)
-
-                     pos = ([this%cfg%xm(i),this%cfg%y(j),this%cfg%zm(k)]-Loc(:,n))/xscale
-                     ftemp = EdgeN(:,n)
-                     ! ftemp = stokeslet_force()
-                     ftemp = doublet_stokes()
-                     Vslip(i,j,k)=Vslip(i,j,k)+ftemp(2)*fcoeff(n)
-
-                     pos = ([this%cfg%xm(i),this%cfg%ym(j),this%cfg%z(k)]-Loc(:,n))/xscale
-                     ftemp = EdgeN(:,n)
-                     ! ftemp = stokeslet_force()
-                     ftemp = doublet_stokes()
-                     Wslip(i,j,k)=Wslip(i,j,k)+ftemp(3)*fcoeff(n)
+              end do
+          end do
+      end do
+  
+      ! Gather total edges across all processors
+      allocate(Nedge_list(0:this%cfg%nproc - 1))
+      call MPI_AllGATHER(Nedge_, 1, MPI_INTEGER, Nedge_list, 1, MPI_INTEGER, this%cfg%comm, ierr)
+      Nedge = sum(Nedge_list)
+  
+      if (Nedge > 0) then
+          allocate(buffer(3 * Nedge_))
+          offset = 0
+  
+          ! Collect local edge data
+          do k = this%cfg%kmin_, this%cfg%kmax_
+              do j = this%cfg%jmin_, this%cfg%jmax_
+                  do i = this%cfg%imin_, this%cfg%imax_
+                      if (vf%edge_sensor(i, j, k) > threshold .and. &
+                          vf%thin_sensor(i, j, k) == 1.0_WP .and. &
+                          vf%VF(i, j, k) > VFlo .and. vf%VF(i, j, k) < VFhi) then
+                          buffer(3 * offset + 1:3 * offset + 3) = &
+                              [this%cfg%xm(i), this%cfg%ym(j), this%cfg%zm(k)]
+                          offset = offset + 1
+                      end if
                   end do
-               end do
-            end do
-         end do
-         deallocate(Loc_,EdgeN_,dispels,Loc,EdgeN,fcoeff)
-        else
-           ss%np_=0;ss%np = 0
-           call ss%resize(0)
+              end do
+          end do
+  
+          ! Communicate edge data
+          allocate(dispels(0:this%cfg%nproc - 1))
+          dispels(0) = 0
+          do i = 1, this%cfg%nproc - 1
+              dispels(i) = dispels(i - 1) + 3 * Nedge_list(i - 1)
+          end do
+  
+          allocate(Loc(3, Nedge))
+          call MPI_ALLGATHERV(buffer, 3 * Nedge_, MPI_REAL_WP, &
+                              Loc, 3 * Nedge_list, dispels, MPI_REAL_WP, this%cfg%comm, ierr)
+          deallocate(buffer, dispels)
+  
+          ! Process collected data and compute contributions
+          do k = this%cfg%kmino_, this%cfg%kmaxo_
+              do j = this%cfg%jmino_, this%cfg%jmaxo_
+                  do i = this%cfg%imino_, this%cfg%imaxo_
+                      do n = 1, Nedge
+                          pos = ([this%cfg%x(i), this%cfg%y(j), this%cfg%z(k)] - Loc(:, n)) / xscale
+                          ftemp = doublet_stokes(pos)
+                          Uslip(i, j, k) = Uslip(i, j, k) + ftemp(1) * Utc
+                          Vslip(i, j, k) = Vslip(i, j, k) + ftemp(2) * Utc
+                          Wslip(i, j, k) = Wslip(i, j, k) + ftemp(3) * Utc
+                      end do
+                  end do
+              end do
+          end do
+  
+          deallocate(Loc)
+      else
+          ss%np_ = 0
+          ss%np = 0
       end if
+  
       deallocate(Nedge_list)
-
-      contains
-
-         function  stokeslet_force() result(vel)
-            implicit none
-            real(WP), dimension(3) :: vel
-            r = norm2(pos)
-            c1 =(r**2+2.0_WP*epsilon**2)
-            c2 = dot_product(ftemp,pos)
-            vel = ((c1*ftemp) + c2*pos)/(r**2+epsilon**2)**(1.5_WP)
-         end function stokeslet_force
-
-         function  doublet_stokes() result(vel)
-            implicit none
-            real(WP), dimension(3) :: vel
-            r = norm2(pos)
-            vel = (-ftemp + 3.0_WP*dot_product(pos,ftemp)*pos/r**2)/r**3
-         end function doublet_stokes
-
-         function doublet_potential() result(vel)
-            implicit none
-            real(WP), dimension(3) :: vel
-            real(WP), dimension(3) :: etheta,pos_n
-            r = norm2(pos)
-            pos_n = pos/r
-            c1 = dot_product(pos_n, ftemp)
-            c2 = sin(acos(c1))
-            etheta =[-pos_n(3)*pos_n(1)/cos(asin(pos_n(3))),-pos_n(3)*pos_n(2)/cos(asin(pos_n(3))), cos(asin(pos_n(3)))] 
-            vel = (2.0_WP*c1*pos_n + c2*etheta)/r**(3.0_WP)
-         end function doublet_potential
-
-   end subroutine add_slipvel
+  
+  contains
+  
+      function doublet_stokes(pos) result(vel)
+          implicit none
+          real(WP), dimension(3), intent(in) :: pos
+          real(WP), dimension(3) :: vel
+          real(WP) :: r
+          r = norm2(pos)
+          vel = (-ftemp + 3.0_WP * dot_product(pos, ftemp) * pos / r**2) / r**3
+      end function doublet_stokes
+  
+  end subroutine add_slipvel
+  
 
    !> Add surface tension jump term using CSF
    subroutine add_surface_tension_jump(this,dt,div,vf,contact_model)
