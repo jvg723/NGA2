@@ -1715,18 +1715,18 @@ contains
       call this%fs%get_olddensity(vf=this%vf)
 
       ! Get slip velocity
-      if (this%bu%edge_exist) then
+      ! if (this%bu%edge_exist) then
          call this%tslpvel%start()
-         call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
+         ! call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
          call this%tslpvel%stop()
          this%Uslip = this%Uslip + this%fs%U
          this%Vslip = this%Vslip + this%fs%V
          this%Wslip = this%Wslip + this%fs%W
-      else
-         this%Uslip = this%fs%U
-         this%Vslip = this%fs%V
-         this%Wslip = this%fs%W
-      end if
+      ! else
+      !    this%Uslip = this%fs%U
+      !    this%Vslip = this%fs%V
+      !    this%Wslip = this%fs%W
+      ! end if
 
       ! VOF solver step
       call this%tvof%start() ! Start VOF timer
@@ -1891,7 +1891,7 @@ contains
 
       ! Locate edges
       call this%tbreak%start()
-      call this%bu%attempt_breakup()
+      ! call this%bu%attempt_breakup()
       call this%tbreak%stop()
       
       ! attempt transfter
