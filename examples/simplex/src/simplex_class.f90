@@ -958,9 +958,10 @@ contains
       create_smesh: block
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=2,name='plic')
+         this%smesh=surfmesh(nvar=3,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
+         this%smesh%varname(3)='ccl_lig'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -978,6 +979,7 @@ contains
                      if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        this%smesh%var(3,np)=real(this%ccl_lig%id(i,j,k),WP)
                      end if
                   end do
                end do
@@ -1510,6 +1512,7 @@ contains
                         if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                           this%smesh%var(3,np)=real(this%ccl_lig%id(i,j,k),WP)
                         end if
                      end do
                   end do
