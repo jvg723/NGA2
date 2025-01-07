@@ -78,7 +78,7 @@ module simplex_class
       type(timer)   :: tvel     !< Timer for velocity
       type(timer)   :: tpres    !< Timer for pressure
       type(timer)   :: tvof     !< Timer for VOF
-      type(timer)   :: ttrans   !< Timer for VOF transfer
+      type(timer)   :: tdtrans   !< Timer for VOF transfer
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -1052,7 +1052,7 @@ contains
          this%tvel  =timer(comm=this%cfg%comm,name='Velocity')
          this%tpres =timer(comm=this%cfg%comm,name='Pressure')
          this%tsgs  =timer(comm=this%cfg%comm,name='SGSmodel')
-         this%ttrans=timer(comm=this%cfg%comm,name='Transfer')
+         this%tdtrans=timer(comm=this%cfg%comm,name='Transfer')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
          call this%timefile%add_column(this%time%n,'Timestep number')
@@ -1062,7 +1062,7 @@ contains
          call this%timefile%add_column(this%tvel%time  ,trim(this%tvel%name))
          call this%timefile%add_column(this%tpres%time ,trim(this%tpres%name))
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
-         call this%timefile%add_column(this%ttrans%time,trim(this%ttrans%name))
+         call this%timefile%add_column(this%tdtrans%time,trim(this%tdtrans%name))
       end block create_timing
       
       
@@ -1201,7 +1201,7 @@ contains
       call this%tsgs%reset()
       call this%tvel%reset()
       call this%tpres%reset()
-      call this%ttrans%reset()
+      call this%tdtrans%reset()
       call this%tstep%start()
       
       ! Increment time
@@ -1384,9 +1384,9 @@ contains
       call this%fs%get_div()
       
       ! Transfer VOF into droplets
-      call this%ttrans%start() ! Start transfer timer
+      call this%tdtrans%start() ! Start transfer timer
       if (this%use_drop_transfer) call this%transfer_drops()
-      call this%ttrans%stop() ! Stop transfer timer
+      call this%tdtrans%stop() ! Stop transfer timer
       
       ! Remove VOF at edge of domain
       remove_vof: block
