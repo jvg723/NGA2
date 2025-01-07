@@ -958,10 +958,12 @@ contains
       create_smesh: block
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=3,name='plic')
+         this%smesh=surfmesh(nvar=5,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='ccl_lig'
+         this%smesh%varname(4)='thickness_unfilt'
+         this%smesh%varname(5)='struct_type'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -980,6 +982,8 @@ contains
                         np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                         this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                         this%smesh%var(3,np)=real(this%ccl_lig%id(i,j,k),WP)
+                        this%smesh%var(4,np)=this%thickness(i,j,k)
+                        this%smesh%var(5,np)=this%struct_type(i,j,k)
                      end if
                   end do
                end do
@@ -1513,6 +1517,8 @@ contains
                            np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
                            this%smesh%var(2,np)=this%vf%thickness(i,j,k)
                            this%smesh%var(3,np)=real(this%ccl_lig%id(i,j,k),WP)
+                           this%smesh%var(4,np)=this%thickness(i,j,k)
+                           this%smesh%var(5,np)=this%struct_type(i,j,k)
                         end if
                      end do
                   end do
@@ -1520,12 +1526,13 @@ contains
             end do
          end block update_smesh
          ! Update particle mesh object
-         if (this%use_drop_transfer) then
+         if (this%use_drop_transfer.or.this%use_lig_transfer) then
             update_pmesh: block
                integer :: i
                call this%lp%update_partmesh(this%pmesh)
                do i=1,this%lp%np_
                   this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
+                  this%pmesh%var(2,i)=this%lp%p(i)%id
                   this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
                end do
             end block update_pmesh 
