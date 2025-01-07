@@ -85,6 +85,7 @@ module simplex_class
       
       !> Drop transfer modeling
       logical :: use_drop_transfer !< Do we use droplet transfer
+      logical :: use_lig_transfer  !< Do we use ligament transfer
       type(lpt)      :: lp         !< Lagrangian particle tracking
       type(monitor)  :: pfile      !< Particle monitoring
       type(partmesh) :: pmesh      !< Particle mesh for lpt
@@ -92,8 +93,19 @@ module simplex_class
       real(WP) :: dmin             !< Minimum diameter below which transfer is automatic
       real(WP) :: ddel             !< Minimum diameter below which structure is directly deleted
       real(WP) :: emax             !< Maximum eccentricity for transfer
-      real(WP) :: vof_transfered   !< Integral of VOF transfered
+      real(WP) :: vof_tr_drop   !< Integral of VOF transfered from droplet conversion
       real(WP) :: vof_deleted      !< Integral of VOF deleted
+      integer  :: np_drop
+
+      real(WP) :: lmin
+      real(WP) :: lmake
+      real(WP) :: lper
+      real(WP) :: lstratio
+      real(WP) :: dw
+      real(WP) :: ldmin
+      real(WP) :: size_ratio
+      real(WP) :: vof_tf_lig
+      integer  :: np_lig
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -293,7 +305,7 @@ contains
       nmax=maxloc(dvol,dim=1)
       
       ! Zero out monitoring variables
-      this%vof_transfered=0.0_WP
+      this%vof_tr_drop=0.0_WP
       this%vof_deleted=0.0_WP
       this%lp%np_new=0
       this%lp%vp_new=0.0_WP
@@ -373,7 +385,7 @@ contains
             end do
             
             ! Increment monitoring variables
-            this%vof_transfered=this%vof_transfered+dvol(n)
+            this%vof_tr_drop=this%vof_tr_drop+dvol(n)
             this%lp%np_new=this%lp%np_new+1
             this%lp%vp_new=this%lp%vp_new+dvol(n)
 
@@ -776,7 +788,7 @@ contains
             this%dmax=1.0e-3_WP
             this%emax=0.8_WP
             ! Zero out transfered volume
-            this%vof_transfered=0.0_WP
+            this%vof_tr_drop=0.0_WP
          end if
       end block prepare_transfer
       
@@ -1001,7 +1013,7 @@ contains
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
          call this%mfile%add_column(this%vof_removed,'VOF removed')
          call this%mfile%add_column(this%vof_deleted,'VOF deleted')
-         call this%mfile%add_column(this%vof_transfered,'VOF transfered')
+         call this%mfile%add_column(this%vof_tr_drop,'VOF transfered')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')

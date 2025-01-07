@@ -30,6 +30,7 @@ Surface tension coefficient : 0.024         # 0.0225      # 0.0728
 
 # Break-up model
 Transfer drops : .true.
+Transfer ligaments : .true.
 
 # Time integration
 Max timestep size : 2e-6
@@ -44,4 +45,4 @@ Ensight output period : 1e-4
 Restart output period : 1e-3
 
 # Data restart
-Restart from : 3.50007E-02
+Restart from : !3.50007E-02
