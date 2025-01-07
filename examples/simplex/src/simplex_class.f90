@@ -1020,7 +1020,7 @@ contains
          integer :: i,j,k
          real(WP) :: rad
          ! Create a VOF solver with plicnet
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
          this%vf%thin_thld_min=0.0_WP
          this%vf%flotsam_thld=0.0_WP
          this%vf%maxcurv_times_mesh=1.0_WP
@@ -1139,7 +1139,6 @@ contains
          this%sgs=sgsmodel(cfg=this%fs%cfg,umask=this%fs%umask,vmask=this%fs%vmask,wmask=this%fs%wmask)
       end block create_sgs
       
-      
       ! Prepare Lagrangian drop model
       ! id=1, transfer_drops
       ! id=2, transfer_ligs
@@ -1147,6 +1146,9 @@ contains
          ! Is transfer used?
          call this%input%read('Transfer drops',this%use_drop_transfer,default=.true.)
          call this%input%read('Transfer ligaments',this%use_lig_transfer,default=.true.)
+         ! Create CCLs
+         call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
+         call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
          ! Setup lpt solver
          if (this%use_drop_transfer.or.this%use_lig_transfer) then
             ! Create lpt solver
@@ -1159,7 +1161,7 @@ contains
          ! Initialize drop transfer routine
          if (this%use_drop_transfer) then
             ! Create CCL
-            call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
+            ! call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
             ! Set parameters for transfer
             this%ddel=0.2_WP*this%cfg%min_meshsize
             this%dmin=1.5_WP*this%cfg%min_meshsize
@@ -1171,7 +1173,7 @@ contains
          end if
          if (this%use_lig_transfer) then
             ! Create CCL LIG
-            call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
+            ! call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
             this%ldmin=1.0e-2_WP
             this%dw =0.697_WP
             this%size_ratio=0.015_WP!0.707_WP 
@@ -1184,7 +1186,7 @@ contains
             this%np_lig=0
          end if
       end block prepare_transfer
-      
+
       
       ! Handle restart/saves here
       handle_restart: block
@@ -1319,7 +1321,7 @@ contains
             this%df%varname=['U  ','V  ','W  ','P  ','Pjx','Pjy','Pjz','P11','P12','P13','P14','P21','P22','P23','P24']
          end if
       end block handle_restart
-      
+
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -1357,7 +1359,7 @@ contains
             end do
          end do
       end block create_smesh
-      
+
       
       ! Create partmesh object for particle output
       if (this%use_drop_transfer.or.this%use_lig_transfer) then
@@ -1375,7 +1377,7 @@ contains
             end do
          end block create_pmesh
       end if
-      
+
       
       ! Add Ensight output
       create_ensight: block
@@ -1393,7 +1395,7 @@ contains
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
-      
+
       
       ! Create a monitor file
       create_monitor: block
@@ -1459,7 +1461,7 @@ contains
             call this%pfile%write()
          end if
       end block create_monitor
-      
+
       
       ! Create a timing monitor
       create_timing: block
@@ -1483,7 +1485,7 @@ contains
          call this%timefile%add_column(this%tdtrans%time,trim(this%tdtrans%name))
          call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
       end block create_timing
-      
+
       
       ! Create an event for flow rate analysis
       flowrate_analysis_prep: block
