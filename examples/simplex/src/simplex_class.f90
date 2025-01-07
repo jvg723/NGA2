@@ -93,7 +93,7 @@ module simplex_class
       real(WP) :: dmin             !< Minimum diameter below which transfer is automatic
       real(WP) :: ddel             !< Minimum diameter below which structure is directly deleted
       real(WP) :: emax             !< Maximum eccentricity for transfer
-      real(WP) :: vof_tr_drop   !< Integral of VOF transfered from droplet conversion
+      real(WP) :: vof_tf_drop   !< Integral of VOF transfered from droplet conversion
       real(WP) :: vof_deleted      !< Integral of VOF deleted
       integer  :: np_drop
 
@@ -207,7 +207,7 @@ contains
       real(WP), dimension(:,:)  , allocatable :: dvel
       real(WP), dimension(:,:,:), allocatable :: dmoi
       real(WP), dimension(:)    , allocatable :: drem
-      integer :: n,m,ierr,i,j,k,nmax
+      integer :: n,m,ierr,i,j,k,nmax,np_start
       real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
       logical :: transfer
       ! Moment of inertia calculation using lapack
@@ -305,10 +305,9 @@ contains
       nmax=maxloc(dvol,dim=1)
       
       ! Zero out monitoring variables
-      this%vof_tr_drop=0.0_WP
+      this%vof_tf_drop=0.0_WP
       this%vof_deleted=0.0_WP
-      this%lp%np_new=0
-      this%lp%vp_new=0.0_WP
+      this%np_drop=0
       
       ! Transfer drops based on our criteria
       do n=1,this%ccl%nstruct
@@ -353,7 +352,7 @@ contains
          end if
          
          ! Force transfer if drop touches auto-transfer layer
-         if (drem(n).gt.0.0_WP) transfer=.true.
+         ! if (drem(n).gt.0.0_WP) transfer=.true.
          
          ! But prevent transfer if that's the core
          if (n.eq.nmax) transfer=.false.
@@ -363,6 +362,7 @@ contains
             
             ! Root creates a new Lagrangian drop
             if (this%vf%cfg%amRoot) then
+               np_start=this%lp%np_
                ! Increment particle counter
                this%lp%np_=this%lp%np_+1
                ! Make room for new drop
@@ -385,7 +385,8 @@ contains
             end do
             
             ! Increment monitoring variables
-            this%vof_tr_drop=this%vof_tr_drop+dvol(n)
+            this%vof_tf_drop=this%vof_tf_drop+dvol(n)
+            this%np_drop=this%np_drop+1
             this%lp%np_new=this%lp%np_new+1
             this%lp%vp_new=this%lp%vp_new+dvol(n)
 
@@ -788,7 +789,7 @@ contains
             this%dmax=1.0e-3_WP
             this%emax=0.8_WP
             ! Zero out transfered volume
-            this%vof_tr_drop=0.0_WP
+            this%vof_tf_drop=0.0_WP
          end if
       end block prepare_transfer
       
@@ -1013,7 +1014,7 @@ contains
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
          call this%mfile%add_column(this%vof_removed,'VOF removed')
          call this%mfile%add_column(this%vof_deleted,'VOF deleted')
-         call this%mfile%add_column(this%vof_tr_drop,'VOF transfered')
+         call this%mfile%add_column(this%vof_tf_drop,'VOF transfered')
          call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
