@@ -42,13 +42,14 @@ module simplex_class
       type(ibconfig) :: cfg
       
       !> Flow solver
-      type(vfs)         :: vf    !< Volume fraction solver
-      type(tpns)        :: fs    !< Two-phase flow solver
-      type(hypre_str)   :: ps    !< HYPRE linear solver for pressure
-      !type(ddadi)       :: vs    !< DDADI linear solver for velocity
-      type(sgsmodel)    :: sgs   !< SGS model for eddy viscosity
-      type(timetracker) :: time  !< Time info
-      type(cclabel)     :: ccl   !< CCLabel to transfer droplets
+      type(vfs)         :: vf        !< Volume fraction solver
+      type(tpns)        :: fs        !< Two-phase flow solver
+      type(hypre_str)   :: ps        !< HYPRE linear solver for pressure
+      !type(ddadi)       :: vs        !< DDADI linear solver for velocity
+      type(sgsmodel)    :: sgs       !< SGS model for eddy viscosity
+      type(timetracker) :: time      !< Time info
+      type(cclabel)     :: ccl       !< CCLabel to transfer droplets
+      type(cclabel)     :: ccl_lig   !< CCLabel to transfer ligaments
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
@@ -65,6 +66,7 @@ module simplex_class
       real(WP), dimension(:,:,:), allocatable :: resU,resV,resW      !< Residuals
       real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
       real(WP), dimension(:,:,:), allocatable :: Uib,Vib,Wib         !< IB slip velocity
+      real(WP), dimension(:,:,:), allocatable :: thickness,struct_type
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -79,6 +81,7 @@ module simplex_class
       type(timer)   :: tpres    !< Timer for pressure
       type(timer)   :: tvof     !< Timer for VOF
       type(timer)   :: tdtrans   !< Timer for VOF transfer
+      type(timer)   :: tltrans   !< Timer for ligament transfer
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -93,7 +96,7 @@ module simplex_class
       real(WP) :: dmin             !< Minimum diameter below which transfer is automatic
       real(WP) :: ddel             !< Minimum diameter below which structure is directly deleted
       real(WP) :: emax             !< Maximum eccentricity for transfer
-      real(WP) :: vof_tf_drop   !< Integral of VOF transfered from droplet conversion
+      real(WP) :: vof_tf_drop      !< Integral of VOF transfered from droplet conversion
       real(WP) :: vof_deleted      !< Integral of VOF deleted
       integer  :: np_drop
 
@@ -622,6 +625,7 @@ contains
          this%time=timetracker(amRoot=this%cfg%amRoot)
          call this%input%read('Max timestep size',this%time%dtmax)
          call this%input%read('Max cfl number',this%time%cflmax)
+         call this%input%read('Max time',this%time%tmax)
          this%time%dt=this%time%dtmax
          this%time%itmax=2
       end block initialize_timetracker
@@ -640,6 +644,8 @@ contains
          allocate(this%Uib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%thickness  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         allocate(this%struct_type  (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -910,7 +916,7 @@ contains
             this%time%told=this%time%t-this%time%dt
             !this%time%dt=this%time%dtmax !< Force max timestep size anyway
             ! Finally, handle particle I/O
-            if (this%use_drop_transfer) then
+            if (this%use_drop_transfer.or.this%use_lig_transfer) then
                ! Check if particle file exists
                inquire(file='restart/part_'//trim(timestamp),exist=partfile_exists)
                ! If so, read it
@@ -962,15 +968,17 @@ contains
       
       
       ! Create partmesh object for particle output
-      if (this%use_drop_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer) then
          create_pmesh: block
             integer :: i
-            this%pmesh=partmesh(nvar=1,nvec=1,name='lpt')
+            this%pmesh=partmesh(nvar=2,nvec=1,name='lpt')
             this%pmesh%varname(1)='radius'
+            this%pmesh%varname(2)='id'
             this%pmesh%vecname(1)='velocity'
             call this%lp%update_partmesh(this%pmesh)
             do i=1,this%lp%np_
                this%pmesh%var(1,i)=0.5_WP*this%lp%p(i)%d
+               this%pmesh%var(2,i)=this%lp%p(i)%id
                this%pmesh%vec(:,1,i)=this%lp%p(i)%vel
             end do
          end block create_pmesh
@@ -989,7 +997,7 @@ contains
          call this%ens_out%add_scalar('VOF',this%vf%VF)
          call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
-         if (this%use_drop_transfer) call this%ens_out%add_particle('part',this%pmesh)
+         if (this%use_drop_transfer.or.this%use_lig_transfer) call this%ens_out%add_particle('part',this%pmesh)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -1012,10 +1020,12 @@ contains
          call this%mfile%add_column(this%fs%Wmax,'Wmax')
          call this%mfile%add_column(this%fs%Pmax,'Pmax')
          call this%mfile%add_column(this%vf%VFint,'VOF integral')
+         call this%mfile%add_column(this%vf%SDint,'SD integral')
          call this%mfile%add_column(this%vof_removed,'VOF removed')
          call this%mfile%add_column(this%vof_deleted,'VOF deleted')
          call this%mfile%add_column(this%vof_tf_drop,'VOF transfered')
-         call this%mfile%add_column(this%vf%SDint,'SD integral')
+         call this%mfile%add_column(this%vof_tf_drop,'VOF tf drop')
+         call this%mfile%add_column(this%vof_tf_lig ,'VOF tf lig')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
          call this%mfile%add_column(this%fs%psolv%rerr,'Pressure error')
@@ -1033,7 +1043,7 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
          ! Create particle monitor
-         if (this%use_drop_transfer) then
+         if (this%use_drop_transfer.or.this%use_lig_transfer) then
             call this%lp%get_max()
             this%pfile=monitor(amroot=this%lp%cfg%amRoot,name='particles')
             call this%pfile%add_column(this%time%n,'Timestep number')
@@ -1041,6 +1051,8 @@ contains
             call this%pfile%add_column(this%lp%np,'Particle number')
             call this%pfile%add_column(this%lp%vp_tot,'Particle volume')
             call this%pfile%add_column(this%lp%np_new,'Npart new')
+            call this%pfile%add_column(this%np_drop,'Npart new drop')
+            call this%pfile%add_column(this%np_lig, 'Npart new lig')
             call this%pfile%add_column(this%lp%vp_new,'Vpart new')
             call this%pfile%add_column(this%lp%np_out,'Npart removed')
             call this%pfile%add_column(this%lp%vp_out,'Vpart removed')
@@ -1060,12 +1072,13 @@ contains
       ! Create a timing monitor
       create_timing: block
          ! Create timers
-         this%tstep =timer(comm=this%cfg%comm,name='Timestep')
-         this%tvof  =timer(comm=this%cfg%comm,name='VOFsolve')
-         this%tvel  =timer(comm=this%cfg%comm,name='Velocity')
-         this%tpres =timer(comm=this%cfg%comm,name='Pressure')
-         this%tsgs  =timer(comm=this%cfg%comm,name='SGSmodel')
+         this%tstep  =timer(comm=this%cfg%comm,name='Timestep')
+         this%tvof   =timer(comm=this%cfg%comm,name='VOFsolve')
+         this%tvel   =timer(comm=this%cfg%comm,name='Velocity')
+         this%tpres  =timer(comm=this%cfg%comm,name='Pressure')
+         this%tsgs   =timer(comm=this%cfg%comm,name='SGSmodel')
          this%tdtrans=timer(comm=this%cfg%comm,name='Transfer')
+         this%tltrans=timer(comm=this%cfg%comm,name='Transferlig')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
          call this%timefile%add_column(this%time%n,'Timestep number')
@@ -1076,6 +1089,7 @@ contains
          call this%timefile%add_column(this%tpres%time ,trim(this%tpres%name))
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
          call this%timefile%add_column(this%tdtrans%time,trim(this%tdtrans%name))
+         call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
       end block create_timing
       
       
@@ -1215,6 +1229,7 @@ contains
       call this%tvel%reset()
       call this%tpres%reset()
       call this%tdtrans%reset()
+      call this%tltrans%reset()
       call this%tstep%start()
       
       ! Increment time
@@ -1223,7 +1238,7 @@ contains
       call this%time%increment()
       
       ! Advance lagrangian droplets
-      if (this%use_drop_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer) then
          this%resU=this%fs%rho_g
          this%resV=this%fs%visc_g
          call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
@@ -1395,11 +1410,20 @@ contains
       ! Recompute interpolated velocity and divergence
       call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
       call this%fs%get_div()
-      
-      ! Transfer VOF into droplets
-      call this%tdtrans%start() ! Start transfer timer
-      if (this%use_drop_transfer) call this%transfer_drops()
-      call this%tdtrans%stop() ! Stop transfer timer
+
+      ! attempt transfter
+      attempt_transfer : block
+         ! Zero out monitoring variables
+         this%lp%np_new=0
+         this%lp%vp_new=0.0_WP
+         ! Transfer VOF into droplets
+         call this%tdtrans%start() ! Start transfer timer
+         if (this%use_drop_transfer) call this%transfer_drops()
+         call this%tdtrans%stop() ! Stop transfer timer
+         call this%tltrans%start() ! Start burst timer
+         ! if (this%use_lig_transfer) call this%transfer_ligs()
+         call this%tltrans%stop() ! Stop burst timer
+      end block attempt_transfer
       
       ! Remove VOF at edge of domain
       remove_vof: block
@@ -1500,7 +1524,7 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%timefile%write()
-      if (this%use_drop_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer) then
          call this%lp%get_max()
          call this%pfile%write()
       end if
@@ -1561,7 +1585,7 @@ contains
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
             ! Finally, handle particle I/O
-            if (this%use_drop_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
+            if (this%use_drop_transfer.or.this%use_lig_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
          end block save_restart
       end if
       
@@ -1575,6 +1599,7 @@ contains
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
       deallocate(this%gradU,this%Uib,this%Vib,this%Wib,this%SR)
+      deallocate(this%thickness,this%struct_type)
    end subroutine final
    
    
