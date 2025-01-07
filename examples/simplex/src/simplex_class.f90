@@ -779,16 +779,20 @@ contains
       prepare_transfer: block
          ! Is transfer used?
          call this%input%read('Transfer drops',this%use_drop_transfer,default=.true.)
-         ! Only initialize transfer model if used
-         if (this%use_drop_transfer) then
-            ! Create CCL
-            call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
+         call this%input%read('Transfer ligaments',this%use_lig_transfer,default=.true.)
+         ! Setup lpt solver
+         if (this%use_drop_transfer.or.this%use_lig_transfer) then
             ! Create lpt solver
             this%lp=lpt(cfg=this%cfg,name='spray')
             this%lp%rho=this%fs%rho_l
             this%lp%gravity=this%fs%gravity
             this%lp%filter_width=3.5_WP*this%cfg%min_meshsize
             call this%lp%resize(0)
+         end if
+         ! Initialize drop transfer routine
+         if (this%use_drop_transfer) then
+            ! Create CCL
+            call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
             ! Set parameters for transfer
             this%ddel=0.2_WP*this%cfg%min_meshsize
             this%dmin=1.5_WP*this%cfg%min_meshsize
@@ -796,6 +800,21 @@ contains
             this%emax=0.8_WP
             ! Zero out transfered volume
             this%vof_tf_drop=0.0_WP
+            this%np_drop=0
+         end if
+         if (this%use_lig_transfer) then
+            ! Create CCL LIG
+            call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
+            this%ldmin=1.0e-2_WP
+            this%dw =0.697_WP
+            this%size_ratio=0.015_WP!0.707_WP 
+            this%lmin=1.0_WP
+            this%lmake=1.5_WP
+            this%lper=0.9_WP
+            this%lstratio=1.5_WP
+            ! Zero out monitoring variables
+            this%vof_tf_lig=0.0_WP
+            this%np_lig=0
          end if
       end block prepare_transfer
       
