@@ -357,7 +357,7 @@ contains
          end if
          
          ! Force transfer if drop touches auto-transfer layer
-         ! if (drem(n).gt.0.0_WP) transfer=.true.
+         if (drem(n).gt.0.0_WP) transfer=.true.
          
          ! But prevent transfer if that's the core
          if (n.eq.nmax) transfer=.false.
@@ -659,7 +659,7 @@ contains
             cycle
          end if
 
-         ! if (llen(n).le.0.0_WP) cycle
+         if (llen(n).le.0.0_WP) cycle
       
          ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", lthc(n), ",lig percentage:", lper(n),"max length:",llen(n),&
          ! & "how many cells",lnum(n), "vol:",lvol(n),"nmain", nmain, "Trp:", Trp, "Tsr:", Tsr, "Trp/Tsr", Trp/Tsr,"and id:", n
@@ -685,11 +685,12 @@ contains
                else
                   this%lp%p(this%lp%np_)%d=diam                                                                                    
                end if
-               if (llen(n).eq.0.0_WP) then
-                  this%lp%p(this%lp%np_)%pos=lpos(n,:)
-               else
-                  this%lp%p(this%lp%np_)%pos=lpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*lmoi(n,:,1)
-               end if
+               ! if (llen(n).eq.0.0_WP) then
+               !    this%lp%p(this%lp%np_)%pos=lpos(n,:)
+               ! else
+               !    this%lp%p(this%lp%np_)%pos=lpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*lmoi(n,:,1)
+               ! end if
+               this%lp%p(this%lp%np_)%pos=lpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*lmoi(n,:,1)
                ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lpos(n,1)=",lpos(n,1), " lpos(n,2)=",lpos(n,2), " lpos(n,3)=",lpos(n,3)
                ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrp=",Lrp
                ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lmoi(n,1,1)=",lmoi(n,1,1), " lmoi(n,2,1)=",lmoi(n,2,1), " lmoi(n,3,1)=",lmoi(n,3,1)
@@ -1847,12 +1848,12 @@ contains
          this%lp%np_new=0
          this%lp%vp_new=0.0_WP
          ! Transfer VOF into droplets
-         call this%tdtrans%start() ! Start transfer timer
-         if (this%use_drop_transfer) call this%transfer_drops()
-         call this%tdtrans%stop() ! Stop transfer timer
          call this%tltrans%start() ! Start burst timer
          if (this%use_lig_transfer) call this%transfer_ligs()
          call this%tltrans%stop() ! Stop burst timer
+         call this%tdtrans%start() ! Start transfer timer
+         if (this%use_drop_transfer) call this%transfer_drops()
+         call this%tdtrans%stop() ! Stop transfer timer
       end block attempt_transfer
       
       ! Remove VOF at edge of domain
