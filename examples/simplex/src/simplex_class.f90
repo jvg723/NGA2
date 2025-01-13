@@ -82,6 +82,7 @@ module simplex_class
       type(timer)   :: tvof     !< Timer for VOF
       type(timer)   :: tdtrans   !< Timer for VOF transfer
       type(timer)   :: tltrans   !< Timer for ligament transfer
+      type(timer)   :: tlpadv    !< Timer for advancing particles
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -600,12 +601,15 @@ contains
          lmoi(n,:,:)=A
          ! Get characteristic lengths of drop
          lmax=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/lvol(n))
+         ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n," lmax=",lmax," d(2)=",d(2)," d(1)=",d(1)," d(3)=",d(3)," lvol(n)=",lvol(n)
          lmid=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/lvol(n))
          lmin=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/lvol(n))
          if (lmin.eq.0.0_WP) lmin=lmid ! Handle 2D case
          ! Use max of bounding box and MoI-derived lengths as length
          !hypot(hypot(xmax(n)-xmin(n),ymax(n)-ymin(n))**2,zmax(n)-zmin(n))
          llen(n) = max(sqrt((xmax(n)-xmin(n))**2+(ymax(n)-ymin(n))**2+(zmax(n)-zmin(n))**2),lmax)
+         ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " llen(n)=",llen(n), " lmax=",lmax
+         ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " xmax(n)=",xmax(n), " xmin(n)=",xmin(n), " ymax(n)=",ymax(n), " ymin(n)=",ymin(n), " zmax(n)=",zmax(n), " zmin(n)=",zmin(n)
 
          ! With the tangent direction of the ligament, we can evaluate the strain rate of each cell of the ligament
          tangent = lmoi(n,:,1)
@@ -630,9 +634,10 @@ contains
       ! Perform transfer
       do n=1,this%ccl_lig%nstruct
          ! Assume a cylinder ligament
-         Lrim=llen(n)
+         Lrim=llen(n) !< this is 0 sometimes
          Vrim=lvol(n)
-         minor_radius=sqrt(Vrim/pi/Lrim)    
+         minor_radius=sqrt(Vrim/pi/Lrim)  
+         ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " minor_radius=",minor_radius, " Lrim=",Lrim, " Vrim=",Vrim
          ! Drop size method from Kim & Moin (2020)
          nmain=floor(this%dw*Lrim/(twoPi*minor_radius))
          ! Calculate breakup time scale based on inviscid RP instability analysis
@@ -643,19 +648,25 @@ contains
          ! local time scale asscoiated with strain rate is on par or bigger than the RP time scale, and its length is longer than the inviscid most unstable wavelength
          if ((lthc(n).le.this%lmin*this%cfg%min_meshsize).and.(lvol(n).ge.this%cfg%min_meshsize**3).and.(lper(n).ge.this%lper).and.(Trp.le.Tsr).and.(nmain.ge.1)) then
          else if(lrem(n).gt.0.0_WP) then
+            ! if (this%vf%cfg%amRoot) print *, "lig is in buffer with nmain=", nmain, " and id=", n
          else
             cycle
          end if
+
+         if (llen(n).le.0.0_WP) cycle
       
          ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", lthc(n), ",lig percentage:", lper(n),"max length:",llen(n),&
          ! & "how many cells",lnum(n), "vol:",lvol(n),"nmain", nmain, "Trp:", Trp, "Tsr:", Tsr, "Trp/Tsr", Trp/Tsr,"and id:", n
       
          nsat=nmain+1
          diam=(6.0_WP*Vrim/pi/(real(nmain,WP)+this%size_ratio**3*real(nsat,WP)))**(1.0_WP/3.0_WP)
+         
+         ! if (this%vf%cfg%amRoot) print *, "This is the diameter: ", diam,"and id: ", n
 
          ! Only the main processor is in charge of creating droplets
          if (this%cfg%amRoot) then
             Lrp = twoPi*minor_radius/this%dw
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrp=",Lrp, " twoPi=",twoPi, " minor_radius=",minor_radius, " this%dw=",this%dw
             do l=1,nsat+nmain
                ! Increment particle counter
                this%lp%np_=this%lp%np_+1
@@ -669,8 +680,14 @@ contains
                   this%lp%p(this%lp%np_)%d=diam                                                                                    
                end if
                this%lp%p(this%lp%np_)%pos =lpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*lmoi(n,:,1)
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lpos(n,1)=",lpos(n,1), " lpos(n,2)=",lpos(n,2), " lpos(n,3)=",lpos(n,3)
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrp=",Lrp
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lmoi(n,1,1)=",lmoi(n,1,1), " lmoi(n,2,1)=",lmoi(n,2,1), " lmoi(n,3,1)=",lmoi(n,3,1)
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " pos(1)=",this%lp%p(this%lp%np_)%pos(1), " pos(2)=",this%lp%p(this%lp%np_)%pos(2), " pos(3)=",this%lp%p(this%lp%np_)%pos(3)   
                this%lp%p(this%lp%np_)%vel =lvel(n,:)
-               this%lp%p(this%lp%np_)%ind =this%cfg%get_ijk_global(this%lp%p(this%lp%np_)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])     
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lvel(n,1)=",lvel(n,1), " lvel(n,2)=",lvel(n,2), " lvel(n,3)=",lvel(n,3)
+               this%lp%p(this%lp%np_)%ind =this%cfg%get_ijk_global(this%lp%p(this%lp%np_)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " ind(1)=",this%lp%p(this%lp%np_)%ind(1), " ind(2)=",this%lp%p(this%lp%np_)%ind(2), " ind(3)=",this%lp%p(this%lp%np_)%ind(3)   
                this%lp%p(this%lp%np_)%flag=0                                                                                        
                this%lp%p(this%lp%np_)%dt  =0.0_WP                                                                                  
                this%lp%p(this%lp%np_)%Acol=0.0_WP                                                                                  
@@ -701,6 +718,9 @@ contains
       ! Integrate monitoring variables 
       call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_tf_lig,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(MPI_IN_PLACE,this%np_lig    ,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
+
+      deallocate(thickness,struct_type)
+      deallocate(lvol,lthc,llen,lnum,lper,lpos,lvel,lmoi,lrem,lSR,xmin,ymin,zmin,SR)
 
       end if
 
@@ -1178,7 +1198,8 @@ contains
             this%dw =0.697_WP
             this%size_ratio=0.015_WP!0.707_WP 
             this%lmin=1.0_WP
-            this%lmake=1.5_WP
+            ! this%lmake=1.5_WP
+            this%lmake=3.0_WP
             this%lper=0.9_WP
             this%lstratio=1.5_WP
             ! Zero out monitoring variables
@@ -1473,6 +1494,7 @@ contains
          this%tsgs   =timer(comm=this%cfg%comm,name='SGSmodel')
          this%tdtrans=timer(comm=this%cfg%comm,name='Transfer')
          this%tltrans=timer(comm=this%cfg%comm,name='Transferlig')
+         this%tlpadv =timer(comm=this%cfg%comm,name='AdvancePart')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
          call this%timefile%add_column(this%time%n,'Timestep number')
@@ -1484,6 +1506,7 @@ contains
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
          call this%timefile%add_column(this%tdtrans%time,trim(this%tdtrans%name))
          call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
+         call this%timefile%add_column(this%tlpadv%time,trim(this%tlpadv%name))
       end block create_timing
 
       
@@ -1624,6 +1647,7 @@ contains
       call this%tpres%reset()
       call this%tdtrans%reset()
       call this%tltrans%reset()
+      call this%tlpadv%reset()
       call this%tstep%start()
       
       ! Increment time
@@ -1635,7 +1659,9 @@ contains
       if (this%use_drop_transfer.or.this%use_lig_transfer) then
          this%resU=this%fs%rho_g
          this%resV=this%fs%visc_g
+         call this%tlpadv%start()
          call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
+         call this%tlpadv%stop()
       end if
       
       ! Remember old VOF
