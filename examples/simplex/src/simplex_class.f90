@@ -460,7 +460,8 @@ contains
       real(WP) :: Oh,Trp,Lrp,Tsr,SR_tmp
       real(WP), dimension(1:3) :: tangent
       real(WP), dimension(:,:,:,:), allocatable :: SR
-      integer  :: nmain,nsat
+      integer :: nmain,nsat
+      integer :: nmax
       real(WP), dimension(:,:,:), allocatable :: thickness
       integer,  dimension(:,:,:), allocatable :: struct_type
       ! Moment of inertia calculation using lapack
@@ -626,6 +627,9 @@ contains
       ! Find the maximum tangential strain rate of each ligament
       call MPI_ALLREDUCE(MPI_IN_PLACE,lSR,1*this%ccl_lig%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
 
+      ! Find the liquid core
+      nmax=maxloc(lvol,dim=1)
+
       ! Zero out monitoring variables
       this%vof_tf_lig=0.0_WP
       this%np_lig=0
@@ -633,6 +637,8 @@ contains
       np_start=this%lp%np_
       ! Perform transfer
       do n=1,this%ccl_lig%nstruct
+         ! Cycle if struct is core
+         if (n.eq.nmax) cycle
          ! Assume a cylinder ligament
          Lrim=llen(n) !< this is 0 sometimes
          Vrim=lvol(n)
