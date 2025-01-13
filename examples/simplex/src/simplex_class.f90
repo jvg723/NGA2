@@ -653,7 +653,7 @@ contains
             cycle
          end if
 
-         if (llen(n).le.0.0_WP) cycle
+         ! if (llen(n).le.0.0_WP) cycle
       
          ! if (this%vf%cfg%amRoot) print *, "This is the min_thickness", lthc(n), ",lig percentage:", lper(n),"max length:",llen(n),&
          ! & "how many cells",lnum(n), "vol:",lvol(n),"nmain", nmain, "Trp:", Trp, "Tsr:", Tsr, "Trp/Tsr", Trp/Tsr,"and id:", n
@@ -679,7 +679,11 @@ contains
                else
                   this%lp%p(this%lp%np_)%d=diam                                                                                    
                end if
-               this%lp%p(this%lp%np_)%pos =lpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*lmoi(n,:,1)
+               if (llen(n).eq.0.0_WP) then
+                  this%lp%p(this%lp%np_)%pos=lpos(n,:)
+               else
+                  this%lp%p(this%lp%np_)%pos=lpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*lmoi(n,:,1)
+               end if
                ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lpos(n,1)=",lpos(n,1), " lpos(n,2)=",lpos(n,2), " lpos(n,3)=",lpos(n,3)
                ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrp=",Lrp
                ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " lmoi(n,1,1)=",lmoi(n,1,1), " lmoi(n,2,1)=",lmoi(n,2,1), " lmoi(n,3,1)=",lmoi(n,3,1)
