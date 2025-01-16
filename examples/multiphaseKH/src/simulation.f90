@@ -254,6 +254,32 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
       end block create_and_initialize_flow_solver
+
+
+      ! Create surfmesh object for interface polygon output
+      create_smesh: block
+         use irl_fortran_interface
+         integer :: i,j,k,nplane,np
+         ! Include an extra variable for number of planes
+         smesh=surfmesh(nvar=1,name='plic')
+         smesh%varname(1)='nplane'
+         ! Transfer polygons to smesh
+         call vf%update_surfmesh(smesh)
+         ! Initalize variables to 0
+         smesh%var(1,:)=0.0_WP
+         np=0
+         do k=vf%cfg%kmin_,vf%cfg%kmax_
+            do j=vf%cfg%jmin_,vf%cfg%jmax_
+               do i=vf%cfg%imin_,vf%cfg%imax_
+                  do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                     end if
+                  end do
+               end do
+            end do
+         end do
+      end block create_smesh
       
       
       ! Add Ensight output
@@ -267,6 +293,7 @@ contains
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
+         call ens_out%add_surface('plic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -285,6 +312,8 @@ contains
          call mfile%add_column(time%t,'Time')
          call mfile%add_column(time%dt,'Timestep size')
          call mfile%add_column(time%cfl,'Maximum CFL')
+         call mfile%add_column(amp,'Wave amplitude')
+         call mfile%add_column(grate,'Growth rate')
          call mfile%add_column(fs%Umax,'Umax')
          call mfile%add_column(fs%Vmax,'Vmax')
          call mfile%add_column(fs%Wmax,'Wmax')
@@ -403,7 +432,31 @@ contains
          call fs%get_div()
          
          ! Output to ensight
-         if (ens_evt%occurs()) call ens_out%write_data(time%t)
+         if (ens_evt%occurs()) then
+            ! Create surfmesh object for interface polygon output
+            create_smesh: block
+               use irl_fortran_interface
+               integer :: i,j,k,nplane,np
+               ! Transfer polygons to smesh
+               call vf%update_surfmesh(smesh)
+               ! Initalize variables to 0
+               smesh%var(1,:)=0.0_WP
+               np=0
+               do k=vf%cfg%kmin_,vf%cfg%kmax_
+                  do j=vf%cfg%jmin_,vf%cfg%jmax_
+                     do i=vf%cfg%imin_,vf%cfg%imax_
+                        do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                           if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                              np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                           end if
+                        end do
+                     end do
+                  end do
+               end do
+            end block create_smesh
+            ! Perform ensight output
+            call ens_out%write_data(time%t)
+         end if
          
          ! Perform and output monitoring
          call fs%get_max()
