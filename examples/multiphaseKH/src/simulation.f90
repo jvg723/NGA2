@@ -41,6 +41,7 @@ module simulation
    real(WP), dimension(:), allocatable :: wnumbX,wshiftX,wampX,wnumbZ,wshiftZ,wampZ
    real(WP) :: amp0,amp,grate
    reaL(WP), dimension(:), allocatable :: all_time,all_amp
+   real(WP) :: lc,tau
    
 contains
    
@@ -277,6 +278,7 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
+         call postproc_data()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -406,6 +408,7 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
+         call postproc_data()
          call mfile%write()
          call cflfile%write()
          
