@@ -21,7 +21,7 @@ Thickness ratio :      1.0     !< This is delta_l/delta_g
 # Time integration
 Max timestep size : 1e-1
 Max cfl number :    0.9
-Max time :          2
+Max time :          200
 
 # Pressure solver
 Pressure tolerance : 1e-6
@@ -29,3 +29,4 @@ Pressure iteration : 100
 
 # Ensight output
 Ensight output period : 1
+Postproc output period : 10

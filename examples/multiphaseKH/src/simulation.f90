@@ -1,7 +1,7 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
    use precision,            only: WP
-   use geometry,             only: cfg
+   use geometry,             only: cfg,Lyl
    use hypre_str_class,      only: hypre_str
    use ddadi_class,          only: ddadi
    use tpns_class,           only: tpns
@@ -44,6 +44,9 @@ module simulation
    real(WP) :: amp0,amp,grate
    reaL(WP), dimension(:), allocatable :: all_time,all_amp
    real(WP) :: lc,tau
+
+   !> Post-processing
+   type(event) :: ppevt
    
 contains
    
@@ -62,50 +65,95 @@ contains
          end do
       end do
    end function levelset_wavy
-   
-   
-   !> Specialized subroutine that outputs wave amplitude information
+
+   !> Specialized subroutine that outputs the vertical liquid distribution
    subroutine postproc_data()
-     use irl_fortran_interface
-     use mathtools, only: Pi
-     use string,    only: str_medium
-     use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
-     use parallel,  only: MPI_REAL_WP
-     implicit none
-     integer :: ierr,i,j,k,my_size
-     real(WP) :: my_height
-     real(WP), dimension(:), allocatable :: temp
-     ! Calculate new amplitude
-     grate=amp
-     my_height=0.0_WP
-     do k=vf%cfg%kmin_,vf%cfg%kmax_
-        do i=vf%cfg%imin_,vf%cfg%imax_
-           ! Find closest vertical column to center
-           if (vf%cfg%x(i).le.0.5_WP*vf%cfg%xL.and.vf%cfg%x(i+1).gt.0.5_WP*vf%cfg%xL.and.vf%cfg%z(k).le.0.0_WP.and.vf%cfg%z(k+1).gt.0.0_WP) then
-              ! Integrate height
-              do j=vf%cfg%jmin_,vf%cfg%jmax_
-                 my_height=my_height+vf%VF(i,j,k)*vf%cfg%dy(j)
-              end do
-           end if
-        end do
-     end do
-     call MPI_ALLREDUCE(my_height,amp,1,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-     amp=amp-0.5_WP*vf%cfg%yL
-     ! Estimate growth rate
-     if (time%t.gt.0.0_WP) then
-        grate=(amp-grate)/time%dt
-     else
-        grate=0.0_WP
-     end if
-     ! Store time and amplitude series
-     if (.not.allocated(all_time)) then
-        my_size=0
-     else
-        my_size=size(all_time,dim=1)
-     end if
-     allocate(temp(my_size+1)); temp(1:my_size)=all_time; temp(my_size+1)=time%t; call MOVE_ALLOC(temp,all_time)
-     allocate(temp(my_size+1)); temp(1:my_size)=all_amp ; temp(my_size+1)=amp   ; call MOVE_ALLOC(temp,all_amp )
+      ! use mathtools, only: Pi
+      use string,    only: str_medium
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
+      use parallel,  only: MPI_REAL_WP
+      implicit none
+      integer :: iunit,ierr,i,j,k
+      real(WP), dimension(:), allocatable :: my_height,height
+      character(len=str_medium) :: filename,timestamp
+      ! Allocate storage
+      allocate(my_height(vf%cfg%imin:vf%cfg%imax)); my_height=0.0_WP
+      allocate(   height(vf%cfg%imin:vf%cfg%imax)); height=0.0_WP
+      ! Initialize local data to zero
+      my_height=0.0_WP
+      ! Integrate all data over x and z
+      do k=vf%cfg%kmin_,vf%cfg%kmax_
+         do i=vf%cfg%imin_,vf%cfg%imax_
+            ! Integrate height
+            do j=vf%cfg%jmin_,vf%cfg%jmax_
+               my_height(i)=my_height(i)+vf%VF(i,j,k)*vf%cfg%dy(j)
+            end do
+         end do
+      end do
+      ! All-reduce the data
+      call MPI_ALLREDUCE(my_height,height,vf%cfg%nx,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      height=height-Lyl
+      ! If root, print it out
+      if (vf%cfg%amRoot) then
+         ! call execute_command_line('mkdir -p stats')
+         ! filename='profile_'
+         filename='./stats/profile_'
+         write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         ! open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12)') 'x_location','height'
+         do i=vf%cfg%imin,vf%cfg%imax
+            write(iunit,'(es12.5,3x,es12.5)') vf%cfg%xm(i),height(i)
+         end do
+         close(iunit)
+      end if
+      ! Deallocate work arrays
+      deallocate(my_height,height)
    end subroutine postproc_data
+   
+   
+   ! !> Specialized subroutine that outputs wave amplitude information
+   ! subroutine postproc_data()
+   !   use irl_fortran_interface
+   !   use mathtools, only: Pi
+   !   use string,    only: str_medium
+   !   use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
+   !   use parallel,  only: MPI_REAL_WP
+   !   implicit none
+   !   integer :: ierr,i,j,k,my_size
+   !   real(WP) :: my_height
+   !   real(WP), dimension(:), allocatable :: temp
+   !   ! Calculate new amplitude
+   !   grate=amp
+   !   my_height=0.0_WP
+   !   do k=vf%cfg%kmin_,vf%cfg%kmax_
+   !      do i=vf%cfg%imin_,vf%cfg%imax_
+   !         ! Find closest vertical column to center
+   !         if (vf%cfg%x(i).le.0.5_WP*vf%cfg%xL.and.vf%cfg%x(i+1).gt.0.5_WP*vf%cfg%xL.and.vf%cfg%z(k).le.0.0_WP.and.vf%cfg%z(k+1).gt.0.0_WP) then
+   !            ! Integrate height
+   !            do j=vf%cfg%jmin_,vf%cfg%jmax_
+   !               my_height=my_height+vf%VF(i,j,k)*vf%cfg%dy(j)
+   !            end do
+   !         end if
+   !      end do
+   !   end do
+   !   call MPI_ALLREDUCE(my_height,amp,1,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+   !   amp=amp-0.5_WP*vf%cfg%yL
+   !   ! Estimate growth rate
+   !   if (time%t.gt.0.0_WP) then
+   !      grate=(amp-grate)/time%dt
+   !   else
+   !      grate=0.0_WP
+   !   end if
+   !   ! Store time and amplitude series
+   !   if (.not.allocated(all_time)) then
+   !      my_size=0
+   !   else
+   !      my_size=size(all_time,dim=1)
+   !   end if
+   !   allocate(temp(my_size+1)); temp(1:my_size)=all_time; temp(my_size+1)=time%t; call MOVE_ALLOC(temp,all_time)
+   !   allocate(temp(my_size+1)); temp(1:my_size)=all_amp ; temp(my_size+1)=amp   ; call MOVE_ALLOC(temp,all_amp )
+   ! end subroutine postproc_data
    
    
    !> Initialization of problem solver
@@ -308,7 +356,7 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
-         call postproc_data()
+         ! call postproc_data()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -341,6 +389,17 @@ contains
          call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
          call cflfile%write()
       end block create_monitor
+
+      ! Create specialized post-processing
+      create_postproc: block
+         ! Create event for data postprocessing
+         ppevt=event(time=time,name='Postproc output')
+         call param_read('Postproc output period',ppevt%tper)
+         ! Create directory to write to
+         if (cfg%amRoot) call execute_command_line('mkdir -p stats')
+         ! Perform the output
+         if (ppevt%occurs()) call postproc_data()
+      end block create_postproc
       
       
    end subroutine simulation_init
@@ -464,130 +523,133 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
-         call postproc_data()
+         ! call postproc_data()
          call mfile%write()
          call cflfile%write()
+
+         ! Specialized post-processing
+         if (ppevt%occurs()) call postproc_data()
          
       end do
       
-      ! Post-process growth rate using ODRPACK
-      odr_fit: block
-         use, intrinsic :: iso_fortran_env, only: output_unit
-         use mathtools, only: twoPi
-         use messager,  only: log
-         use string,    only: str_long
-         character(len=str_long) :: message
-         integer :: i
-         ! ODRPACK variables - explicit model based on exponential of time
-         integer                       :: N                      !> Number of observations (number of polygons)
-         integer , parameter           :: M=1                    !> Number of elements per explanatory variables (1 time)
-         integer , parameter           :: NP=2                   !> Number of parameters in our model (2 for a normalized exponential in time with time shift)
-         integer , parameter           :: NQ=1                   !> Number of response per observation (only 1, the normalized amplitude)
-         real(WP), dimension(NP)       :: BETA=0.0_WP            !> Array of model parameter values (the growth rate and time shift)
-         real(WP), dimension(:,:)  , allocatable :: YY           !> Value of response variable (of size LDYYxNQ)
-         integer                       :: LDYY                   !> Leading dimension of YY (equals N since an explicit model is used)
-         real(WP), dimension(:,:)  , allocatable :: XX           !> Value of explanatory variable (of size LDXXxM)
-         integer                       :: LDXX                   !> Leading dimension of XX (equals N)
-         real(WP), dimension(:,:,:), allocatable :: WE           !> Weighting of response data (of size LDWExLD2WExNQ)
-         integer                       :: LDWE                   !> Leading dimension of WE (equals N since an explicit model is used)
-         integer                       :: LD2WE                  !> Second dimension of WE (equals NQ)
-         real(WP), dimension(:,:,:), allocatable :: WD           !> Weighting of explanatory data (of size LDWDxLD2WDxM)
-         integer                       :: LDWD                   !> Leading dimension of WD (equals N)
-         integer                       :: LD2WD                  !> Second dimension of WD (equals 1)
-         integer , dimension(NP)       :: IFIXB=-1               !> Whether any model parameters has to be kept constant
-         integer , parameter           :: LDIFX=1                !> Leading dimension of IFIXX (equals 1)
-         integer , dimension(LDIFX,M)  :: IFIXX=-1               !> Whether any explanatory variable data is to be treated as "fixed"
-         integer                       :: JOB=00030              !> 5-digit parameter flag that controls execution (this invokes analytical Jacobian with explicit model)
-         integer                       :: NDIGIT=1               !> Number of reliable digits in our model - let ODRPACK figure it out on its own
-         real(WP)                      :: TAUFAC=0.0_WP          !> To control size of first step (ignored here)
-         real(WP)                      :: SSTOL=-1.0_WP          !> Relative cvg of sum of squares: this sets it to 1e-8             ********* Need to change to sth else
-         real(WP)                      :: PARTOL=-1.0_WP         !> Relative cvg for model parameters: this sets it to 1e-11         ********* Need to change to sth else
-         integer                       :: MAXIT=-1               !> Maximum number of iterations                                     ********* Need to change to sth else
-         integer                       :: IPRINT=0               !> 4-digit parameter flag for controlling printing (default is -1)
-         integer                       :: LUNERR=10              !> Logical unit for error reporting (6 by default)
-         integer                       :: LUNRPT=10              !> Logical unit for reporting
-         real(WP), dimension(NP)       :: STPB=0.0_WP            !> Relative step sizes for Jacobian for model parameters (here, default)
-         integer , parameter           :: LDSTPD=1               !> Leading dimension of STPD, either 1 or N (here, 1)
-         real(WP), dimension(LDSTPD,1) :: STPD=0.0_WP            !> Relative step sizes for Jacobian for input errors (here, default)
-         real(WP), dimension(NP)       :: SCLB=1.0_WP            !> Scaling for the model parameters (here, not default but set to 1.0 to avoid rescaling 0 coefficients)
-         real(WP), dimension(:,:)  , allocatable :: SCLD         !> Scaling for the input errors (here, not default but set to 1.0 to avoid rescaling 0 coefficients)
-         integer                       :: LDSCLD                 !> Leading dimension of SCLD, either 1 or N (here, N)
-         integer                       :: LWORK                  !> Size of WORK array
-         real(WP), dimension(:)    , allocatable :: WORK         !> WORK array
-         integer , parameter           :: LiWORK=20+NP+NQ*(NP+M) !> Size of IWORK array
-         integer , dimension(LiWORK)   :: iWORK                  !> iWORK array
-         integer                       :: INFO                   !> Why the calculations stopped
-         ! Copy over data and sizes
-         N=size(all_time,dim=1)
-         LDYY=N; allocate(YY(LDYY,NQ)); YY(:,1)=all_amp/amp0
-         LDXX=N; allocate(XX(LDXX,M )); XX(:,1)=all_time
-         LDWE=N; LD2WE=NQ; allocate(WE(LDWE,LD2WE,NQ)); WE=1.0_WP
-         LDWD=N; LD2WD=1 ; allocate(WD(LDWD,LD2WD,M )); WD=1.0_WP
-         LDSCLD=N; allocate(SCLD(LDSCLD,M)); SCLD=1.0_WP
-         LWORK=18+11*NP+NP**2+M+M**2+4*N*NQ+6*N*M+2*N*NQ*NP+2*N*NQ*M+NQ**2+5*NQ+NQ*(NP+M)+(LDWE*LD2WE)*NQ; allocate(WORK(LWORK))
-         ! Call ODRPACK to find time shift
-         call DODRC(exponential_model,N,M,NP,NQ,BETA,YY,LDYY,XX,LDXX,WE,LDWE,LD2WE,WD,LDWD,LD2WD,IFIXB,IFIXX,LDIFX,JOB,NDIGIT,TAUFAC,&
-         &          SSTOL,PARTOL,MAXIT,IPRINT,LUNERR,LUNRPT,STPB,STPD,LDSTPD,SCLB,SCLD,LDSCLD,WORK,LWORK,iWORK,LiWORK,INFO)
-         ! Adjust weights to eliminate the early non-exponential part
-         do i=1,size(all_time,dim=1)
-            if (all_time(i).le.2.0_WP*BETA(2)) then
-               WE(i,1,1)=0.0_WP
-               WD(i,1,1)=0.0_WP
-            end if
-         end do
-         ! Call ODRPACK again to find growth rate
-         call DODRC(exponential_model,N,M,NP,NQ,BETA,YY,LDYY,XX,LDXX,WE,LDWE,LD2WE,WD,LDWD,LD2WD,IFIXB,IFIXX,LDIFX,JOB,NDIGIT,TAUFAC,&
-         &          SSTOL,PARTOL,MAXIT,IPRINT,LUNERR,LUNRPT,STPB,STPD,LDSTPD,SCLB,SCLD,LDSCLD,WORK,LWORK,iWORK,LiWORK,INFO)
-         ! Get back growth rate
-         if (fs%cfg%amRoot) then
-            write(output_unit,'(es12.5,x,es12.5,x,es12.5,x,es12.5)') lc,tau,twoPi/fs%cfg%xL*lc,BETA(1)*tau
-            write(message    ,'("Reference time scale   = ",es12.5)') tau               ; call log(message)
-            write(message    ,'("Cut-off length scale   = ",es12.5)') lc                ; call log(message)
-            write(message    ,'("Normalized growth rate = ",es12.5)') BETA(1)*tau       ; call log(message)
-            write(message    ,'("Normalized wave number = ",es12.5)') twoPi/fs%cfg%xL*lc; call log(message)
-         end if
-      end block odr_fit
+      ! ! Post-process growth rate using ODRPACK
+      ! odr_fit: block
+      !    use, intrinsic :: iso_fortran_env, only: output_unit
+      !    use mathtools, only: twoPi
+      !    use messager,  only: log
+      !    use string,    only: str_long
+      !    character(len=str_long) :: message
+      !    integer :: i
+      !    ! ODRPACK variables - explicit model based on exponential of time
+      !    integer                       :: N                      !> Number of observations (number of polygons)
+      !    integer , parameter           :: M=1                    !> Number of elements per explanatory variables (1 time)
+      !    integer , parameter           :: NP=2                   !> Number of parameters in our model (2 for a normalized exponential in time with time shift)
+      !    integer , parameter           :: NQ=1                   !> Number of response per observation (only 1, the normalized amplitude)
+      !    real(WP), dimension(NP)       :: BETA=0.0_WP            !> Array of model parameter values (the growth rate and time shift)
+      !    real(WP), dimension(:,:)  , allocatable :: YY           !> Value of response variable (of size LDYYxNQ)
+      !    integer                       :: LDYY                   !> Leading dimension of YY (equals N since an explicit model is used)
+      !    real(WP), dimension(:,:)  , allocatable :: XX           !> Value of explanatory variable (of size LDXXxM)
+      !    integer                       :: LDXX                   !> Leading dimension of XX (equals N)
+      !    real(WP), dimension(:,:,:), allocatable :: WE           !> Weighting of response data (of size LDWExLD2WExNQ)
+      !    integer                       :: LDWE                   !> Leading dimension of WE (equals N since an explicit model is used)
+      !    integer                       :: LD2WE                  !> Second dimension of WE (equals NQ)
+      !    real(WP), dimension(:,:,:), allocatable :: WD           !> Weighting of explanatory data (of size LDWDxLD2WDxM)
+      !    integer                       :: LDWD                   !> Leading dimension of WD (equals N)
+      !    integer                       :: LD2WD                  !> Second dimension of WD (equals 1)
+      !    integer , dimension(NP)       :: IFIXB=-1               !> Whether any model parameters has to be kept constant
+      !    integer , parameter           :: LDIFX=1                !> Leading dimension of IFIXX (equals 1)
+      !    integer , dimension(LDIFX,M)  :: IFIXX=-1               !> Whether any explanatory variable data is to be treated as "fixed"
+      !    integer                       :: JOB=00030              !> 5-digit parameter flag that controls execution (this invokes analytical Jacobian with explicit model)
+      !    integer                       :: NDIGIT=1               !> Number of reliable digits in our model - let ODRPACK figure it out on its own
+      !    real(WP)                      :: TAUFAC=0.0_WP          !> To control size of first step (ignored here)
+      !    real(WP)                      :: SSTOL=-1.0_WP          !> Relative cvg of sum of squares: this sets it to 1e-8             ********* Need to change to sth else
+      !    real(WP)                      :: PARTOL=-1.0_WP         !> Relative cvg for model parameters: this sets it to 1e-11         ********* Need to change to sth else
+      !    integer                       :: MAXIT=-1               !> Maximum number of iterations                                     ********* Need to change to sth else
+      !    integer                       :: IPRINT=0               !> 4-digit parameter flag for controlling printing (default is -1)
+      !    integer                       :: LUNERR=10              !> Logical unit for error reporting (6 by default)
+      !    integer                       :: LUNRPT=10              !> Logical unit for reporting
+      !    real(WP), dimension(NP)       :: STPB=0.0_WP            !> Relative step sizes for Jacobian for model parameters (here, default)
+      !    integer , parameter           :: LDSTPD=1               !> Leading dimension of STPD, either 1 or N (here, 1)
+      !    real(WP), dimension(LDSTPD,1) :: STPD=0.0_WP            !> Relative step sizes for Jacobian for input errors (here, default)
+      !    real(WP), dimension(NP)       :: SCLB=1.0_WP            !> Scaling for the model parameters (here, not default but set to 1.0 to avoid rescaling 0 coefficients)
+      !    real(WP), dimension(:,:)  , allocatable :: SCLD         !> Scaling for the input errors (here, not default but set to 1.0 to avoid rescaling 0 coefficients)
+      !    integer                       :: LDSCLD                 !> Leading dimension of SCLD, either 1 or N (here, N)
+      !    integer                       :: LWORK                  !> Size of WORK array
+      !    real(WP), dimension(:)    , allocatable :: WORK         !> WORK array
+      !    integer , parameter           :: LiWORK=20+NP+NQ*(NP+M) !> Size of IWORK array
+      !    integer , dimension(LiWORK)   :: iWORK                  !> iWORK array
+      !    integer                       :: INFO                   !> Why the calculations stopped
+      !    ! Copy over data and sizes
+      !    N=size(all_time,dim=1)
+      !    LDYY=N; allocate(YY(LDYY,NQ)); YY(:,1)=all_amp/amp0
+      !    LDXX=N; allocate(XX(LDXX,M )); XX(:,1)=all_time
+      !    LDWE=N; LD2WE=NQ; allocate(WE(LDWE,LD2WE,NQ)); WE=1.0_WP
+      !    LDWD=N; LD2WD=1 ; allocate(WD(LDWD,LD2WD,M )); WD=1.0_WP
+      !    LDSCLD=N; allocate(SCLD(LDSCLD,M)); SCLD=1.0_WP
+      !    LWORK=18+11*NP+NP**2+M+M**2+4*N*NQ+6*N*M+2*N*NQ*NP+2*N*NQ*M+NQ**2+5*NQ+NQ*(NP+M)+(LDWE*LD2WE)*NQ; allocate(WORK(LWORK))
+      !    ! Call ODRPACK to find time shift
+      !    call DODRC(exponential_model,N,M,NP,NQ,BETA,YY,LDYY,XX,LDXX,WE,LDWE,LD2WE,WD,LDWD,LD2WD,IFIXB,IFIXX,LDIFX,JOB,NDIGIT,TAUFAC,&
+      !    &          SSTOL,PARTOL,MAXIT,IPRINT,LUNERR,LUNRPT,STPB,STPD,LDSTPD,SCLB,SCLD,LDSCLD,WORK,LWORK,iWORK,LiWORK,INFO)
+      !    ! Adjust weights to eliminate the early non-exponential part
+      !    do i=1,size(all_time,dim=1)
+      !       if (all_time(i).le.2.0_WP*BETA(2)) then
+      !          WE(i,1,1)=0.0_WP
+      !          WD(i,1,1)=0.0_WP
+      !       end if
+      !    end do
+      !    ! Call ODRPACK again to find growth rate
+      !    call DODRC(exponential_model,N,M,NP,NQ,BETA,YY,LDYY,XX,LDXX,WE,LDWE,LD2WE,WD,LDWD,LD2WD,IFIXB,IFIXX,LDIFX,JOB,NDIGIT,TAUFAC,&
+      !    &          SSTOL,PARTOL,MAXIT,IPRINT,LUNERR,LUNRPT,STPB,STPD,LDSTPD,SCLB,SCLD,LDSCLD,WORK,LWORK,iWORK,LiWORK,INFO)
+      !    ! Get back growth rate
+      !    if (fs%cfg%amRoot) then
+      !       write(output_unit,'(es12.5,x,es12.5,x,es12.5,x,es12.5)') lc,tau,twoPi/fs%cfg%xL*lc,BETA(1)*tau
+      !       write(message    ,'("Reference time scale   = ",es12.5)') tau               ; call log(message)
+      !       write(message    ,'("Cut-off length scale   = ",es12.5)') lc                ; call log(message)
+      !       write(message    ,'("Normalized growth rate = ",es12.5)') BETA(1)*tau       ; call log(message)
+      !       write(message    ,'("Normalized wave number = ",es12.5)') twoPi/fs%cfg%xL*lc; call log(message)
+      !    end if
+      ! end block odr_fit
       
       
    end subroutine simulation_run
    
    
-   !> Definition of our exponential function of time model
-   subroutine exponential_model(N,M,NP,NQ,LDN,LDM,LDNP,BETA,XPLUSD,IFIXB,IFIXX,LDFIX,IDEVAL,F,FJACB,FJACD,ISTOP)
-      implicit none
-      ! Input parameters
-      integer , intent(in) :: IDEVAL,LDFIX,LDM,LDN,LDNP,M,N,NP,NQ
-      integer , dimension(NP)     , intent(in) :: IFIXB
-      integer , dimension(LDFIX,M), intent(in) :: IFIXX
-      real(WP), dimension(NP)     , intent(in) :: BETA
-      real(WP), dimension(LDN,M)  , intent(in) :: XPLUSD
-      ! Output parameters
-      real(WP), dimension(LDN,NQ) :: F
-      real(WP), dimension(LDN,LDNP,NQ) :: FJACB
-      real(WP), dimension(LDN,LDM ,NQ) :: FJACD
-      integer :: ISTOP,i
-      ! Check stopping condition - all values are acceptable
-      ISTOP=0
-      ! Compute model value
-      if (mod(IDEVAL,10).ge.1) then
-         do i=1,N
-            F(i,1)=exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
-         end do
-      end if
-      ! Compute model derivatives with respect to BETA
-      if (mod(IDEVAL/10,10).GE.1) then
-         do i=1,N
-            FJACB(i,1,1)=(XPLUSD(i,1)-BETA(2))*exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
-            FJACB(i,2,1)=            -BETA(1) *exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
-         end do
-      end if
-      ! Compute model derivatives with respect to input
-      if (mod(IDEVAL/100,10).GE.1) then
-         do i=1,N
-            FJACD(i,1,1)=BETA(1)*exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
-         end do
-      end if
-   end subroutine exponential_model
+   ! !> Definition of our exponential function of time model
+   ! subroutine exponential_model(N,M,NP,NQ,LDN,LDM,LDNP,BETA,XPLUSD,IFIXB,IFIXX,LDFIX,IDEVAL,F,FJACB,FJACD,ISTOP)
+   !    implicit none
+   !    ! Input parameters
+   !    integer , intent(in) :: IDEVAL,LDFIX,LDM,LDN,LDNP,M,N,NP,NQ
+   !    integer , dimension(NP)     , intent(in) :: IFIXB
+   !    integer , dimension(LDFIX,M), intent(in) :: IFIXX
+   !    real(WP), dimension(NP)     , intent(in) :: BETA
+   !    real(WP), dimension(LDN,M)  , intent(in) :: XPLUSD
+   !    ! Output parameters
+   !    real(WP), dimension(LDN,NQ) :: F
+   !    real(WP), dimension(LDN,LDNP,NQ) :: FJACB
+   !    real(WP), dimension(LDN,LDM ,NQ) :: FJACD
+   !    integer :: ISTOP,i
+   !    ! Check stopping condition - all values are acceptable
+   !    ISTOP=0
+   !    ! Compute model value
+   !    if (mod(IDEVAL,10).ge.1) then
+   !       do i=1,N
+   !          F(i,1)=exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !       end do
+   !    end if
+   !    ! Compute model derivatives with respect to BETA
+   !    if (mod(IDEVAL/10,10).GE.1) then
+   !       do i=1,N
+   !          FJACB(i,1,1)=(XPLUSD(i,1)-BETA(2))*exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !          FJACB(i,2,1)=            -BETA(1) *exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !       end do
+   !    end if
+   !    ! Compute model derivatives with respect to input
+   !    if (mod(IDEVAL/100,10).GE.1) then
+   !       do i=1,N
+   !          FJACD(i,1,1)=BETA(1)*exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !       end do
+   !    end if
+   ! end subroutine exponential_model
    
    
    !> Finalize the NGA2 simulation
