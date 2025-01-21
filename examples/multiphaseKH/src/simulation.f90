@@ -72,6 +72,7 @@ contains
       use string,    only: str_medium
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
       use parallel,  only: MPI_REAL_WP
+      use filesys,   only: makedir,isdir
       implicit none
       integer :: iunit,ierr,i,j,k
       real(WP), dimension(:), allocatable :: my_height,height
@@ -94,12 +95,9 @@ contains
       call MPI_ALLREDUCE(my_height,height,vf%cfg%nx,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); height=height/real(vf%cfg%nx*vf%cfg%nz,WP)
       ! If root, print it out
       if (vf%cfg%amRoot) then
-         ! call execute_command_line('mkdir -p stats')
-         ! filename='profile_'
-         filename='./stats/profile_'
-         write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file=trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         ! open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         if (.not.isdir('stats')) call makedir('stats')
+         filename='profile_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(a12,3x,a12,3x,a12)') 'x_location','height'
          do i=vf%cfg%imin,vf%cfg%imax
             write(iunit,'(es12.5,3x,es12.5)') vf%cfg%xm(i),height(i)
@@ -394,8 +392,6 @@ contains
          ! Create event for data postprocessing
          ppevt=event(time=time,name='Postproc output')
          call param_read('Postproc output period',ppevt%tper)
-         ! Create directory to write to
-         if (cfg%amRoot) call execute_command_line('mkdir -p stats')
          ! Perform the output
          if (ppevt%occurs()) call postproc_data()
       end block create_postproc
