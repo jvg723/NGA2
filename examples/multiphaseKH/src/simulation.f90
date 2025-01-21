@@ -36,7 +36,9 @@ module simulation
    real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
    
    !> Problem definition
-   real(WP) :: Reg,Weg,r_visc,r_rho,r_vel,delta_l
+   real(WP) :: Reg,Weg,r_visc,r_rho
+   real(WP) :: r_vel, U_l, U_g
+   real(WP) :: r_delta, delta_l, delta_g
    integer  :: nwaveX,nwaveZ
    real(WP), dimension(:), allocatable :: wnumbX,wshiftX,wampX,wnumbZ,wshiftZ,wampZ
    real(WP) :: amp0,amp,grate
@@ -226,7 +228,8 @@ contains
          call param_read('Viscosity ratio',r_visc); fs%visc_l=r_visc*fs%visc_g
          call param_read('Density ratio',r_rho); fs%rho_g=1.0_WP; fs%rho_l=r_rho*fs%rho_g
          call param_read('Gas Weber number',Weg); fs%sigma=1.0_WP/(Weg+epsilon(Weg))
-         call param_read('Velocity ratio',r_vel); delta_l=r_visc*r_vel
+         call param_read('Velocity ratio',r_vel); U_g=1.0_WP; U_l=r_vel*U_g
+         call param_read('Thickness ratio',r_delta); delta_g=1.0_WP; delta_l=r_delta*delta_g
          ! Configure pressure solver
 			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          call param_read('Pressure iteration',ps%maxit)
@@ -242,10 +245,10 @@ contains
                do i=fs%cfg%imino_,fs%cfg%imaxo_
                   if (fs%cfg%ym(j).le.0.0_WP) then
                      ! Use the liquid profile
-                     fs%U(i,j,k)=r_vel*erf(fs%cfg%ym(j)/delta_l)
+                     fs%U(i,j,k)=U_l*erf(fs%cfg%ym(j)/delta_l)
                   else
                      ! Use the gas profile
-                     fs%U(i,j,k)=erf(fs%cfg%ym(j))
+                     fs%U(i,j,k)=U_g*erf(fs%cfg%ym(j)/delta_g)
                   end if
                end do
             end do

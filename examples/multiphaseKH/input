@@ -16,6 +16,7 @@ Gas Weber number :     10
 Viscosity ratio :      10      !< This is mu_l/mu_g
 Density ratio :        40      !< This is rho_l/rho_g
 Velocity ratio :       0.1     !< This is U_l/U_g
+Thickness ratio :      1.0     !< This is delta_l/delta_g
 
 # Time integration
 Max timestep size : 1e-1
