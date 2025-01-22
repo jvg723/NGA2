@@ -92,7 +92,8 @@ contains
          end do
       end do
       ! All-reduce the data
-      call MPI_ALLREDUCE(my_height,height,vf%cfg%nx,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); height=height/real(vf%cfg%nx*vf%cfg%nz,WP)
+      call MPI_ALLREDUCE(my_height,height,vf%cfg%nx,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); height=height/real(vf%cfg%nz,WP)
+      height=height-Lyl
       ! If root, print it out
       if (vf%cfg%amRoot) then
          if (.not.isdir('stats')) call makedir('stats')
