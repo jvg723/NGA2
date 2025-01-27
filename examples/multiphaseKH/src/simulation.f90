@@ -66,8 +66,8 @@ contains
       end do
    end function levelset_wavy
 
-   !> Specialized subroutine that outputs the vertical liquid distribution
-   subroutine postproc_data()
+   !> Specialized subroutine that outputs the height of the interface
+   subroutine postproc_data_height()
       ! use mathtools, only: Pi
       use string,    only: str_medium
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
@@ -107,51 +107,7 @@ contains
       end if
       ! Deallocate work arrays
       deallocate(my_height,height)
-   end subroutine postproc_data
-   
-   
-   ! !> Specialized subroutine that outputs wave amplitude information
-   ! subroutine postproc_data()
-   !   use irl_fortran_interface
-   !   use mathtools, only: Pi
-   !   use string,    only: str_medium
-   !   use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
-   !   use parallel,  only: MPI_REAL_WP
-   !   implicit none
-   !   integer :: ierr,i,j,k,my_size
-   !   real(WP) :: my_height
-   !   real(WP), dimension(:), allocatable :: temp
-   !   ! Calculate new amplitude
-   !   grate=amp
-   !   my_height=0.0_WP
-   !   do k=vf%cfg%kmin_,vf%cfg%kmax_
-   !      do i=vf%cfg%imin_,vf%cfg%imax_
-   !         ! Find closest vertical column to center
-   !         if (vf%cfg%x(i).le.0.5_WP*vf%cfg%xL.and.vf%cfg%x(i+1).gt.0.5_WP*vf%cfg%xL.and.vf%cfg%z(k).le.0.0_WP.and.vf%cfg%z(k+1).gt.0.0_WP) then
-   !            ! Integrate height
-   !            do j=vf%cfg%jmin_,vf%cfg%jmax_
-   !               my_height=my_height+vf%VF(i,j,k)*vf%cfg%dy(j)
-   !            end do
-   !         end if
-   !      end do
-   !   end do
-   !   call MPI_ALLREDUCE(my_height,amp,1,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-   !   amp=amp-0.5_WP*vf%cfg%yL
-   !   ! Estimate growth rate
-   !   if (time%t.gt.0.0_WP) then
-   !      grate=(amp-grate)/time%dt
-   !   else
-   !      grate=0.0_WP
-   !   end if
-   !   ! Store time and amplitude series
-   !   if (.not.allocated(all_time)) then
-   !      my_size=0
-   !   else
-   !      my_size=size(all_time,dim=1)
-   !   end if
-   !   allocate(temp(my_size+1)); temp(1:my_size)=all_time; temp(my_size+1)=time%t; call MOVE_ALLOC(temp,all_time)
-   !   allocate(temp(my_size+1)); temp(1:my_size)=all_amp ; temp(my_size+1)=amp   ; call MOVE_ALLOC(temp,all_amp )
-   ! end subroutine postproc_data
+   end subroutine postproc_data_height
    
    
    !> Initialization of problem solver
@@ -354,7 +310,6 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
-         ! call postproc_data()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -394,7 +349,7 @@ contains
          ppevt=event(time=time,name='Postproc output')
          call param_read('Postproc output period',ppevt%tper)
          ! Perform the output
-         if (ppevt%occurs()) call postproc_data()
+         if (ppevt%occurs()) call postproc_data_height()
       end block create_postproc
       
       
@@ -519,12 +474,11 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
-         ! call postproc_data()
          call mfile%write()
          call cflfile%write()
 
          ! Specialized post-processing
-         if (ppevt%occurs()) call postproc_data()
+         if (ppevt%occurs()) call postproc_data_height()
          
       end do
       
