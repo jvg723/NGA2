@@ -367,12 +367,26 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for number of planes
-         smesh=surfmesh(nvar=1,name='plic')
+         smesh=surfmesh(nvar=8,name='plic')
          smesh%varname(1)='nplane'
+         smesh%varname(2)='trC'
+         smesh%varname(3)='Cxx'
+         smesh%varname(4)='Cxy'
+         smesh%varname(5)='Cxz'
+         smesh%varname(6)='Cyy'
+         smesh%varname(7)='Cyz'
+         smesh%varname(8)='Czz'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Initalize variables to 0
          smesh%var(1,:)=0.0_WP
+         smesh%var(2,:)=0.0_WP
+         smesh%var(3,:)=0.0_WP
+         smesh%var(4,:)=0.0_WP
+         smesh%var(5,:)=0.0_WP
+         smesh%var(6,:)=0.0_WP
+         smesh%var(7,:)=0.0_WP
+         smesh%var(8,:)=0.0_WP
          np=0
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
@@ -380,6 +394,13 @@ contains
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                         np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                        smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                        smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                        smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                        smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                        smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                        smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                        smesh%var(8,np)=ve%SCrec(i,j,k,6)
                      end if
                   end do
                end do
@@ -390,6 +411,7 @@ contains
       
       ! Add Ensight output
       create_ensight: block
+         integer :: nsc
          ! Create Ensight output from cfg
          ens_out=ensight(cfg=cfg,name='MPKH')
          ! Create event for Ensight output
@@ -401,6 +423,11 @@ contains
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_surface('plic',smesh)
+         if (stabilization) then
+            do nsc=1,ve%nscalar
+               call ens_out%add_scalar(trim(ve%SCname(nsc)),ve%SCrec(:,:,:,nsc))
+            end do
+         end if
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
       end block create_ensight
@@ -408,10 +435,14 @@ contains
       
       ! Create a monitor file
       create_monitor: block
+         integer :: nsc
          ! Prepare some info about fields
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+         end if
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -441,6 +472,17 @@ contains
          call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
          call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
          call cflfile%write()
+         ! Create scalar monitor
+         scfile=monitor(ve%cfg%amRoot,'scalar')
+         call scfile%add_column(time%n,'Timestep number')
+         call scfile%add_column(time%t,'Time')
+         if (stabilization) then
+            do nsc=1,ve%nscalar
+               call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
+               call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
+            end do
+         end if
+         call scfile%write()
       end block create_monitor
 
       ! Create specialized post-processing
