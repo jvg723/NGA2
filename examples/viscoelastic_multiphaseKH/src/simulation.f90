@@ -6,6 +6,7 @@ module simulation
    use ddadi_class,          only: ddadi
    use tpns_class,           only: tpns
    use vfs_class,            only: vfs
+   use tpviscoelastic_class, only: tpviscoelastic
    use timetracker_class,    only: timetracker
    use ensight_class,        only: ensight
    use surfmesh_class,       only: surfmesh
@@ -19,6 +20,7 @@ module simulation
    type(ddadi),          public :: vs
    type(tpns),           public :: fs
    type(vfs),            public :: vf
+   type(tpviscoelastic), public :: ve
    type(timetracker),    public :: time
    
    !> Ensight postprocessing
@@ -27,7 +29,7 @@ module simulation
    type(event)    :: ens_evt
    
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile
+   type(monitor) :: mfile,cflfile,scfile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -35,6 +37,8 @@ module simulation
    real(WP), dimension(:,:,:),      allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),      allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),    allocatable :: vort
+   real(WP), dimension(:,:,:,:),    allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:,:),  allocatable :: gradUz
    
    !> Problem definition
    real(WP) :: Reg,Weg,r_visc,r_rho
@@ -48,6 +52,9 @@ module simulation
 
    !> Post-processing
    type(event) :: ppevt
+
+   !> Check for stabilization 
+   logical :: stabilization 
    
 contains
    
