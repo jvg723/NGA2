@@ -532,6 +532,48 @@ contains
          
          ! Prepare new staggered viscosity (at n+1)
          call fs%get_viscosity(vf=vf)
+
+         ! Calculate grad(U)
+         call fs%get_gradU(gradU)
+
+         ! Transport our liquid conformation tensor using log conformation
+         advance_scalar: block
+            integer :: ierr
+            integer :: i,j,k,nsc
+            ! Add streching source term for constitutive model
+            if (stabilization) then 
+               call ve%get_CgradU_log(gradU,SCtmp,vf%VFold); resSC=SCtmp
+            end if
+            ve%SC=ve%SC+time%dt*resSC
+            call ve%apply_bcond(time%t,time%dt)
+            ve%SCold=ve%SC
+            ! Explicit calculation of dSC/dt from scalar equation
+            call ve%get_dSCdt(dSCdt=resSC,U=fs%U,V=fs%V,W=fs%W,VFold=vf%VFold,VF=vf%VF,detailed_face_flux=vf%detailed_face_flux,dt=time%dt)
+            ! Update our scalars
+            do nsc=1,ve%nscalar
+               where (ve%mask.eq.0.and.vf%VF.ne.0.0_WP) ve%SC(:,:,:,nsc)=(vf%VFold*ve%SCold(:,:,:,nsc)+time%dt*resSC(:,:,:,nsc))/vf%VF
+               where (vf%VF.eq.0.0_WP) ve%SC(:,:,:,nsc)=0.0_WP
+            end do
+            ! Apply boundary conditions
+            call ve%apply_bcond(time%t,time%dt)
+         end block advance_scalar
+
+         ! Add in relaxation forcing and reconstruct C
+         if (stabilization) then 
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+            ! Reconstruct conformation tensor
+            call ve%reconstruct_conformation(vf%VF)
+            ! Add in relaxtion source from semi-anlaytical integration
+            call ve%get_relax_analytical(time%dt,vf%VF)
+            ! Reconstruct lnC for next time step
+            !> get eigenvalues and eigenvectors based on reconstructed C
+            call ve%get_eigensystem_SCrec(vf%VF)
+            !> Reconstruct lnC from eigenvalues and eigenvectors
+            call ve%reconstruct_log_conformation(vf%VF)
+            ! Take exp(eigenvalues) to use in next time-step
+            ve%eigenval=exp(ve%eigenval)
+         end if
          
          ! Perform sub-iterations
          do while (time%it.le.time%itmax)
@@ -600,6 +642,13 @@ contains
                call vf%update_surfmesh(smesh)
                ! Initalize variables to 0
                smesh%var(1,:)=0.0_WP
+               smesh%var(2,:)=0.0_WP
+               smesh%var(3,:)=0.0_WP
+               smesh%var(4,:)=0.0_WP
+               smesh%var(5,:)=0.0_WP
+               smesh%var(6,:)=0.0_WP
+               smesh%var(7,:)=0.0_WP
+               smesh%var(8,:)=0.0_WP
                np=0
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
@@ -607,6 +656,13 @@ contains
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
                               np=np+1; smesh%var(1,np)=real(getNumberOfPlanes(vf%liquid_gas_interface(i,j,k)),WP)
+                              smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                              smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                              smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                              smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                              smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                              smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                              smesh%var(8,np)=ve%SCrec(i,j,k,6)
                            end if
                         end do
                      end do
@@ -620,8 +676,12 @@ contains
          ! Perform and output monitoring
          call fs%get_max()
          call vf%get_max()
+         if (stabilization) then
+            call ve%get_max_reconstructed(vf%VF)
+         end if
          call mfile%write()
          call cflfile%write()
+         call scfile%write()
 
          ! Specialized post-processing
          if (ppevt%occurs()) then 
@@ -631,7 +691,7 @@ contains
          
       end do
       
-      ! ! Post-process growth rate using ODRPACK
+      ! Post-process growth rate using ODRPACK
       ! odr_fit: block
       !    use, intrinsic :: iso_fortran_env, only: output_unit
       !    use mathtools, only: twoPi
@@ -763,6 +823,7 @@ contains
       
       ! Deallocate work arrays
       deallocate(resU,resV,resW,Ui,Vi,Wi,vort)
+      deallocate(resSC,SCtmp,gradU)
       
    end subroutine simulation_final
    
