@@ -38,7 +38,7 @@ module simulation
    real(WP), dimension(:,:,:),      allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:),    allocatable :: vort
    real(WP), dimension(:,:,:,:),    allocatable :: resSC,SCtmp
-   real(WP), dimension(:,:,:,:,:),  allocatable :: gradUz
+   real(WP), dimension(:,:,:,:,:),  allocatable :: gradU
    
    !> Problem definition
    real(WP) :: Reg,Weg,r_visc,r_rho
@@ -180,6 +180,9 @@ contains
          allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(vort(1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resSC(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(SCtmp(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
+         allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -197,7 +200,7 @@ contains
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
          use mms_geom,  only: cube_refine_vol
-         use vfs_class, only: lvira,VFhi,VFlo,remap,plicnet
+         use vfs_class, only: plicnet,VFhi,VFlo,remap,flux_storage
          use mathtools, only: twoPi
          use random,    only: random_uniform
          use parallel,  only: MPI_REAL_WP
@@ -208,7 +211,7 @@ contains
          real(WP) :: vol,area
          integer, parameter :: amr_ref_lvl=4
          ! Create a VOF solver
-         call vf%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
+         call vf%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=flux_storage,name='VOF')
          !vf%cons_correct=.false.
          ! Prepare initialize interface parameters
          nwaveX=6
@@ -316,6 +319,47 @@ contains
          call fs%get_vorticity(vort)
          call fs%get_div()
       end block create_and_initialize_flow_solver
+
+      ! Create a viscoleastic model with log conformation stablization method
+      create_viscoelastic: block
+         use tpviscoelastic_class, only: oldroydb
+         use tpscalar_class,       only: bcond,neumann
+         type(bcond), pointer :: mybc
+         integer :: i,j,k
+         ! Create viscoelastic model solver
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
+         ! Relaxation time for polymer
+         call param_read('Weissenberg Number',ve%trelax); ve%trelax=ve%trelax*delta_g/U_g
+         ! Polymer viscosity
+         call param_read('Polymer viscosity ratio',ve%visc_p); ve%visc_p=fs%visc_l*((1.0_WP-ve%visc_p)/ve%visc_p)
+         ! Setup without an implicit solver
+         call ve%setup()
+         ! Check first if we use stabilization
+         call param_read('Stabilization',stabilization,default=.false.)
+         ! Initialize C scalar fields
+         if (stabilization) then 
+            !> Allocate storage fo eigenvalues and vectors
+            allocate(ve%eigenval    (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenval=0.0_WP
+            allocate(ve%eigenvec(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); ve%eigenvec=0.0_WP
+            !> Allocate storage for reconstructured C
+            allocate(ve%SCrec   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6)); ve%SCrec=0.0_WP
+            do k=cfg%kmino_,cfg%kmaxo_
+               do j=cfg%jmino_,cfg%jmaxo_
+                  do i=cfg%imino_,cfg%imaxo_
+                     if (vf%VF(i,j,k).gt.0.0_WP) then
+                        ve%SCrec(i,j,k,1)=1.0_WP  !< Cxx
+                        ve%SCrec(i,j,k,4)=1.0_WP  !< Cyy
+                        ve%SCrec(i,j,k,6)=1.0_WP  !< Czz
+                     end if
+                  end do
+               end do
+            end do
+            ! Get eigenvalues and eigenvectors
+            call ve%get_eigensystem(vf%VF)
+         end if
+         ! Apply boundary conditions
+         call ve%apply_bcond(time%t,time%dt)
+      end block create_viscoelastic
 
 
       ! Create surfmesh object for interface polygon output
