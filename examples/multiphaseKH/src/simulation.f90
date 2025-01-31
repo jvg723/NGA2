@@ -34,7 +34,6 @@ module simulation
    !> Private work arrays
    real(WP), dimension(:,:,:),      allocatable :: resU,resV,resW
    real(WP), dimension(:,:,:),      allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:),    allocatable :: vort
    
    !> Problem definition
    real(WP) :: Reg,Weg,r_visc,r_rho
@@ -172,7 +171,6 @@ contains
          allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-         allocate(vort(1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
       end block allocate_work_arrays
       
       
@@ -306,7 +304,6 @@ contains
          end do
          ! Calculate cell-centered velocities and divergence
          call fs%interp_vel(Ui,Vi,Wi)
-         call fs%get_vorticity(vort)
          call fs%get_div()
       end block create_and_initialize_flow_solver
 
@@ -346,7 +343,6 @@ contains
          call param_read('Ensight output period',ens_evt%tper)
          ! Add variables to output
          call ens_out%add_vector('velocity',Ui,Vi,Wi)
-         call ens_out%add_vector('vorticity',vort(1,:,:,:),vort(2,:,:,:),vort(3,:,:,:))
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
          call ens_out%add_surface('plic',smesh)
@@ -495,7 +491,6 @@ contains
          
          ! Recompute interpolated velocity and divergence
          call fs%interp_vel(Ui,Vi,Wi)
-         call fs%get_vorticity(vort)
          call fs%get_div()
          
          ! Output to ensight
@@ -670,7 +665,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,vort)
+      deallocate(resU,resV,resW,Ui,Vi,Wi)
       
    end subroutine simulation_final
    
