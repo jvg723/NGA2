@@ -103,10 +103,10 @@ contains
       height=height-Lyl
       ! If root, print it out
       if (vf%cfg%amRoot) then
-         if (.not.isdir('stats')) call makedir('stats')
-         filename='profile_'; write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12)') 'x_location','height'
+         if (.not.isdir('interface_location')) call makedir('interface_location')
+         filename='interface_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='interface_location/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12)') 'x_location','interface'
          do i=vf%cfg%imin,vf%cfg%imax
             write(iunit,'(es12.5,3x,es12.5)') vf%cfg%xm(i),height(i)
          end do
@@ -117,7 +117,7 @@ contains
    end subroutine postproc_data_height
 
    !> Specialized subroutine that outputs the vertical liquid distribution
-   subroutine postproc_data()
+   subroutine postproc_data_profile()
       ! use mathtools, only: Pi
       use string,    only: str_medium
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
@@ -149,9 +149,9 @@ contains
       call MPI_ALLREDUCE(myVEL,VEL,vf%cfg%ny,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr); VEL=VEL/real(vf%cfg%nx*vf%cfg%nz,WP)
       ! If root, print it out
       if (vf%cfg%amRoot) then
-         if (.not.isdir('output_stats')) call makedir('output_stats')
-         filename='vertprofile_'; write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file='output_stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         if (.not.isdir('stats')) call makedir('stats')
+         filename='profile_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(a12,3x,a12,3x,a12)') 'Height','VOF','VEL'
          do j=vf%cfg%jmin,vf%cfg%jmax
             write(iunit,'(es12.5,3x,es12.5,3x,es12.5)') vf%cfg%ym(j),VOF(j),VEL(j)
@@ -161,7 +161,7 @@ contains
       ! Deallocate work arrays
       deallocate(myVOF,VOF)
       deallocate(myVEL,VEL)
-   end subroutine postproc_data
+   end subroutine postproc_data_profile
    
    
    !> Initialization of problem solver
@@ -490,7 +490,7 @@ contains
          ! Perform the output
          if (ppevt%occurs()) then 
             call postproc_data_height()
-            call postproc_data()
+            call postproc_data_profile()
          end if
       end block create_postproc
       
@@ -746,7 +746,7 @@ contains
          ! Specialized post-processing
          if (ppevt%occurs()) then 
             call postproc_data_height()
-            call postproc_data()
+            call postproc_data_profile()
          end if
          
       end do
