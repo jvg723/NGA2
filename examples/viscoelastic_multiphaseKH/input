@@ -6,8 +6,8 @@ Stabilization : .true.
 
 # Mesh definition
 Lx :	      32
-Liquid Ly :	4
-Gas Ly :	   12
+Liquid Ly :	  4
+Gas Ly :	  12
 Lz :	      16!1e-1
 nx :	      160!320
 ny :	      80!160
