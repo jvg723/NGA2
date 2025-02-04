@@ -9,6 +9,7 @@ module tpns_class
    use config_class,   only: config
    use linsol_class,   only: linsol
    use iterator_class, only: iterator
+   use timer_class,    only: timer
    implicit none
    private
    
@@ -149,6 +150,17 @@ module tpns_class
       ! Monitoring quantities
       real(WP) :: Umax,Vmax,Wmax,Pmax,divmax                              !< Maximum velocity, pressure, divergence
       
+      !> Timing info
+      type(timer) :: ttotal     !< Timer for step
+      type(timer) :: tcntedg    !< Timer for counting edges
+      type(timer) :: tifedge    !< Timer for checking if there is an edge in the doamin
+      type(timer) :: tbcnter    !< Timer for recording barry center
+      type(timer) :: tcount     !< Timer for counting
+      type(timer) :: tcomm      !< Timer for communicating
+      type(timer) :: tedgloop   !< Timer for looping over Nedge
+      type(timer) :: tclcslpv   !< Timer for loop calculaute slip velocity
+
+
    contains
       procedure :: print=>tpns_print                      !< Output solver to the screen
       procedure :: setup                                  !< Finish configuring the flow solver
@@ -329,6 +341,20 @@ contains
       call self%cfg%sync(self%wmask)
       if (.not.self%cfg%zper.and.self%cfg%kproc.eq.1) self%wmask(:,:,self%cfg%kmino)=self%wmask(:,:,self%cfg%kmino+1)
       
+      ! Create a timers
+      create_timing: block
+         ! Create timers
+         self%ttotal  =timer(comm=self%cfg%comm,name='TotalTime')
+         self%tcntedg =timer(comm=self%cfg%comm,name='CountEdge')
+         self%tifedge =timer(comm=self%cfg%comm,name='IfEdge')
+         self%tbcnter =timer(comm=self%cfg%comm,name='RecBryCnt')
+         self%tcount  =timer(comm=self%cfg%comm,name='Count')
+         self%tcomm   =timer(comm=self%cfg%comm,name='Communication')
+         self%tedgloop=timer(comm=self%cfg%comm,name='NedgeLoop')
+         self%tclcslpv=timer(comm=self%cfg%comm,name='CalcSlpv')
+      end block create_timing
+
+
    end function constructor
       
    
@@ -1712,6 +1738,19 @@ contains
       real(WP), dimension(3) :: ftemp,pos,c1,c2
       real(WP) :: a,b,dx,xscale,epsilon,Utc,r,threshold
       integer :: Nedge_,Nedge,count,info,i,j,k,ind,ierr,n
+
+      ! Reset all timers and start routine timer
+      call this%ttotal%reset()
+      call this%tcntedg%reset()
+      call this%tifedge%reset()
+      call this%tbcnter%reset()
+      call this%tcount%reset()
+      call this%tcomm%reset()
+      call this%tedgloop%reset()
+      call this%tclcslpv%reset()
+      call this%ttotal%start()
+
+
       ! Empty out slip velocities
       Uslip = 0.0_WP; Vslip = 0.0_WP; Wslip = 0.0_WP
       ! a is the ratio to scale distance
@@ -1722,6 +1761,7 @@ contains
       xscale=a*dx; epsilon=b*dx
       Utc = sqrt(2.0_WP*this%sigma/(this%rho_l*Hfilm))
       ! First pass to identify the number of edge cell in the current processor
+      call this%tcntedg%start()
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
@@ -1731,17 +1771,20 @@ contains
             end do
          end do
       end do
+      call this%tcntedg%stop()
       ! Communicate the total number of edges to all processors
       allocate(Nedge_list(0:this%cfg%nproc-1))
       call MPI_AllGATHER(Nedge_,1,MPI_INTEGER,Nedge_list,1,MPI_INTEGER,this%cfg%comm,ierr)
       Nedge = sum(Nedge_list)
       ! If there is an edge somewhere
+      call this%tifedge%start()
       if (Nedge .gt. 0) then 
          allocate(Loc_(1:3,1:Nedge_))
          allocate(EdgeN_(1:3,1:Nedge_))
         !  allocate(FilmThick_(Nedge_))
          Nedge_ = 0
          ! Second pass to write down the the barycenters and the edge normal for cells with an edge
+         call this%tbcnter%start()
          do k=this%cfg%kmin_,this%cfg%kmax_
             do j=this%cfg%jmin_,this%cfg%jmax_
                do i=this%cfg%imin_,this%cfg%imax_
@@ -1754,26 +1797,32 @@ contains
                end do
             end do
          end do
+         call this%tbcnter%stop()
 
          allocate(dispels(0:this%cfg%nproc-1))
          allocate(Loc(1:3,1:Nedge))
          allocate(EdgeN(1:3,1:Nedge))
          allocate(fcoeff(1:Nedge))
+         call this%tcount%start()
          count = 0
          do i = 0,this%cfg%nproc-1
             dispels(i)= count
             count = count+Nedge_list(i)
          end do
+         call this%tcount%stop()
 
          ! Communicate source barycenters and edge normals
+         call this%tcomm%start()
          call MPI_ALLGATHERV(Loc_(1,:),Nedge_,MPI_REAL_WP,Loc(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
          call MPI_ALLGATHERV(Loc_(2,:),Nedge_,MPI_REAL_WP,Loc(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
          call MPI_ALLGATHERV(Loc_(3,:),Nedge_,MPI_REAL_WP,Loc(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
          call MPI_ALLGATHERV(EdgeN_(1,:),Nedge_,MPI_REAL_WP,EdgeN(1,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
          call MPI_ALLGATHERV(EdgeN_(2,:),Nedge_,MPI_REAL_WP,EdgeN(2,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
          call MPI_ALLGATHERV(EdgeN_(3,:),Nedge_,MPI_REAL_WP,EdgeN(3,:),Nedge_list,dispels,MPI_REAL_WP,this%cfg%comm)
+         call this%tcomm%stop()
          fcoeff = Utc
          
+         call this%tedgloop%start()   
          ss%np_ = Nedge_; ss%np = Nedge
          call ss%resize(Nedge_)
          do n = 1, Nedge_
@@ -1782,7 +1831,9 @@ contains
             ss%p(n)%nedge = EdgeN_(:,n)
             ss%p(n)%VF = 0.0_WP
          end do
+         call this%tedgloop%stop()
 
+         call this%tclcslpv%start()
          do k=this%cfg%kmino_,this%cfg%kmaxo_
             do j=this%cfg%jmino_,this%cfg%jmaxo_
                do i=this%cfg%imino_,this%cfg%imaxo_
@@ -1809,12 +1860,17 @@ contains
                end do
             end do
          end do
+         call this%tclcslpv%stop()
          deallocate(Loc_,EdgeN_,dispels,Loc,EdgeN,fcoeff)
-        else
+         call this%tifedge%stop()
+      else
            ss%np_=0;ss%np = 0
            call ss%resize(0)
       end if
       deallocate(Nedge_list)
+
+      ! Stop routine timer
+      call this%ttotal%stop()
 
       contains
 

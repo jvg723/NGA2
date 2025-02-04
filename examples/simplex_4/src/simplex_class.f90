@@ -86,6 +86,7 @@ module simplex_class
       type(timer)   :: tltrans  !< Timer for ligament transfer
       type(timer)   :: tslpvel  !< Timer for adding slip velocity
       type(timer)   :: tbreak   !< Timer for attempting breakup
+      type(monitor) :: slptimefile !< Timing monitoring
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
@@ -1547,6 +1548,18 @@ contains
          call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
          call this%timefile%add_column(this%tslpvel%time,trim(this%tslpvel%name))
          call this%timefile%add_column(this%tbreak%time ,trim(this%tbreak%name))
+         ! Create monitor file for adding in slip vel
+         this%slptimefile=monitor(this%fs%cfg%amRoot,'slpv_timing')
+         call this%slptimefile%add_column(this%time%n,'Timestep number')
+         call this%slptimefile%add_column(this%time%t,'Time')
+         call this%slptimefile%add_column(this%fs%ttotal%time  ,trim(this%fs%ttotal%name))
+         call this%slptimefile%add_column(this%fs%tcntedg%time ,trim(this%fs%tcntedg%name))
+         call this%slptimefile%add_column(this%fs%tifedge%time ,trim(this%fs%tifedge%name))
+         call this%slptimefile%add_column(this%fs%tbcnter%time ,trim(this%fs%tbcnter%name))
+         call this%slptimefile%add_column(this%fs%tcount%time  ,trim(this%fs%tcount%name))
+         call this%slptimefile%add_column(this%fs%tcomm%time   ,trim(this%fs%tcomm%name))
+         call this%slptimefile%add_column(this%fs%tedgloop%time,trim(this%fs%tedgloop%name))
+         call this%slptimefile%add_column(this%fs%tclcslpv%time,trim(this%fs%tclcslpv%name))
       end block create_timing
       
       
