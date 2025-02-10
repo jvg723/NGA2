@@ -1043,9 +1043,9 @@ contains
          integer :: i,j,k
          real(WP) :: rad
          ! Create a VOF solver with plicnet
-         ! call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=flux,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=flux,name='VOF')
          ! call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
+         ! call this%vf%initialize(cfg=this%cfg,reconstruction_method=r2pnet,transport_method=remap,name='VOF')
          this%vf%thin_thld_min=0.0_WP
          this%vf%flotsam_thld=0.0_WP
          this%vf%maxcurv_times_mesh=1.0_WP
@@ -1728,54 +1728,54 @@ contains
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
 
-      ! Add in slip velocity at hole edges
-      call this%tslpvel%start()
-      slip_velocity: block
-         use vfs_class, only: VFlo,VFhi
-         real (WP), parameter :: threshold=0.3_WP
-         integer :: i,j,k
-         if (this%bu%edge_exist) then
-            ! Store current velocity field 
-            this%Uslip=this%fs%U
-            this%Vslip=this%fs%V
-            this%Wslip=this%fs%W
-            ! Add in retraction velocities
-            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                     if (this%vf%edge_sensor(i,j,k).gt.threshold.and.this%vf%thin_sensor(i,j,k).eq.1.0_WP.and.this%vf%VF(i,j,k).gt.VFlo.and.this%vf%VF(i,j,k).lt.VFhi) then
-                        this%Uslip(i  ,j,k)=this%Uslip(i  ,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                        this%Uslip(i+1,j,k)=this%Uslip(i+1,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                        this%Vslip(i,j  ,k)=this%Vslip(i,j  ,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                        this%Vslip(i,j+1,k)=this%Vslip(i,j+1,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                        this%Wslip(i,j,k  )=this%Wslip(i,j,k  )+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                        this%Wslip(i,j,k+1)=this%Wslip(i,j,k+1)+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
-                     end if
-                  end do 
-               end do 
-            end do
-         else
-            this%Uslip=this%fs%U
-            this%Vslip=this%fs%V
-            this%Wslip=this%fs%W
-         end if 
-      end block slip_velocity
-      call this%tslpvel%stop()
+      ! ! Add in slip velocity at hole edges
+      ! call this%tslpvel%start()
+      ! slip_velocity: block
+      !    use vfs_class, only: VFlo,VFhi
+      !    real (WP), parameter :: threshold=0.3_WP
+      !    integer :: i,j,k
+      !    if (this%bu%edge_exist) then
+      !       ! Store current velocity field 
+      !       this%Uslip=this%fs%U
+      !       this%Vslip=this%fs%V
+      !       this%Wslip=this%fs%W
+      !       ! Add in retraction velocities
+      !       do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+      !          do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+      !             do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+      !                if (this%vf%edge_sensor(i,j,k).gt.threshold.and.this%vf%thin_sensor(i,j,k).eq.1.0_WP.and.this%vf%VF(i,j,k).gt.VFlo.and.this%vf%VF(i,j,k).lt.VFhi) then
+      !                   this%Uslip(i  ,j,k)=this%Uslip(i  ,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                   this%Uslip(i+1,j,k)=this%Uslip(i+1,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                   this%Vslip(i,j  ,k)=this%Vslip(i,j  ,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                   this%Vslip(i,j+1,k)=this%Vslip(i,j+1,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                   this%Wslip(i,j,k  )=this%Wslip(i,j,k  )+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                   this%Wslip(i,j,k+1)=this%Wslip(i,j,k+1)+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+      !                end if
+      !             end do 
+      !          end do 
+      !       end do
+      !    else
+      !       this%Uslip=this%fs%U
+      !       this%Vslip=this%fs%V
+      !       this%Wslip=this%fs%W
+      !    end if 
+      ! end block slip_velocity
+      ! call this%tslpvel%stop()
 
 
       ! Get slip velocity
-      ! if (this%bu%edge_exist) then
-         ! call this%tslpvel%start()
-         ! call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
-         ! call this%tslpvel%stop()
-         ! this%Uslip = this%Uslip + this%fs%U
-         ! this%Vslip = this%Vslip + this%fs%V
-         ! this%Wslip = this%Wslip + this%fs%W
-      ! else
-      !    this%Uslip = this%fs%U
-      !    this%Vslip = this%fs%V
-      !    this%Wslip = this%fs%W
-      ! end if
+      if (this%bu%edge_exist) then
+         call this%tslpvel%start()
+         call this%fs%add_slipvel(this%vf,this%ss,this%Uslip,this%Vslip,this%Wslip,this%bu%min_filmthickness)
+         call this%tslpvel%stop()
+         this%Uslip = this%Uslip + this%fs%U
+         this%Vslip = this%Vslip + this%fs%V
+         this%Wslip = this%Wslip + this%fs%W
+      else
+         this%Uslip = this%fs%U
+         this%Vslip = this%fs%V
+         this%Wslip = this%fs%W
+      end if
 
       ! VOF solver step
       call this%tvof%start() ! Start VOF timer
