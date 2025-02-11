@@ -848,6 +848,7 @@ contains
       real(WP), dimension(:,:)  , allocatable :: svel
       real(WP), dimension(:,:,:), allocatable :: smoi
       real(WP), dimension(:)    , allocatable :: srem
+      real(WP), dimension(:)    , allocatable :: s_ecc
       real(WP), dimension(:)    , allocatable :: xmin,xmax,ymin,ymax,zmin,zmax
       integer :: n,m,ierr,i,j,k,l,ii,jj,kk,iunit,totalnewp,np_start,np_old,count,ip,rank
       real(WP) :: x,y,z,x0,y0,z0,smax,smid,smin
@@ -856,6 +857,7 @@ contains
       real(WP), dimension(:,:,:,:), allocatable :: thickness
       integer :: nmain,nsat
       integer :: nmax
+      real(WP) :: Vt,Vl,Vd,minor_radius,diam,Vrim,Lrim, Lrp
       ! Moment of inertia calculation using lapack
       real(WP), dimension(:), allocatable, save :: work !< Saved!
       integer, save :: lwork                            !< Saved!
@@ -908,15 +910,16 @@ contains
          end do
 
          ! Allocate ligament stats arrays
-         allocate(svol(1:this%ccl_buffer%nstruct        )); svol=0.0_WP
-         allocate(sthc(1:this%ccl_buffer%nstruct        )); sthc=HUGE(x)
-         allocate(slen(1:this%ccl_buffer%nstruct        )); slen=0.0_WP
-         allocate(snum(1:this%ccl_buffer%nstruct        )); snum=0.0_WP
-         allocate(sper(1:this%ccl_buffer%nstruct        )); sper=0.0_WP
-         allocate(spos(1:this%ccl_buffer%nstruct,1:3    )); spos=0.0_WP
-         allocate(svel(1:this%ccl_buffer%nstruct,1:3    )); svel=0.0_WP
-         allocate(smoi(1:this%ccl_buffer%nstruct,1:3,1:3)); smoi=0.0_WP
-         allocate(srem(1:this%ccl_buffer%nstruct        )); srem=0.0_WP
+         allocate(svol (1:this%ccl_buffer%nstruct        )); svol=0.0_WP
+         allocate(sthc (1:this%ccl_buffer%nstruct        )); sthc=HUGE(x)
+         allocate(slen (1:this%ccl_buffer%nstruct        )); slen=0.0_WP
+         allocate(snum (1:this%ccl_buffer%nstruct        )); snum=0.0_WP
+         allocate(sper (1:this%ccl_buffer%nstruct        )); sper=0.0_WP
+         allocate(spos (1:this%ccl_buffer%nstruct,1:3    )); spos=0.0_WP
+         allocate(svel (1:this%ccl_buffer%nstruct,1:3    )); svel=0.0_WP
+         allocate(smoi (1:this%ccl_buffer%nstruct,1:3,1:3)); smoi=0.0_WP
+         allocate(srem (1:this%ccl_buffer%nstruct        )); srem=0.0_WP
+         allocate(s_ecc(1:this%ccl_buffer%nstruct        )); s_ecc=0.0_WP
          allocate(xmin(1:this%ccl_buffer%nstruct),xmax(1:this%ccl_buffer%nstruct)); xmin=HUGE(x);xmax=-HUGE(x)
          allocate(ymin(1:this%ccl_buffer%nstruct),ymax(1:this%ccl_buffer%nstruct)); ymin=HUGE(x);ymax=-HUGE(x)
          allocate(zmin(1:this%ccl_buffer%nstruct),zmax(1:this%ccl_buffer%nstruct)); zmin=HUGE(x);zmax=-HUGE(x)
@@ -1021,6 +1024,8 @@ contains
             smid=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n))
             smin=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n))
             if (smin.eq.0.0_WP) smin=smid ! Handle 2D case
+            ! Compute eccentricity
+            s_ecc(n)=sqrt(1.0_WP-smin**2/(smax**2+epsilon(1.0_WP)))
             ! Use max of bounding box and MoI-derived lengths as length
             slen(n) = max(sqrt((xmax(n)-xmin(n))**2+(ymax(n)-ymin(n))**2+(zmax(n)-zmin(n))**2),smax)
          end do
@@ -1034,20 +1039,109 @@ contains
 
          ! Perform transfer
          do n=1,this%ccl_buffer%nstruct
+
             ! Cycle if struct is core
             if (n.eq.nmax) cycle
+
             ! Only convert if structure is toucing buffer
             if(srem(n).gt.0.0_WP) then
             else
                cycle
             end if
-            ! Skip 
+
+            ! Skip if negative
+            if (slen(n).le.0.0_WP) cycle
+
+            ! Check eccentricity for conversion
+            diam=0.0_WP
+            if (s_ecc(n).gt.this%emax) then
+               !>Break-up as ligament (Drop size method from Kim & Moin (2020))
+               Lrim=slen(n) 
+               Vrim=svol(n)
+               minor_radius=sqrt(Vrim/pi/Lrim) 
+               nmain=floor(this%dw*Lrim/(twoPi*minor_radius))
+               nsat=nmain+1
+               diam=(6.0_WP*Vrim/pi/(real(nmain,WP)+this%size_ratio**3*real(nsat,WP)))**(1.0_WP/3.0_WP)
+               ! Only the main processor is in charge of creating droplets
+               if (this%cfg%amRoot) then
+                  np_start=this%lp%np_
+                  Lrp = twoPi*minor_radius/this%dw
+                  do l=1,nsat+nmain
+                     ! Increment particle counter
+                     this%lp%np_=this%lp%np_+1
+                     ! Make room for new drop
+                     call this%lp%resize(this%lp%np_)
+                     ! Add the drop
+                     this%lp%p(this%lp%np_)%id  =int(3,8)                                                                               
+                     if (mod(l,2).eq.1) then
+                        this%lp%p(this%lp%np_)%d=diam*this%size_ratio                                                                                    
+                     else
+                        this%lp%p(this%lp%np_)%d=diam                                                                                    
+                     end if
+                     this%lp%p(this%lp%np_)%pos=spos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*smoi(n,:,1)
+                     this%lp%p(this%lp%np_)%ind =this%cfg%get_ijk_global(this%lp%p(this%lp%np_)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+                     this%lp%p(this%lp%np_)%flag=0                                                                                        
+                     this%lp%p(this%lp%np_)%dt  =0.0_WP                                                                                  
+                     this%lp%p(this%lp%np_)%Acol=0.0_WP                                                                                  
+                     this%lp%p(this%lp%np_)%Tcol=0.0_WP
+                  end do
+                  ! Increment monitoring variables
+                  this%lp%np_new=this%lp%np_new+nmain+nsat
+                  this%np_buf=this%np_buf+nmain+nsat
+                  this%vof_tf_buf=this%vof_tf_buf+svol(n)
+                  this%lp%vp_new=this%lp%vp_new+svol(n)
+               end if
+            else
+               !>Convert to drop
+               diam=(6.0_WP*svol(n)/pi)**(1.0_WP/3.0_WP)
+               ! Root creates a new Lagrangian drop
+               if (this%vf%cfg%amRoot) then
+                  np_start=this%lp%np_
+                  ! Increment particle counter
+                  this%lp%np_=this%lp%np_+1
+                  ! Make room for new drop
+                  call this%lp%resize(this%lp%np_)
+                  ! Add the drop
+                  this%lp%p(this%lp%np_)%id  =int(4,8)
+                  this%lp%p(this%lp%np_)%d   =diam
+                  this%lp%p(this%lp%np_)%pos =spos(n,:)
+                  this%lp%p(this%lp%np_)%vel =svel(n,:)
+                  this%lp%p(this%lp%np_)%ind =this%lp%cfg%get_ijk_global(spos(n,:),[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+                  this%lp%p(this%lp%np_)%flag=0
+                  this%lp%p(this%lp%np_)%dt  =0.0_WP
+                  this%lp%p(this%lp%np_)%Acol=0.0_WP
+                  this%lp%p(this%lp%np_)%Tcol=0.0_WP
+                  ! Increment monitoring variables
+                  this%lp%np_new=this%lp%np_new+1
+                  this%np_buf=this%np_buf+1
+                  this%vof_tf_buf=this%vof_tf_buf+svol(n)
+                  this%lp%vp_new=this%lp%vp_new+svol(n)
+               end if
+            end if
+
+            ! empty out the VF
+            do m=1,this%ccl_buffer%struct(n)%n_
+               i=this%ccl_buffer%struct(n)%map(1,m); j=this%ccl_buffer%struct(n)%map(2,m); k=this%ccl_buffer%struct(n)%map(3,m)
+               this%vf%VF(i,j,k)=0.0_WP
+            end do    
+
          end do
+
+         ! Synchronize VF fields
+         call this%vf%cfg%sync(this%vf%VF)
+         call this%vf%clean_irl_and_band()
+
+         ! Synchronize particles
+         call this%lp%sync()
+         
+         ! Integrate monitoring variables 
+         call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_tf_buf,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,this%np_buf    ,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
 
       end if
 
       deallocate(thickness)
-      deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,xmin,ymin,zmin)
+      deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
 
    contains
 
@@ -1056,9 +1150,9 @@ contains
          implicit none
          integer, intent(in) :: i,j,k
          if ((this%vf%VF(i,j,k).gt.VFlo).and.this%cfg%xm(i).gt.0.0_WP)then
-         make_label=.true.
+            make_label=.true.
          else
-         make_label=.false.
+            make_label=.false.
          end if
       end function make_label
 
@@ -1419,7 +1513,8 @@ contains
       ! Prepare Lagrangian drop model
       ! id=1, transfer_drops
       ! id=2, transfer_ligs
-      ! id=3, transfer_buffer
+      ! id=3, transfer_buffer as ligament
+      ! id=4, transfer_buffer as droplet
       prepare_transfer: block
          ! Is transfer used?
          call this%input%read('Transfer drops',this%use_drop_transfer,default=.true.)
