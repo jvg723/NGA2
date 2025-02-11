@@ -846,7 +846,7 @@ contains
       logical function make_label(i,j,k)
          implicit none
          integer, intent(in) :: i,j,k
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.(this%struct_type(i,j,k).ge.0.99_WP).and.(this%struct_type(i,j,k).le.1.01_WP).and.this%cfg%xm(i).gt.0.0_WP)then
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%cfg%xm(i).gt.0.0_WP)then
          make_label=.true.
          else
          make_label=.false.
