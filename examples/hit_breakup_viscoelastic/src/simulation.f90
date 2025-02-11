@@ -37,9 +37,9 @@ module simulation
    public :: simulation_init,simulation_run,simulation_final
    
    !> Private work arrays
-   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW
-   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
-   real(WP), dimension(:,:,:,:), allocatable :: SR
+   real(WP), dimension(:,:,:),     allocatable :: resU,resV,resW
+   real(WP), dimension(:,:,:),     allocatable :: Ui,Vi,Wi
+   real(WP), dimension(:,:,:,:),   allocatable :: SR
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
    
@@ -57,6 +57,9 @@ module simulation
    !> Provide a pardata objects for restarts
    type(pardata) :: df
    logical :: restarted
+
+   !> Check for stabilization 
+   logical :: stabilization 
    
    !> For monitoring
    real(WP) :: EPS
@@ -370,13 +373,11 @@ contains
          use vfs_class,            only: flux_storage
          integer :: i,j,k
          ! Create viscoelastic model solver
-         call ve%init(cfg=cfg,phase=0,model=fenecr,name='viscoelastic')
+         call ve%init(cfg=cfg,phase=0,model=oldroydb,name='viscoelastic')
          ! Relaxation time for polymer
-         call param_read('Weissenberg Number',ve%trelax);    ve%trelax=ve%trelax*taueta_tgt
+         call param_read('Weissenberg Number',ve%trelax);      ve%trelax=ve%trelax*taueta_tgt
          ! Polymer viscosity
          call param_read('Polymer viscosity ratio',ve%visc_p); ve%visc_p=ve%visc_p*fs%visc_l
-         ! Maximum polymer extensibility
-         call param_read('Maximum polymer extensibility', ve%Lmax)
          ! Setup without an implicit solver
          call ve%setup()
          !> Allocate storage fo eigenvalues and vectors
@@ -542,10 +543,6 @@ contains
             call scfile%add_column(ve%SCrecmin(nsc),trim(ve%SCname(nsc))//'_min')
             call scfile%add_column(ve%SCrecmax(nsc),trim(ve%SCname(nsc))//'_max')
          end do
-         do nsc=1,ve%nscalar
-            call scfile%add_column(ve%SCmin(nsc),trim(ve%SCname(nsc))//'_lnmin')
-            call scfile%add_column(ve%SCmax(nsc),trim(ve%SCname(nsc))//'_lnmax')
-         end do
          call scfile%write()
       end block create_monitor
 
@@ -653,7 +650,7 @@ contains
                   integer :: i,j,k,nsc
                   real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
                   real(WP), dimension(:,:,:,:), allocatable :: stress
-                  real(WP) :: coeff,trace
+                  real(WP) :: coeff
                   ! Allocate work arrays
                   allocate(stress(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
                   allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
@@ -669,28 +666,6 @@ contains
                            do i=cfg%imino_,cfg%imaxo_
                               if (ve%mask(i,j,k).ne.0) cycle
                               if (vf%VF(i,j,k).eq.0.0_WP) cycle
-                              stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
-                              stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
-                              stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
-                              stress(i,j,k,4)=coeff*(ve%SCrec(i,j,k,4)-1.0_WP) !> yy tensor component
-                              stress(i,j,k,5)=coeff*(ve%SCrec(i,j,k,5)-0.0_WP) !> yz tensor component
-                              stress(i,j,k,6)=coeff*(ve%SCrec(i,j,k,6)-1.0_WP) !> zz tensor component
-                           end do
-                        end do
-                     end do
-                  case (fenecr)
-                     do k=cfg%kmino_,cfg%kmaxo_
-                        do j=cfg%jmino_,cfg%jmaxo_
-                           do i=cfg%imino_,cfg%imaxo_
-                              if (ve%mask(i,j,k).ne.0) cycle
-                              if (vf%VF(i,j,k).eq.0.0_WP) cycle
-                              !>Trace of reconstructed conformation tensor
-                              trace=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,2)+ve%SCrec(i,j,k,3)
-                              !>Relaxation function coefficent
-                              coeff=1.00_WP/(1.0_WP-trace/ve%Lmax**2)
-                              coeff=coeff/ve%trelax
-                              coeff=ve%visc_p*coeff
-                              ! Build stress tensor
                               stress(i,j,k,1)=coeff*(ve%SCrec(i,j,k,1)-1.0_WP) !> xx tensor component
                               stress(i,j,k,2)=coeff*(ve%SCrec(i,j,k,2)-0.0_WP) !> xy tensor component
                               stress(i,j,k,3)=coeff*(ve%SCrec(i,j,k,3)-0.0_WP) !> xz tensor component
@@ -856,7 +831,6 @@ contains
          call fs%get_max()
          call vf%get_max()
          call ve%get_max_reconstructed(vf%VF)
-         call ve%get_max(vf%VF)
          call mfile%write()
          call cflfile%write()
          call hitfile%write()
@@ -971,6 +945,8 @@ contains
          do nsc=1,6
             call ve%cfg%sync(ve%SCrec(:,:,:,nsc))
          end do
+         ! Get eigenvalues and eigenvectors
+         call ve%get_eigensystem(vf%VF)
       end block init_conformation
       
       ! Set the drop to injected status
