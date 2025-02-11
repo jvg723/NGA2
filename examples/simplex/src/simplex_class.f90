@@ -50,6 +50,7 @@ module simplex_class
       type(timetracker) :: time      !< Time info
       type(cclabel)     :: ccl       !< CCLabel to transfer droplets
       type(cclabel)     :: ccl_lig   !< CCLabel to transfer ligaments
+      type(cclabel)     :: ccl_buffer   !< CCLabel to transfer liquid in the buffer region
       
       !> Ensight postprocessing
       type(surfmesh) :: smesh    !< Surface mesh for interface
@@ -357,7 +358,7 @@ contains
          end if
          
          ! Force transfer if drop touches auto-transfer layer
-         if (drem(n).gt.0.0_WP) transfer=.true.
+         ! if (drem(n).gt.0.0_WP) transfer=.true.
          
          ! But prevent transfer if that's the core
          if (n.eq.nmax) transfer=.false.
@@ -653,7 +654,7 @@ contains
          ! Only breakup if minimum thickness is reached, sufficient volume of the ligament, enough of local ligament-like structures,
          ! local time scale asscoiated with strain rate is on par or bigger than the RP time scale, and its length is longer than the inviscid most unstable wavelength
          if ((lthc(n).le.this%lmin*this%cfg%min_meshsize).and.(lvol(n).ge.this%cfg%min_meshsize**3).and.(lper(n).ge.this%lper).and.(Trp.le.Tsr).and.(nmain.ge.1)) then
-         else if(lrem(n).gt.0.0_WP) then
+         ! else if(lrem(n).gt.0.0_WP) then
             ! if (this%vf%cfg%amRoot) print *, "lig is in buffer with nmain=", nmain, " and id=", n
          else
             cycle
@@ -824,6 +825,41 @@ contains
       end function same_label
 
    end subroutine transfer_ligs
+
+   subroutine transfer_buffer(this)
+      use vfs_class, only: VFlo,VFhi
+      use mathtools, only: pi,twoPi
+      use mpi_f08
+      use parallel,  only: MPI_REAL_WP
+      use messager, only: die
+      use irl_fortran_interface
+      implicit none
+      class(simplex), intent(inout) :: this
+
+      ! Start by performing a CCL based on buffer criteria
+      call this%ccl_buffer%build(make_label,same_label)
+
+   contains
+
+      !> Function that identifies cells that need a label
+      logical function make_label(i,j,k)
+         implicit none
+         integer, intent(in) :: i,j,k
+         if ((this%vf%VF(i,j,k).gt.VFlo).and.(this%struct_type(i,j,k).ge.0.99_WP).and.(this%struct_type(i,j,k).le.1.01_WP).and.this%cfg%xm(i).gt.0.0_WP)then
+         make_label=.true.
+         else
+         make_label=.false.
+         end if
+      end function make_label
+
+      !> Function that identifies if cell pairs have same label
+      logical function same_label(i1,j1,k1,i2,j2,k2)
+         implicit none
+         integer, intent(in) :: i1,j1,k1,i2,j2,k2
+         same_label=.true.
+      end function same_label
+
+   end subroutine transfer_buffer
    
    
    !> Initialization of simplex simulation
@@ -1180,6 +1216,7 @@ contains
          ! Create CCLs
          call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
          call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
+         call this%ccl_buffer%initialize(pg=this%cfg%pgrid,name='ccl_buf')
          ! Setup lpt solver
          if (this%use_drop_transfer.or.this%use_lig_transfer) then
             ! Create lpt solver
