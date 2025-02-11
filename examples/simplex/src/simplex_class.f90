@@ -130,6 +130,7 @@ module simplex_class
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
       procedure :: transfer_drops                  !< Transfer drops to a Lagrangian representation
       procedure :: transfer_ligs                   !< Transfer ligaments to a Lagrangian representation
+      procedure :: transfer_buffer                 !< Transfer structure in buffer region to a Lagrangian representation
    end type simplex
    
    
@@ -1891,6 +1892,7 @@ contains
          call this%tdtrans%start() ! Start transfer timer
          if (this%use_drop_transfer) call this%transfer_drops()
          call this%tdtrans%stop() ! Stop transfer timer
+         call this%transfer_buffer()
       end block attempt_transfer
       
       ! Remove VOF at edge of domain
