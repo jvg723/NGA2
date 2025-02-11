@@ -111,6 +111,9 @@ module simplex_class
       real(WP) :: size_ratio
       real(WP) :: vof_tf_lig
       integer  :: np_lig
+
+      real(WP) :: vof_tf_buf
+      integer  :: np_buf
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -836,9 +839,215 @@ contains
       use irl_fortran_interface
       implicit none
       class(simplex), intent(inout) :: this
+      real(WP), dimension(:)    , allocatable :: svol
+      real(WP), dimension(:)    , allocatable :: sthc
+      real(WP), dimension(:)    , allocatable :: slen
+      real(WP), dimension(:)    , allocatable :: snum
+      real(WP), dimension(:)    , allocatable :: sper
+      real(WP), dimension(:,:)  , allocatable :: spos
+      real(WP), dimension(:,:)  , allocatable :: svel
+      real(WP), dimension(:,:,:), allocatable :: smoi
+      real(WP), dimension(:)    , allocatable :: srem
+      real(WP), dimension(:)    , allocatable :: xmin,xmax,ymin,ymax,zmin,zmax
+      integer :: n,m,ierr,i,j,k,l,ii,jj,kk,iunit,totalnewp,np_start,np_old,count,ip,rank
+      real(WP) :: x,y,z,x0,y0,z0,smax,smid,smin
+      integer :: nneigh_thickness
+      real(WP) :: tmpvol,tmparea
+      real(WP), dimension(:,:,:,:), allocatable :: thickness
+      integer :: nmain,nsat
+      integer :: nmax
+      ! Moment of inertia calculation using lapack
+      real(WP), dimension(:), allocatable, save :: work !< Saved!
+      integer, save :: lwork                            !< Saved!
+      real(WP), dimension(1) :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer :: info
+
+      ! Query optimal work array size
+      if (.not.allocated(work)) then
+      call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+      lwork=int(lwork_query(1)); allocate(work(lwork))
+      end if
 
       ! Start by performing a CCL based on buffer criteria
       call this%ccl_buffer%build(make_label,same_label)
+
+      ! Get thickness and local struct_type for global information calculation
+      allocate(thickness(this%ccl_buffer%nstruct,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));thickness=0.0_WP
+
+      if (this%ccl_buffer%nstruct.ge.1) then
+
+         ! First pass to accumulate structure thickness
+         nneigh_thickness=3
+         do n=1,this%ccl_buffer%nstruct
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     ! calculate thickness
+                     tmpvol=0.0_WP; tmparea=0.0_WP
+                     do kk=k-nneigh_thickness,k+nneigh_thickness
+                        do jj=j-nneigh_thickness,j+nneigh_thickness
+                           do ii=i-nneigh_thickness,i+nneigh_thickness
+                              tmpvol=tmpvol+this%vf%VF(ii,jj,kk)*this%cfg%vol(i,j,k)
+                              tmparea=tmparea+this%vf%SD(ii,jj,kk)*this%cfg%vol(i,j,k)
+                           end do
+                        end do
+                     end do
+                     ! Calculate thickness
+                     if (this%vf%VF(i,j,k).le.VFlo) then
+                        thickness(n,i,j,k)=0.0_WP
+                     else if (tmparea.gt.0.0_WP) then    
+                        thickness(n,i,j,k)=2.0_WP*tmpvol/(tmparea+tiny(1.0_WP))
+                     else
+                        thickness(n,i,j,k)=3.5_WP*this%cfg%min_meshsize
+                     end if
+                  end do
+               end do
+            end do
+         end do
+
+         ! Allocate ligament stats arrays
+         allocate(svol(1:this%ccl_buffer%nstruct        )); svol=0.0_WP
+         allocate(sthc(1:this%ccl_buffer%nstruct        )); sthc=HUGE(x)
+         allocate(slen(1:this%ccl_buffer%nstruct        )); slen=0.0_WP
+         allocate(snum(1:this%ccl_buffer%nstruct        )); snum=0.0_WP
+         allocate(sper(1:this%ccl_buffer%nstruct        )); sper=0.0_WP
+         allocate(spos(1:this%ccl_buffer%nstruct,1:3    )); spos=0.0_WP
+         allocate(svel(1:this%ccl_buffer%nstruct,1:3    )); svel=0.0_WP
+         allocate(smoi(1:this%ccl_buffer%nstruct,1:3,1:3)); smoi=0.0_WP
+         allocate(srem(1:this%ccl_buffer%nstruct        )); srem=0.0_WP
+         allocate(xmin(1:this%ccl_buffer%nstruct),xmax(1:this%ccl_buffer%nstruct)); xmin=HUGE(x);xmax=-HUGE(x)
+         allocate(ymin(1:this%ccl_buffer%nstruct),ymax(1:this%ccl_buffer%nstruct)); ymin=HUGE(x);ymax=-HUGE(x)
+         allocate(zmin(1:this%ccl_buffer%nstruct),zmax(1:this%ccl_buffer%nstruct)); zmin=HUGE(x);zmax=-HUGE(x)
+
+         ! Second pass to accumulate volume, position, min thickness and ligament percentage
+         do n=1,this%ccl_buffer%nstruct
+            ! Loop over cells in structure
+            snum(n)=snum(n)+1.0_WP*this%ccl_buffer%struct(n)%n_
+            do m=1,this%ccl_buffer%struct(n)%n_
+                ! Get cell indices
+                i=this%ccl_buffer%struct(n)%map(1,m)
+                j=this%ccl_buffer%struct(n)%map(2,m)
+                k=this%ccl_buffer%struct(n)%map(3,m)
+                ! Get cell position, accounting for periodicity
+                x=this%vf%cfg%xm(i)-this%ccl_buffer%struct(n)%per(1)*this%vf%cfg%xL
+                y=this%vf%cfg%ym(j)-this%ccl_buffer%struct(n)%per(2)*this%vf%cfg%yL
+                z=this%vf%cfg%zm(k)-this%ccl_buffer%struct(n)%per(3)*this%vf%cfg%zL
+                ! Accumulate volume and position. Get min thickness and ligament percentage
+                svol(n  )=svol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
+                spos(n,:)=spos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
+                svel(n,:)=svel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
+                sthc(n)=min(sthc(n),thickness(n,i,j,k))
+                sper(n)=sper(n)+1.0_WP
+                ! Check if ligament touches auto-transfer layer
+                if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
+                &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
+                &   j.ge.this%vf%cfg%jmax-this%nlayer.or.&
+                &   k.le.this%vf%cfg%kmin+this%nlayer.or.&
+                &   k.ge.this%vf%cfg%kmax-this%nlayer) srem(n)=1.0_WP
+                ! Get the structures's locally largest and smallest x,y,z locations
+                do l=1,2
+                  if (getNumberOfVertices(this%vf%interface_polygon(l,i,j,k)).gt.0) then
+                     d = calculateCentroid(this%vf%interface_polygon(l,i,j,k))
+                     xmin(n)=min(xmin(n),d(1)); xmax(n)=max(xmax(n),d(1))
+                     ymin(n)=min(ymin(n),d(2)); ymax(n)=max(ymax(n),d(2))
+                     zmin(n)=min(zmin(n),d(3)); zmax(n)=max(zmax(n),d(3))
+                  end if
+               end do
+            end do
+         end do
+         call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,srem,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,sthc,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,snum,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,sper,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,xmin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,ymin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,zmin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,xmax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,ymax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+         call MPI_ALLREDUCE(MPI_IN_PLACE,zmax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
+
+         ! Third pass to accumulate moment of inertia
+         do n=1,this%ccl_buffer%nstruct
+            ! Get ligament barycenter
+            x0=spos(n,1)/svol(n)
+            y0=spos(n,2)/svol(n)
+            z0=spos(n,3)/svol(n)
+            ! Loop over cells in structure
+            do m=1,this%ccl_buffer%struct(n)%n_
+                ! Get cell indices
+                i=this%ccl_buffer%struct(n)%map(1,m)
+                j=this%ccl_buffer%struct(n)%map(2,m)
+                k=this%ccl_buffer%struct(n)%map(3,m)
+                ! Get cell position relative to drop barycenter, accounting for periodicity
+                x=this%vf%cfg%xm(i)-this%ccl_buffer%struct(n)%per(1)*this%vf%cfg%xL-x0
+                y=this%vf%cfg%ym(j)-this%ccl_buffer%struct(n)%per(2)*this%vf%cfg%yL-y0
+                z=this%vf%cfg%zm(k)-this%ccl_buffer%struct(n)%per(3)*this%vf%cfg%zL-z0
+                ! Accumulate moment of inertia
+                smoi(n,1,1)=smoi(n,1,1)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y**2+z**2)
+                smoi(n,2,2)=smoi(n,2,2)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(z**2+x**2)
+                smoi(n,3,3)=smoi(n,3,3)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x**2+y**2)
+                smoi(n,1,2)=smoi(n,1,2)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x*y)
+                smoi(n,1,3)=smoi(n,1,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(x*z)
+                smoi(n,2,3)=smoi(n,2,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y*z)
+            end do
+         end do
+         call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
+
+         ! Fourth pass to generalize ligament stats
+         do n=1,this%ccl_buffer%nstruct
+            ! Get ligament, accounting for periodicity
+            spos(n,:)=spos(n,:)/svol(n)
+            if (this%vf%cfg%xper.and.spos(n,1).lt.this%vf%cfg%x(this%vf%cfg%imin)) spos(n,1)=spos(n,1)+this%vf%cfg%xL
+            if (this%vf%cfg%yper.and.spos(n,2).lt.this%vf%cfg%y(this%vf%cfg%jmin)) spos(n,2)=spos(n,2)+this%vf%cfg%yL
+            if (this%vf%cfg%zper.and.spos(n,3).lt.this%vf%cfg%z(this%vf%cfg%kmin)) spos(n,3)=spos(n,3)+this%vf%cfg%zL
+            ! Get drop velocity
+            svel(n,:)=svel(n,:)/svol(n)
+            ! Calculate the percentage of ligament structure type
+            sper(n)=sper(n)/snum(n)
+            ! Calculate maximum length of the structure
+            A=smoi(n,:,:)
+            call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
+            d=max(0.0_WP,d)    
+            ! Replace with corrected eigenvectors for future ligament droplet placement
+            smoi(n,:,:)=A
+            ! Get characteristic lengths of drop
+            smax=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n))
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n," lmax=",lmax," d(2)=",d(2)," d(1)=",d(1)," d(3)=",d(3)," lvol(n)=",lvol(n)
+            smid=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n))
+            smin=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n))
+            if (smin.eq.0.0_WP) smin=smid ! Handle 2D case
+            ! Use max of bounding box and MoI-derived lengths as length
+            slen(n) = max(sqrt((xmax(n)-xmin(n))**2+(ymax(n)-ymin(n))**2+(zmax(n)-zmin(n))**2),smax)
+         end do
+
+         ! Find the liquid core
+         nmax=maxloc(svol,dim=1)
+
+         ! Zero out monitoring variables
+         this%vof_tf_buf=0.0_WP
+         this%np_buf=0
+
+         ! Perform transfer
+         do n=1,this%ccl_buffer%nstruct
+            ! Cycle if struct is core
+            if (n.eq.nmax) cycle
+            ! Only convert if structure is toucing buffer
+            if(srem(n).gt.0.0_WP) then
+            else
+               cycle
+            end if
+            ! Skip 
+         end do
+
+      end if
+
+      deallocate(thickness)
+      deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,xmin,ymin,zmin)
 
    contains
 
@@ -1210,6 +1419,7 @@ contains
       ! Prepare Lagrangian drop model
       ! id=1, transfer_drops
       ! id=2, transfer_ligs
+      ! id=3, transfer_buffer
       prepare_transfer: block
          ! Is transfer used?
          call this%input%read('Transfer drops',this%use_drop_transfer,default=.true.)
@@ -1255,6 +1465,10 @@ contains
             this%vof_tf_lig=0.0_WP
             this%np_lig=0
          end if
+         !> Buffer layer transfer
+         ! Zero out monitoring variables
+         this%vof_tf_buf=0.0_WP
+         this%np_buf=0
       end block prepare_transfer
 
       
@@ -1492,6 +1706,7 @@ contains
          call this%mfile%add_column(this%vof_tf_drop,'VOF transfered')
          call this%mfile%add_column(this%vof_tf_drop,'VOF tf drop')
          call this%mfile%add_column(this%vof_tf_lig ,'VOF tf lig')
+         call this%mfile%add_column(this%vof_tf_buf ,'VOF tf buf')
          call this%mfile%add_column(this%fs%divmax,'Maximum divergence')
          call this%mfile%add_column(this%fs%psolv%it,'Pressure iteration')
          call this%mfile%add_column(this%fs%psolv%rerr,'Pressure error')
@@ -1519,6 +1734,7 @@ contains
             call this%pfile%add_column(this%lp%np_new,'Npart new')
             call this%pfile%add_column(this%np_drop,'Npart new drop')
             call this%pfile%add_column(this%np_lig, 'Npart new lig')
+            call this%pfile%add_column(this%np_buf, 'Npart buffer')
             call this%pfile%add_column(this%lp%vp_new,'Vpart new')
             call this%pfile%add_column(this%lp%np_out,'Npart removed')
             call this%pfile%add_column(this%lp%vp_out,'Vpart removed')
