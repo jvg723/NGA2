@@ -57,9 +57,6 @@ module simulation
    !> Provide a pardata objects for restarts
    type(pardata) :: df
    logical :: restarted
-
-   !> Check for stabilization 
-   logical :: stabilization 
    
    !> For monitoring
    real(WP) :: EPS
@@ -479,7 +476,6 @@ contains
          call fs%get_max()
          call vf%get_max()
          call ve%get_max_reconstructed(vf%VF)
-         call ve%get_max(vf%VF)
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
