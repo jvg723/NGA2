@@ -66,24 +66,6 @@ module simulation
 
 contains
    
-   ! !> Function that identifies liquid cells
-   ! logical function label_liquid(i,j,k)
-   !    implicit none
-   !    integer, intent(in) :: i,j,k
-   !    if (vf%VF(i,j,k).gt.0.0_WP) then
-   !       label_liquid=.true.
-   !    else
-   !       label_liquid=.false.
-   !    end if
-   ! end function label_liquid
-
-   ! !> Function that identifies if cell pairs have same label
-   ! logical function same_label(i1,j1,k1,i2,j2,k2)
-   !    implicit none
-   !    integer, intent(in) :: i1,j1,k1,i2,j2,k2
-   !    same_label=.true.
-   ! end function same_label
-
    
    !> Function that defines a level set function for a sphere
    function levelset_sphere(xyz,t) result(G)
@@ -142,40 +124,40 @@ contains
       
    end subroutine compute_stats
    
-   !> Perform droplet analysis
-   subroutine analyse_drops()
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-      use parallel,  only: MPI_REAL_WP
-      use mathtools, only: Pi
-      use string,    only: str_medium
-      use filesys,   only: makedir,isdir
-      character(len=str_medium) :: filename,timestamp
-      real(WP), dimension(:), allocatable :: dvol
-      integer :: iunit,n,m,ierr
-      ! Allocate droplet volume array
-      allocate(dvol(1:ccl%nstruct)); dvol=0.0_WP
-      ! Loop over individual structures
-      do n=1,ccl%nstruct
-         ! Loop over cells in structure and accumulate volume
-         do m=1,ccl%struct(n)%n_
-            dvol(n)=dvol(n)+cfg%vol(ccl%struct(n)%map(1,m),ccl%struct(n)%map(2,m),ccl%struct(n)%map(3,m))*&
-            &                 vf%VF(ccl%struct(n)%map(1,m),ccl%struct(n)%map(2,m),ccl%struct(n)%map(3,m))
-         end do
-      end do
-      ! Reduce volume data
-      call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-      ! Only root process outputs to a file
-      if (cfg%amRoot) then
-         if (.not.isdir('diameter')) call makedir('diameter')
-         filename='diameter_'; write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         do n=1,ccl%nstruct
-            ! Output list of diameters
-            write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
-         end do
-         close(iunit)
-      end if
-   end subroutine analyse_drops
+   ! !> Perform droplet analysis
+   ! subroutine analyse_drops()
+   !    use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+   !    use parallel,  only: MPI_REAL_WP
+   !    use mathtools, only: Pi
+   !    use string,    only: str_medium
+   !    use filesys,   only: makedir,isdir
+   !    character(len=str_medium) :: filename,timestamp
+   !    real(WP), dimension(:), allocatable :: dvol
+   !    integer :: iunit,n,m,ierr
+   !    ! Allocate droplet volume array
+   !    allocate(dvol(1:ccl%nstruct)); dvol=0.0_WP
+   !    ! Loop over individual structures
+   !    do n=1,ccl%nstruct
+   !       ! Loop over cells in structure and accumulate volume
+   !       do m=1,ccl%struct(n)%n_
+   !          dvol(n)=dvol(n)+cfg%vol(ccl%struct(n)%map(1,m),ccl%struct(n)%map(2,m),ccl%struct(n)%map(3,m))*&
+   !          &                 vf%VF(ccl%struct(n)%map(1,m),ccl%struct(n)%map(2,m),ccl%struct(n)%map(3,m))
+   !       end do
+   !    end do
+   !    ! Reduce volume data
+   !    call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+   !    ! Only root process outputs to a file
+   !    if (cfg%amRoot) then
+   !       if (.not.isdir('diameter')) call makedir('diameter')
+   !       filename='diameter_'; write(timestamp,'(es12.5)') time%t
+   !       open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+   !       do n=1,ccl%nstruct
+   !          ! Output list of diameters
+   !          write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+   !       end do
+   !       close(iunit)
+   !    end if
+   ! end subroutine analyse_drops
 
    !> Analyse structures
    subroutine analyse_structs()
