@@ -182,15 +182,17 @@ contains
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
       use parallel,  only: MPI_REAL_WP
       use mathtools, only: pi
+      use string,    only: str_medium
+      use filesys,   only: makedir,isdir
+      character(len=str_medium) :: filename,timestamp
       real(WP), dimension(:)    , allocatable :: svol
       real(WP), dimension(:,:)  , allocatable :: spos
       real(WP), dimension(:,:)  , allocatable :: svel
       real(WP), dimension(:,:,:), allocatable :: smoi
-      real(WP), dimension(:)    , allocatable :: srem
       real(WP), dimension(:,:)  , allocatable :: slen
       real(WP), dimension(:)    , allocatable :: secc
-      integer :: n,m,ierr,i,j,k,nmax,np_start
-      real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
+      integer :: n,m,ierr,i,j,k,iunit
+      real(WP) :: x,y,z,x0,y0,z0
 
       ! Moment of inertia calculation using lapack
       real(WP), dimension(:), allocatable, save :: work !< Saved!
@@ -214,7 +216,6 @@ contains
       allocate(spos(1:ccl%nstruct,1:3    )); spos=0.0_WP
       allocate(svel(1:ccl%nstruct,1:3    )); svel=0.0_WP
       allocate(smoi(1:ccl%nstruct,1:3,1:3)); smoi=0.0_WP
-      allocate(srem(1:ccl%nstruct        )); srem=0.0_WP
       allocate(slen(1:ccl%nstruct,1:3    )); slen=0.0_WP
       allocate(secc(1:ccl%nstruct        )); secc=0.0_WP
       
@@ -239,7 +240,6 @@ contains
       call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(MPI_IN_PLACE,srem,1*ccl%nstruct,MPI_REAL_WP,MPI_MAX,vf%cfg%comm,ierr)
       
       ! Second pass to accumulate moment of inertia
       do n=1,ccl%nstruct
@@ -298,15 +298,21 @@ contains
       call MPI_ALLREDUCE(MPI_IN_PLACE,slen,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       call MPI_ALLREDUCE(MPI_IN_PLACE,secc,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       
-      ! Transfer drops based on our criteria
-      do n=1,ccl%nstruct
-         
-         
-      end do
+      ! Only root process outputs to a file
+      if (cfg%amRoot) then
+         if (.not.isdir('stats')) call makedir('stats')
+         filename='structure_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','xlen','ylen','zlen','secc'
+         do n=1,ccl%nstruct
+
+         end do
+         close(iunit)
+      end if
       
       
       ! Deallocate all but work array
-      deallocate(svol,spos,svel,smoi,srem,slen,secc)
+      deallocate(svol,spos,svel,smoi,slen,secc)
       
    contains
       
