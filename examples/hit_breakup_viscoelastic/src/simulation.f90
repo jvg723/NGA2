@@ -64,6 +64,16 @@ module simulation
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
 
+   !> Type for structure stats
+   type :: struct_stats
+      real(WP) :: vol
+      real(WP) :: x_cg,y_cg,z_cg
+      real(WP) :: u_avg,v_avg,w_avg
+      real(WP), dimension(3,3) :: Imom
+      real(WP), dimension(3) :: lengths
+      real(WP), dimension(3,3) :: axes
+   end type struct_stats
+
 contains
    
    !> Function that identifies liquid cells
@@ -176,6 +186,173 @@ contains
          close(iunit)
       end if
    end subroutine analyse_drops
+
+   !> Perform structure analysis
+   subroutine analyse_structs()
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
+      use mathtools, only: Pi
+      use string,    only: str_medium
+      use filesys,   only: makedir,isdir
+      character(len=str_medium) :: filename,timestamp
+
+      ! contains 
+
+      ! subroutine compute_struct_stats(id,stats)
+      !    implicit none 
+      !    integer, intent(in) :: id
+      !    type(struct_stats), intent(inout) :: stats
+
+      !    integer :: n,m
+      !    integer :: lwork,info,ierr
+      !    integer :: ii,jj,kk
+      !    integer  :: per_x,per_y,per_z
+      !    real(WP) :: vol_struct
+      !    real(WP) :: x_vol,y_vol,z_vol
+      !    real(WP) :: u_vol,v_vol,w_vol
+      !    real(WP), dimension(3,3) :: Imom
+      !    real(WP) :: xtmp,ytmp,ztmp
+      !    real(WP), dimension(3) :: lengths
+      !    real(WP), dimension(3,3) :: axes
+         
+      !    ! Eigenvalues/eigenvectors
+      !    real(WP), dimension(3,3) :: A
+      !    real(WP), dimension(3) :: d
+      !    integer , parameter :: order = 3
+      !    real(WP), dimension(:), allocatable :: work
+      !    real(WP), dimension(1)   :: lwork_query
+
+         
+      !    ! Query optimal work array size
+      !    call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
+
+      !    ! Initialize values
+      !    vol_struct    = 0.0_WP ! Structure volume
+      !    x_vol = 0.0_WP; y_vol = 0.0_WP; z_vol = 0.0_WP ! Center of gravity
+      !    u_vol = 0.0_WP; v_vol = 0.0_WP; w_vol = 0.0_WP ! Average velocity inside struct
+
+      !    ! Find new structure with matching newid
+      !    do n=1,strack%nstruct
+      !       ! Only deal with structure matching newid
+      !       if (strack%struct(n)%id.eq.id) then
+               
+      !          ! Periodicity
+      !          per_x = strack%struct(n)%per(1)
+      !          per_y = strack%struct(n)%per(2)
+      !          per_z = strack%struct(n)%per(3)
+               
+      !          ! Loop over cells in new structure and accumulate statistics
+      !          do m=1,strack%struct(n)%n_
+
+      !             ! Indices of cells in structure
+      !             ii=strack%struct(n)%map(1,m) 
+      !             jj=strack%struct(n)%map(2,m) 
+      !             kk=strack%struct(n)%map(3,m)
+
+      !             ! Location of struct node
+      !             xtmp = strack%vf%cfg%xm(ii)-per_x*strack%vf%cfg%xL
+      !             ytmp = strack%vf%cfg%ym(jj)-per_y*strack%vf%cfg%yL
+      !             ztmp = strack%vf%cfg%zm(kk)-per_z*strack%vf%cfg%zL
+
+      !             ! Volume
+      !             vol_struct = vol_struct + strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+                  
+      !             ! Center of gravity
+      !             x_vol = x_vol + xtmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             y_vol = y_vol + ytmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             z_vol = z_vol + ztmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+                  
+      !             ! Average velocity inside struct
+      !             u_vol = u_vol + fs%U(ii,jj,kk)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             v_vol = v_vol + fs%V(ii,jj,kk)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             w_vol = w_vol + fs%W(ii,jj,kk)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !          end do
+      !       end if
+      !    end do
+
+      !    ! Sum parallel stats
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,vol_struct,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,x_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,y_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,z_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,u_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,v_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    call MPI_ALLREDUCE(MPI_IN_PLACE,w_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+         
+      !    ! Moments of inertia
+      !    Imom=0.0_WP
+      !    do n=1,strack%nstruct
+      !       ! Only deal with structure matching newid
+      !       if (strack%struct(n)%id.eq.id) then
+
+      !          ! Periodicity
+      !          per_x = strack%struct(n)%per(1)
+      !          per_y = strack%struct(n)%per(2)
+      !          per_z = strack%struct(n)%per(3)
+                  
+      !          ! Loop over cells in new structure and accumulate statistics
+      !          do m=1,strack%struct(n)%n_
+
+      !             ! Indices of cells in structure
+      !             ii=strack%struct(n)%map(1,m) 
+      !             jj=strack%struct(n)%map(2,m) 
+      !             kk=strack%struct(n)%map(3,m)
+
+      !             ! Location of struct node
+      !             xtmp = strack%vf%cfg%xm(ii)-per_x*strack%vf%cfg%xL-x_vol/vol_struct
+      !             ytmp = strack%vf%cfg%ym(jj)-per_y*strack%vf%cfg%yL-y_vol/vol_struct
+      !             ztmp = strack%vf%cfg%zm(kk)-per_z*strack%vf%cfg%zL-z_vol/vol_struct
+
+      !             ! Moment of Inertia
+      !             Imom(1,1) = Imom(1,1) + (ytmp**2 + ztmp**2)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             Imom(2,2) = Imom(2,2) + (xtmp**2 + ztmp**2)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             Imom(3,3) = Imom(3,3) + (xtmp**2 + ytmp**2)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+                  
+      !             Imom(1,2) = Imom(1,2) - xtmp*ytmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             Imom(1,3) = Imom(1,3) - xtmp*ztmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !             Imom(2,3) = Imom(2,3) - ytmp*ztmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
+      !          end do 
+      !       end if
+      !    end do
+
+      !    ! Sum parallel stats on Imom
+      !    do n=1,3
+      !       call MPI_ALLREDUCE(MPI_IN_PLACE,Imom(:,n),3,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
+      !    end do
+
+      !    ! Characteristic lengths and principle axes
+      !    ! Eigenvalues/eigenvectors of moments of inertia tensor
+      !    A = Imom
+      !    n = 3
+      !    call dsyev('V','U',n,Imom,n,d,work,lwork,info)
+      !    ! Get rid of very small negative values (due to machine accuracy)
+      !    d = max(0.0_WP,d)
+      !    ! Store characteristic lengths
+      !    lengths(1) = sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/vol_struct)
+      !    lengths(2) = sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/vol_struct)
+      !    lengths(3) = sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/vol_struct)
+      !    ! Zero out length in 3rd dimension if 2D
+      !    if (strack%vf%cfg%nx.eq.1.or.strack%vf%cfg%ny.eq.1.or.strack%vf%cfg%nz.eq.1) lengths(3)=0.0_WP
+      !    ! Store principal axes
+      !    axes(:,:) = A
+
+      !    ! Finish computing qantities
+      !    stats%vol     = vol_struct
+      !    stats%x_cg    = x_vol/vol_struct
+      !    stats%y_cg    = y_vol/vol_struct
+      !    stats%z_cg    = z_vol/vol_struct
+      !    stats%u_avg   = u_vol/vol_struct
+      !    stats%v_avg   = v_vol/vol_struct
+      !    stats%w_avg   = w_vol/vol_struct
+      !    stats%Imom    = Imom 
+      !    stats%lengths = lengths
+      !    stats%axes    = axes
+
+      ! end subroutine compute_struct_stats
+
+
+
+   end subroutine analyse_structs
    
    
    !> Initialization of problem solver
