@@ -303,9 +303,10 @@ contains
          if (.not.isdir('stats')) call makedir('stats')
          filename='structure_'; write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','xlen','ylen','zlen','secc'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','len1','len2','len3','secc'
          do n=1,ccl%nstruct
-
+                                                                                                                                                                                                   !'vol', 'xpos'    ,'ypos'   ,'zpos'   ,'xvel'   ,'yvel'    ,'zvel'   ,'moi11'   ,'moi22'   ,'moi33'     ,'moi12'    ,'moi13'    ,'moi23'    ,'len1'   ,'len2'    ,'len3'   ,'secc'
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') svol(n),spos(n,1),spos(n,2),spos(n,3),svel(n,1),svel(n,2),svel(n,3),smoi(n,1,1),smoi(n,2,2),smoi(n,3,3),smoi(n,1,2),smoi(n,1,3),smoi(n,2,3),slen(n,1), slen(n,2),slen(n,3),secc(n)
          end do
          close(iunit)
       end if
