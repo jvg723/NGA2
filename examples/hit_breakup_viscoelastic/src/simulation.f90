@@ -21,6 +21,7 @@ module simulation
    type(tpns),           public :: fs
    type(timetracker),    public :: time
    type(vfs),            public :: vf
+   type(vfs),            public :: vf2
    type(tpviscoelastic), public :: ve
 
    !> Include cclabel for tagging liquid droplets 
@@ -70,7 +71,7 @@ contains
    logical function label_liquid(i,j,k)
       implicit none
       integer, intent(in) :: i,j,k
-      if (vf%VF(i,j,k).gt.0.0_WP) then
+      if (vf2%VF(i,j,k).gt.0.0_WP) then
          label_liquid=.true.
       else
          label_liquid=.false.
@@ -254,6 +255,7 @@ contains
          use vfs_class, only: lvira,elvira,plicnet,remap_storage,flux_storage
          ! Create a VOF solver with stored full-cell Lagrangian remap
          call vf%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=flux_storage,name='VOF')
+         call vf2%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=remap_storage,name='VOF')
          ! Initialize droplet parameters
          call param_read('Droplet diameter',radius); radius=0.5_WP*radius
          call param_read('Droplet position',center,default=[0.5_WP*cfg%xL,0.5_WP*cfg%yL,0.5_WP*cfg%zL])
