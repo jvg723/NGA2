@@ -23,7 +23,7 @@ module simulation
    type(vfs),            public :: vf
    type(tpviscoelastic), public :: ve
 
-   !> Include cclabel for tagging liquid droplets 
+   !> Include cclabel for anlyzing structures
    type(cclabel) :: ccl
 
    !> Ensight postprocessing
@@ -66,23 +66,23 @@ module simulation
 
 contains
    
-   !> Function that identifies liquid cells
-   logical function label_liquid(i,j,k)
-      implicit none
-      integer, intent(in) :: i,j,k
-      if (vf%VF(i,j,k).gt.0.0_WP) then
-         label_liquid=.true.
-      else
-         label_liquid=.false.
-      end if
-   end function label_liquid
+   ! !> Function that identifies liquid cells
+   ! logical function label_liquid(i,j,k)
+   !    implicit none
+   !    integer, intent(in) :: i,j,k
+   !    if (vf%VF(i,j,k).gt.0.0_WP) then
+   !       label_liquid=.true.
+   !    else
+   !       label_liquid=.false.
+   !    end if
+   ! end function label_liquid
 
-   !> Function that identifies if cell pairs have same label
-   logical function same_label(i1,j1,k1,i2,j2,k2)
-      implicit none
-      integer, intent(in) :: i1,j1,k1,i2,j2,k2
-      same_label=.true.
-   end function same_label
+   ! !> Function that identifies if cell pairs have same label
+   ! logical function same_label(i1,j1,k1,i2,j2,k2)
+   !    implicit none
+   !    integer, intent(in) :: i1,j1,k1,i2,j2,k2
+   !    same_label=.true.
+   ! end function same_label
 
    
    !> Function that defines a level set function for a sphere
@@ -176,6 +176,157 @@ contains
          close(iunit)
       end if
    end subroutine analyse_drops
+
+   !> Analyse structures
+   subroutine analyse_structs()
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
+      use mathtools, only: pi
+      real(WP), dimension(:)    , allocatable :: svol
+      real(WP), dimension(:,:)  , allocatable :: spos
+      real(WP), dimension(:,:)  , allocatable :: svel
+      real(WP), dimension(:,:,:), allocatable :: smoi
+      real(WP), dimension(:)    , allocatable :: srem
+      real(WP), dimension(:,:)  , allocatable :: slen
+      real(WP), dimension(:)    , allocatable :: secc
+      integer :: n,m,ierr,i,j,k,nmax,np_start
+      real(WP) :: x,y,z,x0,y0,z0,diam,ecc,lmax,lmid,lmin
+
+      ! Moment of inertia calculation using lapack
+      real(WP), dimension(:), allocatable, save :: work !< Saved!
+      integer, save :: lwork                            !< Saved!
+      real(WP), dimension(1) :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer :: info
+      
+      ! Query optimal work array size
+      if (.not.allocated(work)) then
+         call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+         lwork=int(lwork_query(1)); allocate(work(lwork))
+      end if
+      
+      ! Start by performing a CCL
+      call ccl%build(make_label,same_label)
+      
+      ! Allocate structure stats arrays
+      allocate(svol(1:ccl%nstruct        )); svol=0.0_WP
+      allocate(spos(1:ccl%nstruct,1:3    )); spos=0.0_WP
+      allocate(svel(1:ccl%nstruct,1:3    )); svel=0.0_WP
+      allocate(smoi(1:ccl%nstruct,1:3,1:3)); smoi=0.0_WP
+      allocate(srem(1:ccl%nstruct        )); srem=0.0_WP
+      allocate(slen(1:ccl%nstruct,1:3    )); slen=0.0_WP
+      allocate(secc(1:ccl%nstruct        )); secc=0.0_WP
+      
+      ! First pass to accumulate volume, position, and velocity
+      do n=1,ccl%nstruct
+         ! Loop over cells in structure
+         do m=1,ccl%struct(n)%n_
+            ! Get cell indices
+            i=ccl%struct(n)%map(1,m)
+            j=ccl%struct(n)%map(2,m)
+            k=ccl%struct(n)%map(3,m)
+            ! Get cell position, accounting for periodicity
+            x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL
+            y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL
+            z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL
+            ! Accumulate volume, position, and velocity
+            svol(n  )=svol(n  )+cfg%vol(i,j,k)*vf%VF(i,j,k)
+            spos(n,:)=spos(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[x,y,z]
+            svel(n,:)=svel(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[Ui(i,j,k),Vi(i,j,k),Wi(i,j,k)]
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,srem,1*ccl%nstruct,MPI_REAL_WP,MPI_MAX,vf%cfg%comm,ierr)
+      
+      ! Second pass to accumulate moment of inertia
+      do n=1,ccl%nstruct
+         ! Get drop barycenter
+         x0=spos(n,1)/svol(n)
+         y0=spos(n,2)/svol(n)
+         z0=spos(n,3)/svol(n)
+         ! Loop over cells in structure
+         do m=1,ccl%struct(n)%n_
+            ! Get cell indices
+            i=ccl%struct(n)%map(1,m)
+            j=ccl%struct(n)%map(2,m)
+            k=ccl%struct(n)%map(3,m)
+            ! Get cell position relative to drop barycenter, accounting for periodicity
+            x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL-x0
+            y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL-y0
+            z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL-z0
+            ! Accumulate moment of inertia
+            smoi(n,1,1)=smoi(n,1,1)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(y**2+z**2)
+            smoi(n,2,2)=smoi(n,2,2)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(z**2+x**2)
+            smoi(n,3,3)=smoi(n,3,3)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(x**2+y**2)
+            smoi(n,1,2)=smoi(n,1,2)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*y)
+            smoi(n,1,3)=smoi(n,1,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*z)
+            smoi(n,2,3)=smoi(n,2,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(y*z)
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      
+      ! Third pass to generate normalized drop stats
+      do n=1,ccl%nstruct
+         ! Get drop barycenter, accounting for periodicity
+         spos(n,:)=spos(n,:)/svol(n)
+         if (vf%cfg%xper.and.spos(n,1).lt.vf%cfg%x(vf%cfg%imin)) spos(n,1)=spos(n,1)+vf%cfg%xL
+         if (vf%cfg%yper.and.spos(n,2).lt.vf%cfg%y(vf%cfg%jmin)) spos(n,2)=spos(n,2)+vf%cfg%yL
+         if (vf%cfg%zper.and.spos(n,3).lt.vf%cfg%z(vf%cfg%kmin)) spos(n,3)=spos(n,3)+vf%cfg%zL
+         ! Get drop velocity
+         svel(n,:)=svel(n,:)/svol(n)
+      end do
+
+      ! Fourth pass to calculate characteristic lengths, principal axes, and eccentricity
+      do n=1,ccl%nstruct
+         ! In between, check eccentricity from moment of inertia tensor
+         A=smoi(n,:,:)
+         call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
+         d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
+         ! Get characteristic lengths of drop
+         slen(n,1)=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n)) !>lmax
+         slen(n,2)=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n)) !>lmid
+         slen(n,3)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n)) !>lmin
+         secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
+      end do
+      
+
+
+      
+      
+      ! Transfer drops based on our criteria
+      do n=1,ccl%nstruct
+         
+         
+      end do
+      
+      
+      ! Deallocate all but work array
+      deallocate(svol,spos,svel,smoi,srem,slen,secc)
+      
+   contains
+      
+      !> Function that identifies cells that need a label
+      logical function make_label(i,j,k)
+         implicit none
+         integer, intent(in) :: i,j,k
+         if (vf%VF(i,j,k).gt.0.0_WP) then
+            make_label=.true.
+         else
+            make_label=.false.
+         end if
+      end function make_label
+      
+      !> Function that identifies if cell pairs have same label
+      logical function same_label(i1,j1,k1,i2,j2,k2)
+         implicit none
+         integer, intent(in) :: i1,j1,k1,i2,j2,k2
+         same_label=.true.
+      end function same_label
+      
+   end subroutine analyse_structs
 
    
    
@@ -394,7 +545,7 @@ contains
       
       ! Create structure tracker
       create_ccl: block
-         call ccl%initialize(pg=cfg%pgrid,name='tag_droplets')
+         call ccl%initialize(pg=cfg%pgrid,name='tag_structs')
       end block create_ccl
 
       
@@ -819,8 +970,7 @@ contains
          
          ! Analyse droplets
          if (drop_evt%occurs()) then 
-            call ccl%build(make_label=label_liquid,same_label=same_label)
-            call analyse_drops()
+            call analyse_structs()
          end if
          
          ! Perform and output monitoring
