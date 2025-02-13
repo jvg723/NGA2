@@ -689,7 +689,7 @@ contains
       drop_analysis: block
          drop_evt=event(time=time,name='Drop analysis')
          call param_read('Drop analysis period',drop_evt%tper)
-         if (drop_evt%occurs()) call analyse_drops()
+         if (drop_evt%occurs()) call analyse_structs()
       end block drop_analysis
       
    end subroutine simulation_init
