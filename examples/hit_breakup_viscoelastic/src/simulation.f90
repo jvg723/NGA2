@@ -278,23 +278,25 @@ contains
          ! Get drop velocity
          svel(n,:)=svel(n,:)/svol(n)
       end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
 
       ! Fourth pass to calculate characteristic lengths, principal axes, and eccentricity
       do n=1,ccl%nstruct
          ! In between, check eccentricity from moment of inertia tensor
          A=smoi(n,:,:)
+         ! Calculate eigenvalue
          call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
          d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
          ! Get characteristic lengths of drop
          slen(n,1)=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n)) !>lmax
          slen(n,2)=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n)) !>lmid
          slen(n,3)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n)) !>lmin
+         ! Calculate its eccentricity
          secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
       end do
-      
-
-
-      
+      call MPI_ALLREDUCE(MPI_IN_PLACE,slen,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,secc,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       
       ! Transfer drops based on our criteria
       do n=1,ccl%nstruct
