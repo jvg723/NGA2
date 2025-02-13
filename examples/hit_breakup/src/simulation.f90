@@ -8,7 +8,7 @@ module simulation
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
-   use stracker_class,    only: stracker
+   use cclabel_class,        only: cclabel
    use event_class,       only: event
    use monitor_class,     only: monitor
    use pardata_class,     only: pardata
@@ -21,8 +21,8 @@ module simulation
    type(timetracker), public :: time
    type(vfs),         public :: vf
 
-   !> Include structure tracker
-   type(stracker) :: strack
+   !> Include cclabel for anlyzing structures
+   type(cclabel) :: ccl
  
    !> Ensight postprocessing
    type(ensight)  :: ens_out
@@ -60,31 +60,9 @@ module simulation
    real(WP) :: Re_L,Re_lambda
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
-
-   !> Type for structure stats
-   type :: struct_stats
-      real(WP) :: vol
-      real(WP) :: x_cg,y_cg,z_cg
-      real(WP) :: u_avg,v_avg,w_avg
-      real(WP), dimension(3,3) :: Imom
-      real(WP), dimension(3) :: lengths
-      real(WP), dimension(3,3) :: axes
-   end type struct_stats
-   
+  
 
 contains
-   
-   !> Function that identifies liquid cells
-   logical function label_liquid(i,j,k)
-      implicit none
-      integer, intent(in) :: i,j,k
-      if (vf%VF(i,j,k).gt.0.0_WP) then
-         label_liquid=.true.
-      else
-         label_liquid=.false.
-      end if
-   end function label_liquid
-
    
    !> Function that defines a level set function for a sphere
    function levelset_sphere(xyz,t) result(G)
@@ -143,281 +121,200 @@ contains
       
    end subroutine compute_stats
    
-   !> Perform droplet analysis
-   subroutine analyse_drops()
-      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+   ! !> Perform droplet analysis
+   ! subroutine analyse_drops()
+   !    use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+   !    use parallel,  only: MPI_REAL_WP
+   !    use mathtools, only: Pi
+   !    use string,    only: str_medium
+   !    use filesys,   only: makedir,isdir
+   !    character(len=str_medium) :: filename,timestamp
+   !    real(WP), dimension(:), allocatable :: dvol
+   !    integer :: iunit,n,m,ierr
+   !    ! Allocate droplet volume array
+   !    allocate(dvol(1:ccl%nstruct)); dvol=0.0_WP
+   !    ! Loop over individual structures
+   !    do n=1,ccl%nstruct
+   !       ! Loop over cells in structure and accumulate volume
+   !       do m=1,ccl%struct(n)%n_
+   !          dvol(n)=dvol(n)+cfg%vol(ccl%struct(n)%map(1,m),ccl%struct(n)%map(2,m),ccl%struct(n)%map(3,m))*&
+   !          &                 vf%VF(ccl%struct(n)%map(1,m),ccl%struct(n)%map(2,m),ccl%struct(n)%map(3,m))
+   !       end do
+   !    end do
+   !    ! Reduce volume data
+   !    call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+   !    ! Only root process outputs to a file
+   !    if (cfg%amRoot) then
+   !       if (.not.isdir('diameter')) call makedir('diameter')
+   !       filename='diameter_'; write(timestamp,'(es12.5)') time%t
+   !       open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+   !       do n=1,ccl%nstruct
+   !          ! Output list of diameters
+   !          write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+   !       end do
+   !       close(iunit)
+   !    end if
+   ! end subroutine analyse_drops
+
+   !> Analyse structures
+   subroutine analyse_structs()
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
       use parallel,  only: MPI_REAL_WP
-      use mathtools, only: Pi
+      use mathtools, only: pi
       use string,    only: str_medium
       use filesys,   only: makedir,isdir
       character(len=str_medium) :: filename,timestamp
-      real(WP), dimension(:), allocatable :: dvol
-      integer :: iunit,n,m,ierr
-      ! Allocate droplet volume array
-      allocate(dvol(1:strack%nstruct)); dvol=0.0_WP
-      ! Loop over individual structures
-      do n=1,strack%nstruct
-         ! Loop over cells in structure and accumulate volume
-         do m=1,strack%struct(n)%n_
-            dvol(n)=dvol(n)+cfg%vol(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))*&
-            &                 vf%VF(strack%struct(n)%map(1,m),strack%struct(n)%map(2,m),strack%struct(n)%map(3,m))
+      real(WP), dimension(:)    , allocatable :: svol
+      real(WP), dimension(:,:)  , allocatable :: spos
+      real(WP), dimension(:,:)  , allocatable :: svel
+      real(WP), dimension(:,:,:), allocatable :: smoi
+      real(WP), dimension(:,:)  , allocatable :: slen
+      real(WP), dimension(:)    , allocatable :: secc
+      integer :: n,m,ierr,i,j,k,iunit
+      real(WP) :: x,y,z,x0,y0,z0
+
+      ! Moment of inertia calculation using lapack
+      real(WP), dimension(:), allocatable, save :: work !< Saved!
+      integer, save :: lwork                            !< Saved!
+      real(WP), dimension(1) :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer :: info
+      
+      ! Query optimal work array size
+      if (.not.allocated(work)) then
+         call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+         lwork=int(lwork_query(1)); allocate(work(lwork))
+      end if
+      
+      ! Start by performing a CCL
+      call ccl%build(make_label,same_label)
+      
+      ! Allocate structure stats arrays
+      allocate(svol(1:ccl%nstruct        )); svol=0.0_WP
+      allocate(spos(1:ccl%nstruct,1:3    )); spos=0.0_WP
+      allocate(svel(1:ccl%nstruct,1:3    )); svel=0.0_WP
+      allocate(smoi(1:ccl%nstruct,1:3,1:3)); smoi=0.0_WP
+      allocate(slen(1:ccl%nstruct,1:3    )); slen=0.0_WP
+      allocate(secc(1:ccl%nstruct        )); secc=0.0_WP
+      
+      ! First pass to accumulate volume, position, and velocity
+      do n=1,ccl%nstruct
+         ! Loop over cells in structure
+         do m=1,ccl%struct(n)%n_
+            ! Get cell indices
+            i=ccl%struct(n)%map(1,m)
+            j=ccl%struct(n)%map(2,m)
+            k=ccl%struct(n)%map(3,m)
+            ! Get cell position, accounting for periodicity
+            x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL
+            y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL
+            z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL
+            ! Accumulate volume, position, and velocity
+            svol(n  )=svol(n  )+cfg%vol(i,j,k)*vf%VF(i,j,k)
+            spos(n,:)=spos(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[x,y,z]
+            svel(n,:)=svel(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[Ui(i,j,k),Vi(i,j,k),Wi(i,j,k)]
          end do
       end do
-      ! Reduce volume data
-      call MPI_ALLREDUCE(MPI_IN_PLACE,dvol,strack%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      
+      ! Second pass to accumulate moment of inertia
+      do n=1,ccl%nstruct
+         ! Get drop barycenter
+         x0=spos(n,1)/svol(n)
+         y0=spos(n,2)/svol(n)
+         z0=spos(n,3)/svol(n)
+         ! Loop over cells in structure
+         do m=1,ccl%struct(n)%n_
+            ! Get cell indices
+            i=ccl%struct(n)%map(1,m)
+            j=ccl%struct(n)%map(2,m)
+            k=ccl%struct(n)%map(3,m)
+            ! Get cell position relative to drop barycenter, accounting for periodicity
+            x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL-x0
+            y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL-y0
+            z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL-z0
+            ! Accumulate moment of inertia
+            smoi(n,1,1)=smoi(n,1,1)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(y**2+z**2)
+            smoi(n,2,2)=smoi(n,2,2)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(z**2+x**2)
+            smoi(n,3,3)=smoi(n,3,3)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(x**2+y**2)
+            smoi(n,1,2)=smoi(n,1,2)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*y)
+            smoi(n,1,3)=smoi(n,1,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*z)
+            smoi(n,2,3)=smoi(n,2,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(y*z)
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      
+      ! Third pass to generate normalized drop stats
+      do n=1,ccl%nstruct
+         ! Get drop barycenter, accounting for periodicity
+         spos(n,:)=spos(n,:)/svol(n)
+         if (vf%cfg%xper.and.spos(n,1).lt.vf%cfg%x(vf%cfg%imin)) spos(n,1)=spos(n,1)+vf%cfg%xL
+         if (vf%cfg%yper.and.spos(n,2).lt.vf%cfg%y(vf%cfg%jmin)) spos(n,2)=spos(n,2)+vf%cfg%yL
+         if (vf%cfg%zper.and.spos(n,3).lt.vf%cfg%z(vf%cfg%kmin)) spos(n,3)=spos(n,3)+vf%cfg%zL
+         ! Get drop velocity
+         svel(n,:)=svel(n,:)/svol(n)
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+
+      ! Fourth pass to calculate characteristic lengths, principal axes, and eccentricity
+      do n=1,ccl%nstruct
+         ! In between, check eccentricity from moment of inertia tensor
+         A=smoi(n,:,:)
+         ! Calculate eigenvalue
+         call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
+         d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
+         ! Get characteristic lengths of drop
+         slen(n,1)=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n)) !>lmax
+         slen(n,2)=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n)) !>lmid
+         slen(n,3)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n)) !>lmin
+         ! Calculate its eccentricity
+         secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,slen,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,secc,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      
       ! Only root process outputs to a file
       if (cfg%amRoot) then
-         if (.not.isdir('diameter')) call makedir('diameter')
-         filename='diameter_'; write(timestamp,'(es12.5)') time%t
-         open(newunit=iunit,file='diameter/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         do n=1,strack%nstruct
-            ! Output list of diameters
-            write(iunit,'(999999(es12.5,x))') (6.0_WP*dvol(n)/Pi)**(1.0_WP/3.0_WP)
+         if (.not.isdir('stats')) call makedir('stats')
+         filename='structure_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','len1','len2','len3','secc'
+         do n=1,ccl%nstruct
+                                                                                                                                                                                                   !'vol', 'xpos'    ,'ypos'   ,'zpos'   ,'xvel'   ,'yvel'    ,'zvel'   ,'moi11'   ,'moi22'   ,'moi33'     ,'moi12'    ,'moi13'    ,'moi23'    ,'len1'   ,'len2'    ,'len3'   ,'secc'
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') svol(n),spos(n,1),spos(n,2),spos(n,3),svel(n,1),svel(n,2),svel(n,3),smoi(n,1,1),smoi(n,2,2),smoi(n,3,3),smoi(n,1,2),smoi(n,1,3),smoi(n,2,3),slen(n,1), slen(n,2),slen(n,3),secc(n)
          end do
          close(iunit)
       end if
-   end subroutine analyse_drops
-
-   !> Perform merge/split analysis
-   subroutine analyze_merge_split
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-      use parallel, only: MPI_REAL_WP
-      implicit none
-      integer :: iunit
-      logical :: file_exists
-      type(struct_stats) :: stats
-
-      ! Open the file - Created in simulation_init
-      if (cfg%amRoot) open(iunit,file="merge_split.csv",form="formatted",status="old",position="append",action="write")
-   
-      analyze_merges: block
-         integer :: n,nn
-
-         ! Traverse merge events
-         do n=1,strack%nmerge_master
-
-            call compute_struct_stats(strack%merge_master(n)%newid,stats)
-            if (cfg%amRoot) then 
-               ! Write merge data to file
-               strack%eventcount = strack%eventcount+1
-               write(iunit,"(I0)",      advance="no")  strack%eventcount
-               write(iunit,"(A)",       advance="no")  ', Merge,'
-               do nn=1,strack%merge_master(n)%noldid
-                  write(iunit,"(I0)",   advance="no")  strack%merge_master(n)%oldids(nn)
-                  write(iunit,"(A)",    advance="no")  ';'
-               end do
-               write(iunit,"(A)",       advance="no")   ','
-               write(iunit,"(I0)",      advance="no")  strack%merge_master(n)%newid
-               write(iunit,"(A)",       advance="no")  ','
-               write(iunit,"(ES12.5 )", advance="no")  time%t
-               write(iunit,"(A)",       advance="no")   ','
-               write(iunit,"(ES22.16)", advance="yes") stats%vol
-            end if 
-         end do
-      end block analyze_merges
-
-      analyze_splits: block 
-      integer :: n,nn
-
-         ! Traverse split events
-         do n=1,strack%nsplit_master
-            ! Write stats for each new structure after split
-            do nn=1,strack%split_master(n)%nnewid
-               call compute_struct_stats(strack%split_master(n)%newids(nn),stats)
-               if (cfg%amRoot) then 
-
-                  ! Write merge data to file
-                  strack%eventcount = strack%eventcount+1
-                  write(iunit,"(I0)",      advance="no")  strack%eventcount
-                  write(iunit,"(A)",       advance="no")  ', Split,'
-                  write(iunit,"(I0)",      advance="no")  strack%split_master(n)%oldid
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(I0)",      advance="no")  strack%split_master(n)%newids(nn)
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES12.5 )", advance="no")  time%t
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES22.16)", advance="no")  stats%vol
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%x_cg
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%y_cg
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%z_cg
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%u_avg
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%v_avg
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%w_avg
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%lengths(1)
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="no")  stats%lengths(2)
-                  write(iunit,"(A)",       advance="no")  ','
-                  write(iunit,"(ES20.12)", advance="yes")  stats%lengths(3)
-               end if 
-            end do
-         end do
       
-      end block analyze_splits
-
-      if (cfg%amRoot) close(iunit)
-   
-   contains 
-
-      subroutine compute_struct_stats(id,stats)
-         implicit none 
-         integer, intent(in) :: id
-         type(struct_stats), intent(inout) :: stats
-
-         integer :: n,m
-         integer :: lwork,info,ierr
-         integer :: ii,jj,kk
-         integer  :: per_x,per_y,per_z
-         real(WP) :: vol_struct
-         real(WP) :: x_vol,y_vol,z_vol
-         real(WP) :: u_vol,v_vol,w_vol
-         real(WP), dimension(3,3) :: Imom
-         real(WP) :: xtmp,ytmp,ztmp
-         real(WP), dimension(3) :: lengths
-         real(WP), dimension(3,3) :: axes
-         
-         ! Eigenvalues/eigenvectors
-         real(WP), dimension(3,3) :: A
-         real(WP), dimension(3) :: d
-         integer , parameter :: order = 3
-         real(WP), dimension(:), allocatable :: work
-         real(WP), dimension(1)   :: lwork_query
-
-         
-         ! Query optimal work array size
-         call dsyev('V','U',order,A,order,d,lwork_query,-1,info); lwork=int(lwork_query(1)); allocate(work(lwork))
-
-         ! Initialize values
-         vol_struct    = 0.0_WP ! Structure volume
-         x_vol = 0.0_WP; y_vol = 0.0_WP; z_vol = 0.0_WP ! Center of gravity
-         u_vol = 0.0_WP; v_vol = 0.0_WP; w_vol = 0.0_WP ! Average velocity inside struct
-
-         ! Find new structure with matching newid
-         do n=1,strack%nstruct
-            ! Only deal with structure matching newid
-            if (strack%struct(n)%id.eq.id) then
-               
-               ! Periodicity
-               per_x = strack%struct(n)%per(1)
-               per_y = strack%struct(n)%per(2)
-               per_z = strack%struct(n)%per(3)
-               
-               ! Loop over cells in new structure and accumulate statistics
-               do m=1,strack%struct(n)%n_
-
-                  ! Indices of cells in structure
-                  ii=strack%struct(n)%map(1,m) 
-                  jj=strack%struct(n)%map(2,m) 
-                  kk=strack%struct(n)%map(3,m)
-
-                  ! Location of struct node
-                  xtmp = strack%vf%cfg%xm(ii)-per_x*strack%vf%cfg%xL
-                  ytmp = strack%vf%cfg%ym(jj)-per_y*strack%vf%cfg%yL
-                  ztmp = strack%vf%cfg%zm(kk)-per_z*strack%vf%cfg%zL
-
-                  ! Volume
-                  vol_struct = vol_struct + strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  
-                  ! Center of gravity
-                  x_vol = x_vol + xtmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  y_vol = y_vol + ytmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  z_vol = z_vol + ztmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  
-                  ! Average velocity inside struct
-                  u_vol = u_vol + fs%U(ii,jj,kk)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  v_vol = v_vol + fs%V(ii,jj,kk)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  w_vol = w_vol + fs%W(ii,jj,kk)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-               end do
-            end if
-         end do
-
-         ! Sum parallel stats
-         call MPI_ALLREDUCE(MPI_IN_PLACE,vol_struct,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,x_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,y_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,z_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,u_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,v_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,w_vol,1,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         
-         ! Moments of inertia
-         Imom=0.0_WP
-         do n=1,strack%nstruct
-            ! Only deal with structure matching newid
-            if (strack%struct(n)%id.eq.id) then
-
-               ! Periodicity
-               per_x = strack%struct(n)%per(1)
-               per_y = strack%struct(n)%per(2)
-               per_z = strack%struct(n)%per(3)
-                  
-               ! Loop over cells in new structure and accumulate statistics
-               do m=1,strack%struct(n)%n_
-
-                  ! Indices of cells in structure
-                  ii=strack%struct(n)%map(1,m) 
-                  jj=strack%struct(n)%map(2,m) 
-                  kk=strack%struct(n)%map(3,m)
-
-                  ! Location of struct node
-                  xtmp = strack%vf%cfg%xm(ii)-per_x*strack%vf%cfg%xL-x_vol/vol_struct
-                  ytmp = strack%vf%cfg%ym(jj)-per_y*strack%vf%cfg%yL-y_vol/vol_struct
-                  ztmp = strack%vf%cfg%zm(kk)-per_z*strack%vf%cfg%zL-z_vol/vol_struct
-
-                  ! Moment of Inertia
-                  Imom(1,1) = Imom(1,1) + (ytmp**2 + ztmp**2)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  Imom(2,2) = Imom(2,2) + (xtmp**2 + ztmp**2)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  Imom(3,3) = Imom(3,3) + (xtmp**2 + ytmp**2)*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  
-                  Imom(1,2) = Imom(1,2) - xtmp*ytmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  Imom(1,3) = Imom(1,3) - xtmp*ztmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-                  Imom(2,3) = Imom(2,3) - ytmp*ztmp*strack%vf%cfg%vol(ii,jj,kk)*strack%vf%VF(ii,jj,kk)
-               end do 
-            end if
-         end do
-
-         ! Sum parallel stats on Imom
-         do n=1,3
-            call MPI_ALLREDUCE(MPI_IN_PLACE,Imom(:,n),3,MPI_REAL_WP,MPI_SUM,strack%vf%cfg%comm,ierr)
-         end do
-
-         ! Characteristic lengths and principle axes
-         ! Eigenvalues/eigenvectors of moments of inertia tensor
-         A = Imom
-         n = 3
-         call dsyev('V','U',n,Imom,n,d,work,lwork,info)
-         ! Get rid of very small negative values (due to machine accuracy)
-         d = max(0.0_WP,d)
-         ! Store characteristic lengths
-         lengths(1) = sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/vol_struct)
-         lengths(2) = sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/vol_struct)
-         lengths(3) = sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/vol_struct)
-         ! Zero out length in 3rd dimension if 2D
-         if (strack%vf%cfg%nx.eq.1.or.strack%vf%cfg%ny.eq.1.or.strack%vf%cfg%nz.eq.1) lengths(3)=0.0_WP
-         ! Store principal axes
-         axes(:,:) = A
-
-         ! Finish computing qantities
-         stats%vol     = vol_struct
-         stats%x_cg    = x_vol/vol_struct
-         stats%y_cg    = y_vol/vol_struct
-         stats%z_cg    = z_vol/vol_struct
-         stats%u_avg   = u_vol/vol_struct
-         stats%v_avg   = v_vol/vol_struct
-         stats%w_avg   = w_vol/vol_struct
-         stats%Imom    = Imom 
-         stats%lengths = lengths
-         stats%axes    = axes
-
-      end subroutine compute_struct_stats
-
-   end subroutine analyze_merge_split
+      
+      ! Deallocate all but work array
+      deallocate(svol,spos,svel,smoi,slen,secc)
+      
+   contains
+      
+      !> Function that identifies cells that need a label
+      logical function make_label(i,j,k)
+         implicit none
+         integer, intent(in) :: i,j,k
+         if (vf%VF(i,j,k).gt.0.0_WP) then
+            make_label=.true.
+         else
+            make_label=.false.
+         end if
+      end function make_label
+      
+      !> Function that identifies if cell pairs have same label
+      logical function same_label(i1,j1,k1,i2,j2,k2)
+         implicit none
+         integer, intent(in) :: i1,j1,k1,i2,j2,k2
+         same_label=.true.
+      end function same_label
+      
+   end subroutine analyse_structs
    
    
    !> Initialization of problem solver
@@ -609,10 +506,10 @@ contains
          if (inj_evt%tper.eq.0.0_WP) call inject_drop()
       end block check_injection
       
-      ! Create structure tracker
-      create_strack: block
-         call strack%initialize(vf=vf,phase=0,make_label=label_liquid,name='stracker_test')
-      end block create_strack
+     ! Create structure tracker
+      create_ccl: block
+         call ccl%initialize(pg=cfg%pgrid,name='tag_structs')
+      end block create_ccl
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
@@ -631,7 +528,7 @@ contains
                do i=vf%cfg%imin_,vf%cfg%imax_
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                        np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
                      end if
                   end do
                end do
@@ -652,7 +549,7 @@ contains
          call ens_out%add_scalar('pressure',fs%P)
          call ens_out%add_scalar('VOF',vf%VF)
          call ens_out%add_scalar('curvature',vf%curv)
-         call ens_out%add_scalar('id',strack%id)
+         call ens_out%add_scalar('id',ccl%id)
          call ens_out%add_surface('vofplic',smesh)
          ! Output to ensight
          if (ens_evt%occurs()) call ens_out%write_data(time%t)
@@ -721,27 +618,12 @@ contains
          call cvgfile%write()
       end block create_monitor
 
-      create_merge_split: block 
-         integer :: iunit
-         logical :: file_exists
-         if (cfg%amRoot) then
-            ! Check if the file exists
-            INQUIRE(FILE="merge_split.csv", EXIST=file_exists)
-            if (.not.file_exists) then
-               ! Create a new file with headers if it doesn't exist
-               open(newunit=iunit, file="merge_split.csv", form="formatted", status="replace", action="write")
-               write(iunit, "(A)") "Event Count, Event Type, Old IDs, New ID, Time, New Vol, X, Y, Z, U, V, W, L1, L2, L3"
-               close(iunit)
-            end if
-         end if
-      end block create_merge_split
-
 
       ! Initialize an event for drop size analysis
       drop_analysis: block
          drop_evt=event(time=time,name='Drop analysis')
          call param_read('Drop analysis period',drop_evt%tper)
-         if (drop_evt%occurs()) call analyse_drops()
+         if (drop_evt%occurs()) call analyse_structs()
       end block drop_analysis
       
    end subroutine simulation_init
@@ -776,10 +658,6 @@ contains
          
          ! VOF solver step
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
-
-         ! Advance stracker
-         call strack%advance(make_label=label_liquid)
-         call analyze_merge_split
          
          ! Prepare new staggered viscosity (at n+1)
 		   call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
@@ -886,7 +764,7 @@ contains
                      do i=vf%cfg%imin_,vf%cfg%imax_
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                              np=np+1; smesh%var(1,np)=real(strack%id(i,j,k),WP)
+                              np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
                            end if
                         end do
                      end do
@@ -897,7 +775,9 @@ contains
          end if
          
          ! Analyse droplets
-         ! if (drop_evt%occurs()) call analyse_drops()
+         if (drop_evt%occurs()) then 
+            call analyse_structs()
+         end if
          
          ! Perform and output monitoring
          call compute_stats()

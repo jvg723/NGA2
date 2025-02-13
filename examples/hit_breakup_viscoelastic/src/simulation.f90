@@ -710,7 +710,6 @@ contains
          
          ! Inject droplet
          if (.not.droplet_injected.and.inj_evt%occurs()) call inject_drop()
-
          
          ! Remember old VOF
          vf%VFold=vf%VF
