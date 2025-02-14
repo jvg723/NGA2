@@ -881,7 +881,7 @@ contains
       allocate(thickness(this%ccl_buffer%nstruct,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));thickness=0.0_WP
 
       if (this%ccl_buffer%nstruct.ge.1) then
-
+         if (this%vf%cfg%amRoot) print *, "1"
          ! First pass to accumulate structure thickness
          nneigh_thickness=3
          do n=1,this%ccl_buffer%nstruct
@@ -910,7 +910,7 @@ contains
                end do
             end do
          end do
-
+         if (this%vf%cfg%amRoot) print *, "2"
          ! Allocate ligament stats arrays
          allocate(svol (1:this%ccl_buffer%nstruct        )); svol=0.0_WP
          allocate(sthc (1:this%ccl_buffer%nstruct        )); sthc=HUGE(x)
@@ -925,7 +925,7 @@ contains
          allocate(xmin(1:this%ccl_buffer%nstruct),xmax(1:this%ccl_buffer%nstruct)); xmin=HUGE(x);xmax=-HUGE(x)
          allocate(ymin(1:this%ccl_buffer%nstruct),ymax(1:this%ccl_buffer%nstruct)); ymin=HUGE(x);ymax=-HUGE(x)
          allocate(zmin(1:this%ccl_buffer%nstruct),zmax(1:this%ccl_buffer%nstruct)); zmin=HUGE(x);zmax=-HUGE(x)
-
+         if (this%vf%cfg%amRoot) print *, "3"
          ! Second pass to accumulate volume, position, min thickness and ligament percentage
          do n=1,this%ccl_buffer%nstruct
             ! Loop over cells in structure
@@ -962,6 +962,7 @@ contains
                end do
             end do
          end do
+         if (this%vf%cfg%amRoot) print *, "4"
          call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
@@ -975,7 +976,7 @@ contains
          call MPI_ALLREDUCE(MPI_IN_PLACE,xmax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,ymax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,zmax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-
+         if (this%vf%cfg%amRoot) print *, "5"
          ! Third pass to accumulate moment of inertia
          do n=1,this%ccl_buffer%nstruct
             ! Get ligament barycenter
@@ -1001,8 +1002,9 @@ contains
                 smoi(n,2,3)=smoi(n,2,3)-this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*(y*z)
             end do
          end do
+         if (this%vf%cfg%amRoot) print *, "6"
          call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-
+         if (this%vf%cfg%amRoot) print *, "7"
          ! Fourth pass to generalize ligament stats
          do n=1,this%ccl_buffer%nstruct
             ! Get ligament, accounting for periodicity
@@ -1031,17 +1033,17 @@ contains
             ! Use max of bounding box and MoI-derived lengths as length
             slen(n) = max(sqrt((xmax(n)-xmin(n))**2+(ymax(n)-ymin(n))**2+(zmax(n)-zmin(n))**2),smax)
          end do
-
+         if (this%vf%cfg%amRoot) print *, "8"
          ! Find the liquid core
          nmax=maxloc(svol,dim=1)
-
+         if (this%vf%cfg%amRoot) print *, "9"
          ! Zero out monitoring variables
          this%vof_tf_buf=0.0_WP
          this%np_buf=0
-
+         if (this%vf%cfg%amRoot) print *, "10"
          ! Perform transfer
          do n=1,this%ccl_buffer%nstruct
-
+            if (this%vf%cfg%amRoot) print *, "This struct id=", n," vol=",svol(n)," len=",slen(n)," rem=",srem(n)," ecc=",s_ecc(n)
             ! Cycle if struct is core
             if (n.eq.nmax) cycle
 
@@ -1081,7 +1083,14 @@ contains
                         this%lp%p(this%lp%np_)%d=diam                                                                                    
                      end if
                      this%lp%p(this%lp%np_)%pos=spos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*smoi(n,:,1)
+                     if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " spos(n,1)=",spos(n,1), " spos(n,2)=",spos(n,2), " spos(n,3)=",spos(n,3)
+                     if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrp=",Lrp
+                     if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " smoi(n,1,1)=",smoi(n,1,1), " smoi(n,2,1)=",smoi(n,2,1), " smoi(n,3,1)=",smoi(n,3,1)
+                     if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " pos(1)=",this%lp%p(this%lp%np_)%pos(1), " pos(2)=",this%lp%p(this%lp%np_)%pos(2), " pos(3)=",this%lp%p(this%lp%np_)%pos(3)   
+                     this%lp%p(this%lp%np_)%vel =svel(n,:)
+                     if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " svel(n,1)=",svel(n,1), " svel(n,2)=",svel(n,2), " svel(n,3)=",svel(n,3)
                      this%lp%p(this%lp%np_)%ind =this%cfg%get_ijk_global(this%lp%p(this%lp%np_)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+                     if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " ind(1)=",this%lp%p(this%lp%np_)%ind(1), " ind(2)=",this%lp%p(this%lp%np_)%ind(2), " ind(3)=",this%lp%p(this%lp%np_)%ind(3)   
                      this%lp%p(this%lp%np_)%flag=0                                                                                        
                      this%lp%p(this%lp%np_)%dt  =0.0_WP                                                                                  
                      this%lp%p(this%lp%np_)%Acol=0.0_WP                                                                                  
@@ -1128,21 +1137,21 @@ contains
             end do    
 
          end do
-
+         if (this%vf%cfg%amRoot) print *, "11"
          ! Synchronize VF fields
          call this%vf%cfg%sync(this%vf%VF)
          call this%vf%clean_irl_and_band()
-
+         if (this%vf%cfg%amRoot) print *, "12"
          ! Synchronize particles
          call this%lp%sync()
-         
+         if (this%vf%cfg%amRoot) print *, "13"
          ! Integrate monitoring variables 
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_tf_buf,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%np_buf    ,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
-
+         if (this%vf%cfg%amRoot) print *, "14"
          deallocate(thickness)
          deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
-
+         if (this%vf%cfg%amRoot) print *, "15"
       end if
 
    contains
@@ -2214,7 +2223,9 @@ contains
          if (this%use_drop_transfer) call this%transfer_drops()
          call this%tdtrans%stop() ! Stop transfer timer
          call this%tbtrans%start() ! Start buffer transfer
+         if (this%vf%cfg%amRoot) print *, "pre buffer transfer"
          if (this%use_buf_transfer) call this%transfer_buffer()
+          if (this%vf%cfg%amRoot) print *, "post buffer transfer"
          call this%tbtrans%stop() ! Stop transfer timer
       end block attempt_transfer
       
