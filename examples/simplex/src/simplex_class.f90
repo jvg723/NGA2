@@ -81,16 +81,16 @@ module simplex_class
       type(timer)   :: tvel     !< Timer for velocity
       type(timer)   :: tpres    !< Timer for pressure
       type(timer)   :: tvof     !< Timer for VOF
-      type(timer)   :: tdtrans   !< Timer for VOF transfer
-      type(timer)   :: tltrans   !< Timer for ligament transfer
-      type(timer)   :: tlpadv    !< Timer for advancing particles
+      type(timer)   :: tdtrans  !< Timer for VOF transfer
+      type(timer)   :: tltrans  !< Timer for ligament transfer
+      type(timer)   :: tbtrans  !< Timer for buffer transfer
+      type(timer)   :: tlpadv   !< Timer for advancing particles
 
       !> Event for flow rate analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
       
       !> Drop transfer modeling
       logical :: use_drop_transfer !< Do we use droplet transfer
-      logical :: use_lig_transfer  !< Do we use ligament transfer
       type(lpt)      :: lp         !< Lagrangian particle tracking
       type(monitor)  :: pfile      !< Particle monitoring
       type(partmesh) :: pmesh      !< Particle mesh for lpt
@@ -102,6 +102,7 @@ module simplex_class
       real(WP) :: vof_deleted      !< Integral of VOF deleted
       integer  :: np_drop
 
+      logical :: use_lig_transfer  !< Do we use ligament transfer
       real(WP) :: lmin
       real(WP) :: lmake
       real(WP) :: lper
@@ -112,6 +113,7 @@ module simplex_class
       real(WP) :: vof_tf_lig
       integer  :: np_lig
 
+      logical  :: use_buf_transfer  !< Do we use buffer transfer
       real(WP) :: vof_tf_buf
       integer  :: np_buf
       
@@ -1138,10 +1140,10 @@ contains
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_tf_buf,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%np_buf    ,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
 
-      end if
+         deallocate(thickness)
+         deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
 
-      deallocate(thickness)
-      deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
+      end if
 
    contains
 
@@ -1519,6 +1521,7 @@ contains
          ! Is transfer used?
          call this%input%read('Transfer drops',this%use_drop_transfer,default=.true.)
          call this%input%read('Transfer ligaments',this%use_lig_transfer,default=.true.)
+         call this%input%read('Transfer buffer',this%use_buf_transfer,default=.true.)
          ! Create CCLs
          call this%ccl%initialize(pg=this%cfg%pgrid,name='ccl')
          call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
@@ -1560,10 +1563,12 @@ contains
             this%vof_tf_lig=0.0_WP
             this%np_lig=0
          end if
-         !> Buffer layer transfer
-         ! Zero out monitoring variables
-         this%vof_tf_buf=0.0_WP
-         this%np_buf=0
+         if (this%use_buf_transfer) then
+            !> Buffer layer transfer
+            ! Zero out monitoring variables
+            this%vof_tf_buf=0.0_WP
+            this%np_buf=0
+         end if
       end block prepare_transfer
 
       
@@ -1743,7 +1748,7 @@ contains
 
       
       ! Create partmesh object for particle output
-      if (this%use_drop_transfer.or.this%use_lig_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer.or.this%use_buf_transfer) then
          create_pmesh: block
             integer :: i
             this%pmesh=partmesh(nvar=2,nvec=1,name='lpt')
@@ -1819,7 +1824,7 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
          ! Create particle monitor
-         if (this%use_drop_transfer.or.this%use_lig_transfer) then
+         if (this%use_drop_transfer.or.this%use_lig_transfer.or.this%use_lig_transfer) then
             call this%lp%get_max()
             this%pfile=monitor(amroot=this%lp%cfg%amRoot,name='particles')
             call this%pfile%add_column(this%time%n,'Timestep number')
@@ -1854,8 +1859,9 @@ contains
          this%tvel   =timer(comm=this%cfg%comm,name='Velocity')
          this%tpres  =timer(comm=this%cfg%comm,name='Pressure')
          this%tsgs   =timer(comm=this%cfg%comm,name='SGSmodel')
-         this%tdtrans=timer(comm=this%cfg%comm,name='Transfer')
+         this%tdtrans=timer(comm=this%cfg%comm,name='Transferdrp')
          this%tltrans=timer(comm=this%cfg%comm,name='Transferlig')
+         this%tbtrans=timer(comm=this%cfg%comm,name='Transferbuf')
          this%tlpadv =timer(comm=this%cfg%comm,name='AdvancePart')
          ! Create corresponding monitor file
          this%timefile=monitor(this%fs%cfg%amRoot,'timing')
@@ -1868,6 +1874,7 @@ contains
          call this%timefile%add_column(this%tsgs%time  ,trim(this%tsgs%name))
          call this%timefile%add_column(this%tdtrans%time,trim(this%tdtrans%name))
          call this%timefile%add_column(this%tltrans%time,trim(this%tltrans%name))
+         call this%timefile%add_column(this%tbtrans%time,trim(this%tbtrans%name))
          call this%timefile%add_column(this%tlpadv%time,trim(this%tlpadv%name))
       end block create_timing
 
@@ -2009,6 +2016,7 @@ contains
       call this%tpres%reset()
       call this%tdtrans%reset()
       call this%tltrans%reset()
+      call this%tbtrans%reset()
       call this%tlpadv%reset()
       call this%tstep%start()
       
@@ -2018,7 +2026,7 @@ contains
       call this%time%increment()
       
       ! Advance lagrangian droplets
-      if (this%use_drop_transfer.or.this%use_lig_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer.or.this%use_buf_transfer) then
          this%resU=this%fs%rho_g
          this%resV=this%fs%visc_g
          call this%tlpadv%start()
@@ -2205,7 +2213,9 @@ contains
          call this%tdtrans%start() ! Start transfer timer
          if (this%use_drop_transfer) call this%transfer_drops()
          call this%tdtrans%stop() ! Stop transfer timer
-         call this%transfer_buffer()
+         call this%tbtrans%start() ! Start buffer transfer
+         if (this%use_buf_transfer) call this%transfer_buffer()
+         call this%tbtrans%stop() ! Stop transfer timer
       end block attempt_transfer
       
       ! Remove VOF at edge of domain
@@ -2312,7 +2322,7 @@ contains
       call this%mfile%write()
       call this%cflfile%write()
       call this%timefile%write()
-      if (this%use_drop_transfer.or.this%use_lig_transfer) then
+      if (this%use_drop_transfer.or.this%use_lig_transfer.or.this%use_buf_transfer) then
          call this%lp%get_max()
          call this%pfile%write()
       end if
@@ -2373,7 +2383,7 @@ contains
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
             ! Finally, handle particle I/O
-            if (this%use_drop_transfer.or.this%use_lig_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
+            if (this%use_drop_transfer.or.this%use_lig_transfer.or.this%use_buf_transfer) call this%lp%write(filename='restart/part_'//trim(adjustl(timestamp)))
          end block save_restart
       end if
       
