@@ -8,7 +8,7 @@ module simulation
    use timetracker_class, only: timetracker
    use ensight_class,     only: ensight
    use surfmesh_class,    only: surfmesh
-   use cclabel_class,        only: cclabel
+   use cclabel_class,     only: cclabel
    use event_class,       only: event
    use monitor_class,     only: monitor
    use pardata_class,     only: pardata
