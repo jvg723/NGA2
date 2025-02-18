@@ -68,6 +68,7 @@ module simplex_class
       real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
       real(WP), dimension(:,:,:), allocatable :: Uib,Vib,Wib         !< IB slip velocity
       real(WP), dimension(:,:,:), allocatable :: thickness,struct_type
+      real(WP), dimension(:,:,:), allocatable :: Uslip,Vslip,Wslip   !< Cell-centered velocities
       
       !> Iterator for VOF removal
       type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
@@ -116,6 +117,9 @@ module simplex_class
       logical  :: use_buf_transfer  !< Do we use buffer transfer
       real(WP) :: vof_tf_buf
       integer  :: np_buf
+
+      ! Slip velocity modeling
+      logical :: use_slipvel
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -1493,6 +1497,13 @@ contains
          call this%fs%get_div()
          ! Compute cell-centered velocity
          call this%fs%interp_vel(this%Ui,this%Vi,this%Wi)
+         ! Are we adding in slip veloctiy
+         call this%input%read('Add slip velocity',this%use_slipvel,default=.false.)
+         if (this%use_slipvel) then 
+            allocate(this%Uslip(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%Uslip=0.0_WP
+            allocate(this%Vslip(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%Vslip=0.0_WP
+            allocate(this%Wslip(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));this%Wslip=0.0_WP
+         end if
       end block initialize_velocity
       
       
@@ -1700,13 +1711,14 @@ contains
       create_smesh: block
          use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
          integer :: i,j,k,np,nplane
-         this%smesh=surfmesh(nvar=6,name='plic')
+         this%smesh=surfmesh(nvar=7,name='plic')
          this%smesh%varname(1)='nplane'
          this%smesh%varname(2)='thickness'
          this%smesh%varname(3)='ccl_lig'
          this%smesh%varname(4)='thickness_unfilt'
          this%smesh%varname(5)='struct_type'
          this%smesh%varname(6)='ccl_buf'
+         this%smesh%varname(7)='edge_sensor'
          ! Transfer polygons to smesh
          call this%vf%update_surfmesh_nowall(this%smesh)
          ! Calculate thickness even for plic
@@ -1728,6 +1740,7 @@ contains
                         this%smesh%var(4,np)=this%thickness(i,j,k)
                         this%smesh%var(5,np)=this%struct_type(i,j,k)
                         this%smesh%var(6,np)=real(this%ccl_buffer%id(i,j,k),WP)
+                        this%smesh%var(7,np)=this%vf%edge_sensor(i,j,k)
                      end if
                   end do
                end do
@@ -2033,11 +2046,42 @@ contains
       
       ! Prepare old staggered density (at n)
       call this%fs%get_olddensity(vf=this%vf)
-      
-      ! VOF solver step
-      call this%tvof%start() ! Start VOF timer
-      call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
-      call this%tvof%stop() ! Stop VOF timer
+
+      ! Check if we are using slip velocity
+      if (this%use_slipvel) then
+         ! Add in slip velocity at hole edges
+         slip_velocity: block
+            integer :: i,j,k
+            ! Store current velocity field 
+            this%Uslip=this%fs%U
+            this%Vslip=this%fs%V
+            this%Wslip=this%fs%W
+            ! Add in retraction velocities
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     if (this%vf%edge_sensor(i,j,k).ge.0.3_WP) then
+                        this%Uslip(i  ,j,k)=this%Uslip(i  ,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                        this%Uslip(i+1,j,k)=this%Uslip(i+1,j,k)+0.5_WP*this%vf%edge_normal(1,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                        this%Vslip(i,j  ,k)=this%Vslip(i,j  ,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                        this%Vslip(i,j+1,k)=this%Vslip(i,j+1,k)+0.5_WP*this%vf%edge_normal(2,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                        this%Wslip(i,j,k  )=this%Wslip(i,j,k  )+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                        this%Wslip(i,j,k+1)=this%Wslip(i,j,k+1)+0.5_WP*this%vf%edge_normal(3,i,j,k)*sqrt(2.0_WP*this%fs%sigma/(this%fs%rho_l*this%vf%thickness(i,j,k)))
+                     end if
+                  end do 
+               end do 
+            end do
+         end block slip_velocity
+         ! VOF solver step
+         call this%tvof%start() ! Start VOF timer
+         call this%vf%advance(dt=this%time%dt,U=this%Uslip,V=this%Vslip,W=this%Wslip)
+         call this%tvof%stop() ! Stop VOF timer
+      else
+         ! VOF solver step
+         call this%tvof%start() ! Start VOF timer
+         call this%vf%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W)
+         call this%tvof%stop() ! Stop VOF timer
+      end if
       
       ! Prepare new staggered viscosity (at n+1)
       call this%fs%get_viscosity(vf=this%vf,strat=arithmetic_visc)
@@ -2277,6 +2321,7 @@ contains
                            this%smesh%var(4,np)=this%thickness(i,j,k)
                            this%smesh%var(5,np)=this%struct_type(i,j,k)
                            this%smesh%var(6,np)=real(this%ccl_buffer%id(i,j,k),WP)
+                           this%smesh%var(7,np)=this%vf%edge_sensor(i,j,k)
                         end if
                      end do
                   end do
@@ -2387,6 +2432,9 @@ contains
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
       deallocate(this%gradU,this%Uib,this%Vib,this%Wib,this%SR)
       deallocate(this%thickness,this%struct_type)
+      if (this%use_slipvel) then 
+         deallocate(this%Uslip,this%Vslip,this%Wslip)
+      end if
    end subroutine final
    
    
