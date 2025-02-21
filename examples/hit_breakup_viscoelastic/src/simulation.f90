@@ -632,6 +632,7 @@ contains
          call mfile%add_column(vf%VFmax,'VOF maximum')
          call mfile%add_column(vf%VFmin,'VOF minimum')
          call mfile%add_column(vf%VFint,'VOF integral')
+         call mfile%add_column(ccl%nstruct,'num structs')
          call mfile%add_column(vf%flotsam_error,'Flotsam error')
          call mfile%add_column(vf%thinstruct_error,'Film error')
          call mfile%add_column(vf%SDint,'SD integral')
