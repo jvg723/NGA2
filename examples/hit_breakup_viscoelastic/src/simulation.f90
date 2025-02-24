@@ -260,8 +260,6 @@ contains
          ! Get drop velocity
          svel(n,:)=svel(n,:)/svol(n)
       end do
-      call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
 
       ! Fourth pass to calculate characteristic lengths, principal axes, and eccentricity
       do n=1,ccl%nstruct
@@ -277,8 +275,7 @@ contains
          ! Calculate its eccentricity
          secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
       end do
-      call MPI_ALLREDUCE(MPI_IN_PLACE,slen,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-      call MPI_ALLREDUCE(MPI_IN_PLACE,secc,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+
       
       ! Only root process outputs to a file
       if (cfg%amRoot) then
