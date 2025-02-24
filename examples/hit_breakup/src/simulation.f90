@@ -170,6 +170,7 @@ contains
       real(WP), dimension(:,:,:), allocatable :: smoi
       real(WP), dimension(:,:)  , allocatable :: slen
       real(WP), dimension(:)    , allocatable :: secc
+      real(WP), dimension(:)    , allocatable :: diam
       integer :: n,m,ierr,i,j,k,iunit
       real(WP) :: x,y,z,x0,y0,z0
 
@@ -197,6 +198,7 @@ contains
       allocate(smoi(1:ccl%nstruct,1:3,1:3)); smoi=0.0_WP
       allocate(slen(1:ccl%nstruct,1:3    )); slen=0.0_WP
       allocate(secc(1:ccl%nstruct        )); secc=0.0_WP
+      allocate(diam(1:ccl%nstruct        )); diam=0.0_WP
       
       ! First pass to accumulate volume, position, and velocity
       do n=1,ccl%nstruct
@@ -271,6 +273,8 @@ contains
          slen(n,3)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n)) !>lmin
          ! Calculate its eccentricity
          secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
+         ! Calculate a diameter
+         diam(n)=(6.0_WP*svol(n)/Pi)**(1.0_WP/3.0_WP)
       end do
 
       ! Only root process outputs to a file
@@ -278,17 +282,17 @@ contains
          if (.not.isdir('stats')) call makedir('stats')
          filename='structure_'; write(timestamp,'(es12.5)') time%t
          open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','len1','len2','len3','secc'
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'diam','vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','len1','len2','len3','secc'
          do n=1,ccl%nstruct
-                                                                                                                                                                                                   !'vol', 'xpos'    ,'ypos'   ,'zpos'   ,'xvel'   ,'yvel'    ,'zvel'   ,'moi11'   ,'moi22'   ,'moi33'     ,'moi12'    ,'moi13'    ,'moi23'    ,'len1'   ,'len2'    ,'len3'   ,'secc'
-            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') svol(n),spos(n,1),spos(n,2),spos(n,3),svel(n,1),svel(n,2),svel(n,3),smoi(n,1,1),smoi(n,2,2),smoi(n,3,3),smoi(n,1,2),smoi(n,1,3),smoi(n,2,3),slen(n,1), slen(n,2),slen(n,3),secc(n)
+                                                                                                                                                                                                             ! diam  ,'vol', 'xpos'    ,'ypos'   ,'zpos'   ,'xvel'   ,'yvel'    ,'zvel'   ,'moi11'   ,'moi22'   ,'moi33'     ,'moi12'    ,'moi13'    ,'moi23'    ,'len1'   ,'len2'    ,'len3'   ,'secc'
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') diam(n),svol(n),spos(n,1),spos(n,2),spos(n,3),svel(n,1),svel(n,2),svel(n,3),smoi(n,1,1),smoi(n,2,2),smoi(n,3,3),smoi(n,1,2),smoi(n,1,3),smoi(n,2,3),slen(n,1), slen(n,2),slen(n,3),secc(n)
          end do
          close(iunit)
       end if
       
       
       ! Deallocate all but work array
-      deallocate(svol,spos,svel,smoi,slen,secc)
+      deallocate(svol,spos,svel,smoi,slen,secc,diam)
       
    contains
       
