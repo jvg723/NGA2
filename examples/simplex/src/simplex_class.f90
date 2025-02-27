@@ -1553,7 +1553,7 @@ contains
             ! call this%ccl_lig%initialize(pg=this%cfg%pgrid,name='ccl_lig')
             this%ldmin=1.0e-2_WP
             this%dw =0.697_WP
-            this%size_ratio=0.015_WP!0.707_WP 
+            this%size_ratio=0.707_WP 
             this%lmin=1.0_WP
             ! this%lmake=1.5_WP
             this%lmake=3.0_WP
