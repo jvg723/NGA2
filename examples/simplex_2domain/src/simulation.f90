@@ -35,9 +35,16 @@ contains
       implicit none
       
       ! Simplex drives overall time integration
-      do while (.not.spx%time%done())
-         ! Advance simplex simulation
-         call spx%step()
+      do while (.not.atomization%time%done())
+         
+         ! Advance simplex simulation until it's caught up
+         do while (spx%time%t.le.atomization%time%t)
+            call spx%step()
+         end do
+
+         ! Advance atomization simulation
+         call atomization%step()
+
       end do
       
    end subroutine simulation_run
