@@ -2,11 +2,15 @@
 module simulation
    use precision,     only: WP
    use simplex_class, only: simplex
+   use atom_class,    only: atom
    implicit none
    private
    
    !> Simplex simulation
    type(simplex) :: spx
+
+   !> Atomization simulation
+   type(atom) :: atomization
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -19,6 +23,9 @@ contains
       
       ! Initialize simplex simulation
       call spx%init()
+
+      ! Initialize atomization simulation
+      call atomization%init()
       
    end subroutine simulation_init
    
@@ -42,6 +49,9 @@ contains
       
       ! Finalize simplex simulation
       call spx%final()
+
+      ! Finalize atomization simulation
+      call atomization%final()
       
    end subroutine simulation_final
    

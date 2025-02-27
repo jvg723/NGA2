@@ -14,6 +14,7 @@ module atom_class
    use timetracker_class, only: timetracker
    use event_class,       only: event
    use monitor_class,     only: monitor
+   use pardata_class,     only: pardata
    implicit none
    private
    
@@ -21,6 +22,11 @@ module atom_class
    
    !> Atom object
    type :: atom
+
+      !> Provide a pardata and an event tracker for saving restarts
+      type(event)    :: save_evt
+      type(pardata)  :: df
+      logical :: restarted
       
       !> Input file for the simulation
       type(inputfile) :: input
@@ -76,7 +82,7 @@ contains
       class(atom), intent(inout) :: this
       
       ! Read the input
-      this%input=inputfile(amRoot=amRoot,filename='input_atom')
+      this%input=inputfile(amRoot=amRoot,filename='atomization.input')
       
       ! Initialize the geometry
       call this%geometry_init()
