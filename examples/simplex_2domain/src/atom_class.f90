@@ -2,7 +2,7 @@
 module atom_class
    use precision,         only: WP
    use inputfile_class,   only: inputfile
-   use ibconfig_class,    only: ibconfig
+   use config_class,      only: config
    use iterator_class,    only: iterator
    use surfmesh_class,    only: surfmesh
    use ensight_class,     only: ensight
@@ -26,10 +26,7 @@ module atom_class
       type(inputfile) :: input
       
       !> Config with IB
-      type(ibconfig) :: cfg
-      
-      !> Surface mesh for IB
-      type(surfmesh) :: plymesh
+      type(config) :: cfg
       
       !> Flow solver
       type(vfs)         :: vf    !< Volume fraction solver
@@ -54,8 +51,9 @@ module atom_class
       real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi            !< Cell-centered velocities
       
       !> Iterator for VOF removal
-      type(iterator) :: vof_removal_layer  !< Edge of domain where we actively remove VOF
-      real(WP) :: vof_removed              !< Integral of VOF removed
+      type(iterator) :: vof_removal_layer !< Edge of domain where we actively remove VOF
+      real(WP)       :: vof_removed       !< Integral of VOF removed
+      integer        :: nlayer=4          !> Hardcode size of buffer layer for VOF removal
 
 
    contains
@@ -67,13 +65,6 @@ module atom_class
    end type atom
 
    
-   !> Hardcode inlet positions used in locator functions at x=-0.01
-   real(WP), parameter, public :: dl=0.0025_WP   ! Liquid pipe diameter ~(inner+outer)/2
-   real(WP), parameter, public :: dg=0.0206_WP   ! Gas pipe diameter ~(inner+outer)/2
-   real(WP), parameter, public :: rl=0.0010_WP   ! Liquid pipe inner radius
-
-   !> Hardcode size of buffer layer for VOF removal
-   integer, parameter :: nlayer=4
    
 contains
    
@@ -166,122 +157,12 @@ contains
          call this%input%read('Partition',partition)
          
          ! Create partitioned grid
-         this%cfg=ibconfig(grp=group,decomp=partition,grid=grid)
+         this%cfg=config(grp=group,decomp=partition,grid=grid)
+
+         ! Create masks for this config
+         this%cfg%VF=1.0_WP
          
       end block create_cfg
-      
-      
-      ! Read in the PLY geometry
-      read_ply: block
-         use string,   only: str_medium
-         use parallel, only: MPI_REAL_WP
-         use mpi_f08
-         character(len=str_medium) :: plyfile
-         integer :: ierr,size_conn
-         
-         ! Read in ply filename
-         call this%input%read('PLY filename',plyfile)
-         
-         ! Root creates surface mesh from ply, other process create empty surface mesh
-         if (this%cfg%amRoot) then
-            this%plymesh=surfmesh(plyfile=plyfile,nvar=0,name='ply')
-         else
-            this%plymesh=surfmesh(nvar=0,name='ply')
-         end if
-         
-         ! Go through parallel broadcast of surface mesh
-         call MPI_BCAST(this%plymesh%nVert   ,1                 ,MPI_INTEGER,0,this%cfg%comm,ierr)
-         call MPI_BCAST(this%plymesh%nPoly   ,1                 ,MPI_INTEGER,0,this%cfg%comm,ierr)
-         if (.not.this%cfg%amRoot) call this%plymesh%set_size(nvert=this%plymesh%nVert,npoly=this%plymesh%nPoly)
-         call MPI_BCAST(this%plymesh%xVert   ,this%plymesh%nVert,MPI_REAL_WP,0,this%cfg%comm,ierr)
-         call MPI_BCAST(this%plymesh%yVert   ,this%plymesh%nVert,MPI_REAL_WP,0,this%cfg%comm,ierr)
-         call MPI_BCAST(this%plymesh%zVert   ,this%plymesh%nVert,MPI_REAL_WP,0,this%cfg%comm,ierr)
-         call MPI_BCAST(this%plymesh%polySize,this%plymesh%nPoly,MPI_INTEGER,0,this%cfg%comm,ierr)
-         if (this%cfg%amRoot) size_conn=size(this%plymesh%polyConn)
-         call MPI_BCAST(size_conn            ,1                 ,MPI_INTEGER,0,this%cfg%comm,ierr)
-         if (.not.this%cfg%amRoot) allocate(this%plymesh%polyConn(size_conn))
-         call MPI_BCAST(this%plymesh%polyConn,size_conn         ,MPI_INTEGER,0,this%cfg%comm,ierr)
-         
-      end block read_ply
-      
-      
-      ! Create IB walls for this config
-      create_walls: block
-         use ibconfig_class, only: sharp
-         use messager,       only: die
-         use mathtools,      only: cross_product,normalize
-         use irl_fortran_interface
-         real(WP), parameter :: safe_coeff=3.0_WP
-         integer :: i,j,k,np,nv,iv,ip
-         real(WP) :: mydist
-         real(WP), dimension(3) :: pos,nearest_pt,mynearest,mynorm
-         type(Poly_type), dimension(:), allocatable :: poly
-         real(WP), dimension(:,:), allocatable :: bary,vert,nvec
-         
-         ! Preprocess surface mesh data using IRL
-         allocate(poly(1:this%plymesh%nPoly))
-         allocate(vert(1:3,1:maxval(this%plymesh%polySize)))
-         allocate(bary(1:3,1:this%plymesh%nPoly))
-         allocate(nvec(1:3,1:this%plymesh%nPoly))
-         do np=1,this%plymesh%nPoly
-            ! Allocate polygon
-            call new(poly(np))
-            ! Fill it up
-            do nv=1,this%plymesh%polySize(np)
-               iv=sum(this%plymesh%polySize(1:np-1))+nv
-               vert(:,nv)=[this%plymesh%xVert(this%plymesh%polyConn(iv)),this%plymesh%yVert(this%plymesh%polyConn(iv)),this%plymesh%zVert(this%plymesh%polyConn(iv))]
-            end do
-            call construct(poly(np),this%plymesh%polySize(np),vert(1:3,1:this%plymesh%polySize(np)))
-            mynorm=normalize(cross_product(vert(:,2)-vert(:,1),vert(:,3)-vert(:,2)))
-            mydist=dot_product(mynorm,vert(:,1))
-            call setPlaneOfExistence(poly(np),[mynorm(1),mynorm(2),mynorm(3),mydist])
-            ! Also store its barycenter
-            bary(:,np)=calculateCentroid(poly(np))
-            nvec(:,np)=calculateNormal  (poly(np))
-         end do
-         deallocate(vert)
-
-         ! Create IB distance field using IRL
-         this%cfg%Gib=huge(1.0_WP)
-         do k=this%cfg%kmino_,this%cfg%kmaxo_
-            do j=this%cfg%jmino_,this%cfg%jmaxo_
-               do i=this%cfg%imino_,this%cfg%imaxo_
-                  ! Store cell center position
-                  pos=[this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)]
-                  ! Traverse all polygons
-                  do np=1,this%plymesh%nPoly
-                     ! Calculate distance to centroid
-                     nearest_pt=pos-bary(:,np)
-                     mydist=dot_product(nearest_pt,nearest_pt)
-                     ! If close enough, compute exact distance to the polygon instead
-                     if (mydist.lt.(safe_coeff*this%cfg%min_meshsize)**2) then
-                        nearest_pt=calculateNearestPtOnSurface(poly(np),pos)
-                        nearest_pt=pos-nearest_pt
-                        mydist=dot_product(nearest_pt,nearest_pt)
-                     end if
-                     ! Remember closest distance
-                     if (mydist.lt.this%cfg%Gib(i,j,k)) then
-                        this%cfg%Gib(i,j,k)=mydist
-                        mynearest=nearest_pt
-                        ip=np
-                     end if
-                  end do
-                  ! Take the square root
-                  this%cfg%Gib(i,j,k)=sqrt(this%cfg%Gib(i,j,k))
-                  ! Find the sign
-                  if (dot_product(mynearest,nvec(:,ip)).gt.0.0_WP) this%cfg%Gib(i,j,k)=-this%cfg%Gib(i,j,k)
-               end do
-            end do
-         end do
-         deallocate(bary,nvec,poly)
-         
-         ! Get normal vector
-         call this%cfg%calculate_normal()
-         
-         ! Get VF field
-         call this%cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
-         
-      end block create_walls
       
 
    end subroutine geometry_init
@@ -317,27 +198,27 @@ contains
       
       ! Initialize our VOF solver and field
       create_and_initialize_vof: block
-         use vfs_class, only: elvira,r2p,remap
+         use vfs_class, only: r2pnet,plicnet,remap
          integer :: i,j,k
          real(WP) :: xloc,rad
          ! Create a VOF solver with LVIRA
-         call this%vf%initialize(cfg=this%cfg,reconstruction_method=elvira,transport_method=remap,name='VOF')
+         call this%vf%initialize(cfg=this%cfg,reconstruction_method=plicnet,transport_method=remap,name='VOF')
          ! Initialize to flat interface in liquid needle
-         xloc=0.0_WP !< Interface initially at x=0
-         do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
-            do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
-               do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
-                  rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
-                  if (this%vf%cfg%xm(i).lt.xloc.and.rad.le.0.5_WP*dl) then
-                     this%vf%VF(i,j,k)=1.0_WP
-                  else
-                     this%vf%VF(i,j,k)=0.0_WP
-                  end if
-                  this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
-                  this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
-               end do
-            end do
-         end do
+         ! xloc=0.0_WP !< Interface initially at x=0
+         ! do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
+         !    do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
+         !       do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
+         !          rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+         !          if (this%vf%cfg%xm(i).lt.xloc.and.rad.le.0.5_WP*dl) then
+         !             this%vf%VF(i,j,k)=1.0_WP
+         !          else
+         !             this%vf%VF(i,j,k)=0.0_WP
+         !          end if
+         !          this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
+         !          this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
+         !       end do
+         !    end do
+         ! end do
          ! Update the band
          call this%vf%update_band()
          ! Perform interface reconstruction from VOF field
@@ -366,7 +247,7 @@ contains
       
       ! Create an incompressible flow solver with bconds
       create_flow_solver: block
-         use hypre_str_class, only: pcg_pfmg
+         use hypre_str_class, only: pcg_pfmg2
          use tpns_class,      only: dirichlet,clipped_neumann,slip
          ! Create flow solver
          this%fs=tpns(cfg=this%cfg,name='Two-phase NS')
@@ -376,25 +257,26 @@ contains
          call this%input%read('Liquid density',this%fs%rho_l)
          call this%input%read('Gas density'   ,this%fs%rho_g)
          call this%input%read('Surface tension coefficient',this%fs%sigma)
-         ! Define gas and liquid inlet boundary conditions
-         call this%fs%add_bcond(name='gas_inlet',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=gas_inlet)
-         call this%fs%add_bcond(name='liq_inlet',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=liq_inlet)
-         ! Outflow on the right
-         call this%fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.false.,locator=right_boundary)
+         ! Set acceleration of gravity
+         call this%input%read('Gravity',this%fs%gravity)
+         ! ! Inlets and coflow on the left
+         ! call this%fs%add_bcond(name='inlets',type=dirichlet,face='x',dir=-1,canCorrect=.false.,locator=left_boundary)
+         ! ! Outflow on the right
+         ! call this%fs%add_bcond(name='outflow',type=clipped_neumann,face='x',dir=+1,canCorrect=.false.,locator=right_boundary)
          ! Slip on the sides
          call this%fs%add_bcond(name='bc_yp',type=slip,face='y',dir=+1,canCorrect=.true.,locator=yp_locator)
          call this%fs%add_bcond(name='bc_ym',type=slip,face='y',dir=-1,canCorrect=.true.,locator=ym_locator)
          call this%fs%add_bcond(name='bc_zp',type=slip,face='z',dir=+1,canCorrect=.true.,locator=zp_locator)
          call this%fs%add_bcond(name='bc_zm',type=slip,face='z',dir=-1,canCorrect=.true.,locator=zm_locator)
          ! Configure pressure solver
-         this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg,nst=7)
+         this%ps=hypre_str(cfg=this%cfg,name='Pressure',method=pcg_pfmg2,nst=7)
          this%ps%maxlevel=20
          call this%input%read('Pressure iteration',this%ps%maxit)
          call this%input%read('Pressure tolerance',this%ps%rcvg)
-         ! Configure implicit velocity solver
-         this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
+         ! Configure velocity solver
+         !this%vs=ddadi(cfg=this%cfg,name='Velocity',nst=7)
          ! Setup the solver
-         call this%fs%setup(pressure_solver=this%ps,implicit_solver=this%vs)
+         call this%fs%setup(pressure_solver=this%ps)!,implicit_solver=this%vs)
       end block create_flow_solver
       
 
@@ -405,50 +287,50 @@ contains
          use tpns_class, only: bcond
          type(bcond), pointer :: mybc
          integer  :: n,i,j,k,ierr
-         real(WP) :: Ugas,myAgas,Agas,Uliq,myAliq,Aliq
-         real(WP) :: Qgas,Qliq,myU
-         real(WP), parameter :: SLPM2SI=1.66667E-5_WP
+         ! real(WP) :: Ugas,myAgas,Agas,Uliq,myAliq,Aliq
+         ! real(WP) :: Qgas,Qliq,myU
+         ! real(WP), parameter :: SLPM2SI=1.66667E-5_WP
          ! Zero initial field
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
-         ! Read in gas flow rate and convert to SI
-         call this%input%read('Gas flow rate (SLPM)',Qgas)
-         Qgas=Qgas*SLPM2SI
-         ! Calculate gas flow area - no overlap here!
-         myAgas=0.0_WP
-         call this%fs%get_bcond('gas_inlet',mybc)
-         do n=1,mybc%itr%n_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            myAgas=myAgas+this%cfg%dy(j)*this%cfg%dz(k)*sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))
-         end do
-         call MPI_ALLREDUCE(myAgas,Agas,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
-         ! Calculate bulk gas velocity
-         Ugas=Qgas/Agas
-         ! Apply Dirichlet at gas inlet
-         call this%fs%get_bcond('gas_inlet',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            this%fs%U(i,j,k)=+sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))*Ugas
-         end do
-         ! Read in liquid flow rate and convert to SI
-         call this%input%read('Liquid flow rate (SLPM)',Qliq)
-         Qliq=Qliq*SLPM2SI
-         ! Calculate liquid flow area - no overlap here!
-         myAliq=0.0_WP
-         call this%fs%get_bcond('liq_inlet',mybc)
-         do n=1,mybc%itr%n_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            myAliq=myAliq+this%cfg%dy(j)*this%cfg%dz(k)*sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))
-         end do
-         call MPI_ALLREDUCE(myAliq,Aliq,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
-         ! Calculate bulk axial velocity
-         Uliq=Qliq/Aliq
-         ! Apply Dirichlet at liquid injector port
-         call this%fs%get_bcond('liq_inlet',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            myU=2.0_WP*Uliq*(1.0_WP-min((this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)/rl**2,1.0_WP))
-            this%fs%U(i,j,k)=+sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))*myU
-         end do
+         ! ! Read in gas flow rate and convert to SI
+         ! call this%input%read('Gas flow rate (SLPM)',Qgas)
+         ! Qgas=Qgas*SLPM2SI
+         ! ! Calculate gas flow area - no overlap here!
+         ! myAgas=0.0_WP
+         ! call this%fs%get_bcond('gas_inlet',mybc)
+         ! do n=1,mybc%itr%n_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    myAgas=myAgas+this%cfg%dy(j)*this%cfg%dz(k)*sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))
+         ! end do
+         ! call MPI_ALLREDUCE(myAgas,Agas,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+         ! ! Calculate bulk gas velocity
+         ! Ugas=Qgas/Agas
+         ! ! Apply Dirichlet at gas inlet
+         ! call this%fs%get_bcond('gas_inlet',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    this%fs%U(i,j,k)=+sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))*Ugas
+         ! end do
+         ! ! Read in liquid flow rate and convert to SI
+         ! call this%input%read('Liquid flow rate (SLPM)',Qliq)
+         ! Qliq=Qliq*SLPM2SI
+         ! ! Calculate liquid flow area - no overlap here!
+         ! myAliq=0.0_WP
+         ! call this%fs%get_bcond('liq_inlet',mybc)
+         ! do n=1,mybc%itr%n_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    myAliq=myAliq+this%cfg%dy(j)*this%cfg%dz(k)*sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))
+         ! end do
+         ! call MPI_ALLREDUCE(myAliq,Aliq,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
+         ! ! Calculate bulk axial velocity
+         ! Uliq=Qliq/Aliq
+         ! ! Apply Dirichlet at liquid injector port
+         ! call this%fs%get_bcond('liq_inlet',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    myU=2.0_WP*Uliq*(1.0_WP-min((this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)/rl**2,1.0_WP))
+         !    this%fs%U(i,j,k)=+sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))*myU
+         ! end do
          ! Apply all other boundary conditions
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          ! Compute MFR through all boundary conditions
@@ -470,8 +352,35 @@ contains
       
       ! Create surfmesh object for interface polygon output
       create_smesh: block
-         this%smesh=surfmesh(nvar=0,name='plic')
-         call this%vf%update_surfmesh(this%smesh)
+         use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+         integer :: i,j,k,np,nplane
+         this%smesh=surfmesh(nvar=3,name='plic')
+         this%smesh%varname(1)='nplane'
+         this%smesh%varname(2)='thickness'
+         this%smesh%varname(3)='edge_sensor'
+         ! Transfer polygons to smesh
+         call this%vf%update_surfmesh_nowall(this%smesh)
+         ! Calculate thickness even for plic
+         if (.not.this%vf%two_planes) then
+            allocate(this%vf%thickness(this%vf%cfg%imino_:this%vf%cfg%imaxo_,this%vf%cfg%jmino_:this%vf%cfg%jmaxo_,this%vf%cfg%kmino_:this%vf%cfg%kmaxo_)); this%vf%thickness=0.0_WP
+         end if
+         call this%vf%get_thickness()
+         ! Populate surface variables
+         np=0
+         do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+            do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+               do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                  if (this%cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                  do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                        this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                        this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
+                     end if
+                  end do
+               end do
+            end do
+         end do
       end block create_smesh
 
 
@@ -530,6 +439,107 @@ contains
          call this%cflfile%add_column(this%fs%CFLv_z,'Viscous zCFL')
          call this%cflfile%write()
       end block create_monitor
+
+      contains
+
+      !> Function that localizes the right domain boundary
+      function right_boundary(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (i.eq.pg%imax+1) isIn=.true.
+      end function right_boundary
+   
+
+      ! !> Function that localizes liquid stream at -x
+      ! function liq_inlet(pg,i,j,k) result(isIn)
+      !    use pgrid_class, only: pgrid
+      !    class(pgrid), intent(in) :: pg
+      !    integer, intent(in) :: i,j,k
+      !    logical :: isIn
+      !    real(WP) :: rad
+      !    isIn=.false.
+      !    rad=sqrt(pg%ym(j)**2+pg%zm(k)**2)
+      !    if (rad.lt.0.5_WP*dl.and.i.eq.pg%imin) isIn=.true.
+      ! end function liq_inlet
+      
+      
+      ! !> Function that localizes gas stream at -x
+      ! function gas_inlet(pg,i,j,k) result(isIn)
+      !    use pgrid_class, only: pgrid
+      !    class(pgrid), intent(in) :: pg
+      !    integer, intent(in) :: i,j,k
+      !    logical :: isIn
+      !    real(WP) :: rad
+      !    isIn=.false.
+      !    rad=sqrt(pg%ym(j)**2+pg%zm(k)**2)
+      !    if (rad.ge.0.5_WP*dl.and.rad.lt.0.5_WP*dg.and.i.eq.pg%imin) isIn=.true.
+      ! end function gas_inlet
+
+
+      !> Function that localizes region of VOF removal
+      function vof_removal_layer_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (i.ge.pg%imax-this%nlayer.or.&
+         &   j.le.pg%jmin+this%nlayer.or.&
+         &   j.ge.pg%jmax-this%nlayer.or.&
+         &   k.le.pg%kmin+this%nlayer.or.&
+         &   k.ge.pg%kmax-this%nlayer) isIn=.true.
+      end function vof_removal_layer_locator
+
+
+      !> Function that localizes the top (y+) of the domain
+      function yp_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         implicit none
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (j.eq.pg%jmax+1) isIn=.true.
+      end function yp_locator
+
+
+      !> Function that localizes the bottom (y-) of the domain
+      function ym_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         implicit none
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (j.eq.pg%jmin) isIn=.true.
+      end function ym_locator
+
+
+      !> Function that localizes the top (z+) of the domain
+      function zp_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         implicit none
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (k.eq.pg%kmax+1) isIn=.true.
+      end function zp_locator
+
+
+      !> Function that localizes the bottom (z-) of the domain
+      function zm_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         implicit none
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (k.eq.pg%kmin) isIn=.true.
+      end function zm_locator
       
       
    end subroutine simulation_init
@@ -608,23 +618,6 @@ contains
          this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU
          this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV
          this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW
-         
-         ! Apply IB forcing to enforce BC at the pipe walls
-         ibforcing: block
-            integer :: i,j,k
-            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
-               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
-                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-                     if (this%fs%umask(i,j,k).eq.0) this%fs%U(i,j,k)=sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))*this%fs%U(i,j,k)
-                     if (this%fs%vmask(i,j,k).eq.0) this%fs%V(i,j,k)=sum(this%fs%itpr_y(:,i,j,k)*this%cfg%VF(i,j-1:j,k))*this%fs%V(i,j,k)
-                     if (this%fs%wmask(i,j,k).eq.0) this%fs%W(i,j,k)=sum(this%fs%itpr_z(:,i,j,k)*this%cfg%VF(i,j,k-1:k))*this%fs%W(i,j,k)
-                  end do
-               end do
-            end do
-            call this%fs%cfg%sync(this%fs%U)
-            call this%fs%cfg%sync(this%fs%V)
-            call this%fs%cfg%sync(this%fs%W)
-         end block ibforcing
         
          ! Apply other boundary conditions on the resulting fields
          call this%fs%apply_bcond(this%time%t,this%time%dt)
@@ -633,7 +626,11 @@ contains
          call this%fs%update_laplacian()
          call this%fs%correct_mfr()
          call this%fs%get_div()
-         call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         if (this%vf%two_planes) then
+            call this%fs%add_surface_tension_jump_twoVF(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         else
+            call this%fs%add_surface_tension_jump(dt=this%time%dt,div=this%fs%div,vf=this%vf)
+         end if
          this%fs%psolv%rhs=-this%fs%cfg%vol*this%fs%div/this%time%dt
          this%fs%psolv%sol=0.0_WP
          call this%fs%psolv%solve()
@@ -674,7 +671,32 @@ contains
       
       ! Output to ensight
       if (this%ens_evt%occurs()) then
-         call this%vf%update_surfmesh(this%smesh)
+         ! Update surface mesh
+         update_smesh: block
+            use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+            integer :: i,j,k,np,nplane
+            ! Transfer polygons to smesh
+            call this%vf%update_surfmesh_nowall(this%smesh)
+            ! Calculate thickness even for plic
+            if (.not.this%vf%two_planes) call this%vf%get_thickness()
+            ! Populate surface variables
+            np=0
+            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
+               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
+                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
+                     if (this%cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                     do nplane=1,getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k))
+                        if (getNumberOfVertices(this%vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                           np=np+1; this%smesh%var(1,np)=real(getNumberOfPlanes(this%vf%liquid_gas_interface(i,j,k)),WP)
+                           this%smesh%var(2,np)=this%vf%thickness(i,j,k)
+                           this%smesh%var(3,np)=this%vf%edge_sensor(i,j,k)
+                        end if
+                     end do
+                  end do
+               end do
+            end do
+         end block update_smesh
+         ! Write ensight files
          call this%ens_out%write_data(this%time%t)
       end if
       
@@ -697,106 +719,6 @@ contains
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi,this%gradU)
       
    end subroutine final
-   
-   
-   !> Function that localizes the right domain boundary
-   function right_boundary(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.eq.pg%imax+1) isIn=.true.
-   end function right_boundary
-   
-
-   !> Function that localizes liquid stream at -x
-   function liq_inlet(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      real(WP) :: rad
-      isIn=.false.
-      rad=sqrt(pg%ym(j)**2+pg%zm(k)**2)
-      if (rad.lt.0.5_WP*dl.and.i.eq.pg%imin) isIn=.true.
-   end function liq_inlet
-   
-   
-   !> Function that localizes gas stream at -x
-   function gas_inlet(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      real(WP) :: rad
-      isIn=.false.
-      rad=sqrt(pg%ym(j)**2+pg%zm(k)**2)
-      if (rad.ge.0.5_WP*dl.and.rad.lt.0.5_WP*dg.and.i.eq.pg%imin) isIn=.true.
-   end function gas_inlet
-
-
-   !> Function that localizes region of VOF removal
-   function vof_removal_layer_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (i.ge.pg%imax-nlayer.or.&
-      &   j.le.pg%jmin+nlayer.or.&
-      &   j.ge.pg%jmax-nlayer.or.&
-      &   k.le.pg%kmin+nlayer.or.&
-      &   k.ge.pg%kmax-nlayer) isIn=.true.
-   end function vof_removal_layer_locator
-   
-   
-   !> Function that localizes the top (y+) of the domain
-   function yp_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (j.eq.pg%jmax+1) isIn=.true.
-   end function yp_locator
-   
-   
-   !> Function that localizes the bottom (y-) of the domain
-   function ym_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (j.eq.pg%jmin) isIn=.true.
-   end function ym_locator
-   
-   
-   !> Function that localizes the top (z+) of the domain
-   function zp_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmax+1) isIn=.true.
-   end function zp_locator
-   
-   
-   !> Function that localizes the bottom (z-) of the domain
-   function zm_locator(pg,i,j,k) result(isIn)
-      use pgrid_class, only: pgrid
-      implicit none
-      class(pgrid), intent(in) :: pg
-      integer, intent(in) :: i,j,k
-      logical :: isIn
-      isIn=.false.
-      if (k.eq.pg%kmin) isIn=.true.
-   end function zm_locator
    
    
 end module atom_class
