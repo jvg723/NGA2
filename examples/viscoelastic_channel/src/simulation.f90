@@ -674,71 +674,71 @@ contains
             end block forcing
 
 
-            ! ! Add polymer stress term
-            ! polymer_stress: block
-            !    use fene_class, only: fenep,lptt,eptt
-            !    integer :: i,j,k,n
-            !    real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
-            !    real(WP) :: coeff
-            !    ! Allocate work arrays
-            !    allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-            !    allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-            !    allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-            !    ! Build liquid stress tensor
-            !    select case (ve%model)
-            !    case (fenep)
-            !       call ve%get_relax(stress,time%dt)
-            !       do n=1,6
-            !          stress(:,:,:,n)=-ve%visc_p*stress(:,:,:,n)
-            !       end do
-               ! case (eptt,lptt)
-               !    stress=0.0_WP
-               !    coeff=nn%visc/(nn%trelax*(1-nn%affinecoeff))
-               !    do n=1,6
-               !       do k=cfg%kmino_,cfg%kmaxo_
-               !          do j=cfg%jmino_,cfg%jmaxo_
-               !             do i=cfg%imino_,cfg%imaxo_
-               !                if (nn%mask(i,j,k).ne.0) cycle                !< Skip non-solved cells
-               !                stress(i,j,k,1)=coeff*(nn%SC(i,j,k,1)-1.0_WP) !> xx tensor component
-               !                stress(i,j,k,2)=coeff*(nn%SC(i,j,k,2)-0.0_WP) !> xy tensor component
-               !                stress(i,j,k,3)=coeff*(nn%SC(i,j,k,3)-0.0_WP) !> xz tensor component
-               !                stress(i,j,k,4)=coeff*(nn%SC(i,j,k,4)-1.0_WP) !> yy tensor component
-               !                stress(i,j,k,5)=coeff*(nn%SC(i,j,k,5)-0.0_WP) !> yz tensor component
-               !                stress(i,j,k,6)=coeff*(nn%SC(i,j,k,6)-1.0_WP) !> zz tensor component
-               !             end do
-               !          end do
-               !       end do
-               !    end do
-            !    end select
-            !    ! Interpolate tensor components to cell edges
-            !    do k=cfg%kmin_,cfg%kmax_+1
-            !       do j=cfg%jmin_,cfg%jmax_+1
-            !          do i=cfg%imin_,cfg%imax_+1
-            !             Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
-            !             Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
-            !             Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
-            !          end do
-            !       end do
-            !    end do
-            !    ! Add divergence of stress to residual
-            !    do k=fs%cfg%kmin_,fs%cfg%kmax_
-            !       do j=fs%cfg%jmin_,fs%cfg%jmax_
-            !          do i=fs%cfg%imin_,fs%cfg%imax_
-            !             if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+(sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
-            !             &                                                 +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
-            !             &                                                 +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1)))*time%dt
-            !             if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+(sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
-            !             &                                                 +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
-            !             &                                                 +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1)))*time%dt
-            !             if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+(sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
-            !             &                                                 +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
-            !             &                                                 +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6)))*time%dt        
-            !          end do
-            !       end do
-            !    end do
-            !    ! Clean up
-            !    deallocate(Txy,Tyz,Tzx)
-            ! end block polymer_stress
+            ! Add polymer stress term
+            polymer_stress: block
+               use viscoelastic_class, only: fenep,lptt,eptt
+               integer :: i,j,k,n
+               real(WP), dimension(:,:,:), allocatable :: Txy,Tyz,Tzx
+               real(WP) :: coeff
+               ! Allocate work arrays
+               allocate(Txy   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               allocate(Tyz   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               allocate(Tzx   (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               ! Build liquid stress tensor
+               select case (ve%model)
+               case (fenep)
+                  call ve%get_relax(stress,time%dt)
+                  do n=1,6
+                     stress(:,:,:,n)=-ve%visc_p*stress(:,:,:,n)
+                  end do
+               case (eptt,lptt)
+                  stress=0.0_WP
+                  coeff=ve%visc_p/(ve%trelax*(1-ve%affinecoeff))
+                  do n=1,6
+                     do k=cfg%kmino_,cfg%kmaxo_
+                        do j=cfg%jmino_,cfg%jmaxo_
+                           do i=cfg%imino_,cfg%imaxo_
+                              if (ve%mask(i,j,k).ne.0) cycle                !< Skip non-solved cells
+                              stress(i,j,k,1)=coeff*(ve%SC(i,j,k,1)-1.0_WP) !> xx tensor component
+                              stress(i,j,k,2)=coeff*(ve%SC(i,j,k,2)-0.0_WP) !> xy tensor component
+                              stress(i,j,k,3)=coeff*(ve%SC(i,j,k,3)-0.0_WP) !> xz tensor component
+                              stress(i,j,k,4)=coeff*(ve%SC(i,j,k,4)-1.0_WP) !> yy tensor component
+                              stress(i,j,k,5)=coeff*(ve%SC(i,j,k,5)-0.0_WP) !> yz tensor component
+                              stress(i,j,k,6)=coeff*(ve%SC(i,j,k,6)-1.0_WP) !> zz tensor component
+                           end do
+                        end do
+                     end do
+                  end do
+               end select
+               ! Interpolate tensor components to cell edges
+               do k=cfg%kmin_,cfg%kmax_+1
+                  do j=cfg%jmin_,cfg%jmax_+1
+                     do i=cfg%imin_,cfg%imax_+1
+                        Txy(i,j,k)=sum(fs%itp_xy(:,:,i,j,k)*stress(i-1:i,j-1:j,k,2))
+                        Tyz(i,j,k)=sum(fs%itp_yz(:,:,i,j,k)*stress(i,j-1:j,k-1:k,5))
+                        Tzx(i,j,k)=sum(fs%itp_xz(:,:,i,j,k)*stress(i-1:i,j,k-1:k,3))
+                     end do
+                  end do
+               end do
+               ! Add divergence of stress to residual
+               do k=fs%cfg%kmin_,fs%cfg%kmax_
+                  do j=fs%cfg%jmin_,fs%cfg%jmax_
+                     do i=fs%cfg%imin_,fs%cfg%imax_
+                        if (fs%umask(i,j,k).eq.0) resU(i,j,k)=resU(i,j,k)+(sum(fs%divu_x(:,i,j,k)*stress(i-1:i,j,k,1))&
+                        &                                                 +sum(fs%divu_y(:,i,j,k)*Txy(i,j:j+1,k))     &
+                        &                                                 +sum(fs%divu_z(:,i,j,k)*Tzx(i,j,k:k+1)))*time%dt
+                        if (fs%vmask(i,j,k).eq.0) resV(i,j,k)=resV(i,j,k)+(sum(fs%divv_x(:,i,j,k)*Txy(i:i+1,j,k))     &
+                        &                                                 +sum(fs%divv_y(:,i,j,k)*stress(i,j-1:j,k,4))&
+                        &                                                 +sum(fs%divv_z(:,i,j,k)*Tyz(i,j,k:k+1)))*time%dt
+                        if (fs%wmask(i,j,k).eq.0) resW(i,j,k)=resW(i,j,k)+(sum(fs%divw_x(:,i,j,k)*Tzx(i:i+1,j,k))     &
+                        &                                                 +sum(fs%divw_y(:,i,j,k)*Tyz(i,j:j+1,k))     &                  
+                        &                                                 +sum(fs%divw_z(:,i,j,k)*stress(i,j,k-1:k,6)))*time%dt        
+                     end do
+                  end do
+               end do
+               ! Clean up
+               deallocate(Txy,Tyz,Tzx)
+            end block polymer_stress
             
             ! Form implicit residuals
             call fs%solve_implicit(time%dt,resU,resV,resW)
