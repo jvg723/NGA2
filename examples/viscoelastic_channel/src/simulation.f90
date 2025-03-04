@@ -549,87 +549,87 @@ contains
             ! Calculate grad(U)
             call fs%get_gradu(gradu)
            
-            ! ! ============= SCALAR SOLVER ======================= 
+            ! ============= SCALAR SOLVER ======================= 
             
-            ! ! Reset interpolation metrics to QUICK scheme
-            ! call ve%metric_reset()
+            ! Reset interpolation metrics to QUICK scheme
+            call ve%metric_reset()
             
-            ! ! Explicit calculation of drhoSC/dt from scalar equation
-            ! call ve%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
+            ! Explicit calculation of drhoSC/dt from scalar equation
+            call ve%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
             
-            ! ! Perform bquick procedure
-            ! bquick: block
-            !    use fene_class, only: fenep,lptt,oldroydb
-            !    integer :: i,j,k
-            !    logical, dimension(:,:,:), allocatable :: flag
-            !    ! Allocate work array
-            !    allocate(flag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
-            !    ! Assemble explicit residual
-            !    resSC=-2.0_WP*(ve%SC-ve%SCold)+time%dt*resSC
-            !    ! Apply it to get explicit scalar prediction
-            !    SCtmp=2.0_WP*ve%SC-ve%SCold+resSC
-            !    ! Check cells that require bquick
-            !    select case (ve%model)
-            !    case (fenep)
-            !       do k=ve%cfg%kmino_,ve%cfg%kmaxo_
-            !          do j=ve%cfg%jmino_,ve%cfg%jmaxo_
-            !             do i=ve%cfg%imino_,ve%cfg%imaxo_
-            !                if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
-            !                &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.ve%Lmax**2) then
-            !                   flag(i,j,k)=.true.
-            !                else
-            !                   flag(i,j,k)=.false.
-            !                end if
-            !             end do
-            !          end do
-            !       end do
-            !    case (lptt,oldroydb)
-            !       do k=ve%cfg%kmino_,ve%cfg%kmaxo_
-            !          do j=ve%cfg%jmino_,ve%cfg%jmaxo_
-            !             do i=ve%cfg%imino_,ve%cfg%imaxo_
-            !                if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP) then
-            !                   flag(i,j,k)=.true.
-            !                else
-            !                   flag(i,j,k)=.false.
-            !                end if
-            !             end do
-            !          end do
-            !       end do
-            !    end select
-            !    ! Adjust metrics
-            !    call ve%metric_adjust(SCtmp,flag)
-            !    ! Clean up
-            !    deallocate(flag)
-            !    ! Recompute drhoSC/dt
-            !    call ve%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
-            ! end block bquick
+            ! Perform bquick procedure
+            bquick: block
+               use viscoelastic_class, only: fenep,lptt,oldroydb
+               integer :: i,j,k
+               logical, dimension(:,:,:), allocatable :: flag
+               ! Allocate work array
+               allocate(flag(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+               ! Assemble explicit residual
+               resSC=-2.0_WP*(ve%SC-ve%SCold)+time%dt*resSC
+               ! Apply it to get explicit scalar prediction
+               SCtmp=2.0_WP*ve%SC-ve%SCold+resSC
+               ! Check cells that require bquick
+               select case (ve%model)
+               case (fenep)
+                  do k=ve%cfg%kmino_,ve%cfg%kmaxo_
+                     do j=ve%cfg%jmino_,ve%cfg%jmaxo_
+                        do i=ve%cfg%imino_,ve%cfg%imaxo_
+                           if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP.or.&
+                           &   SCtmp(i,j,k,1)+SCtmp(i,j,k,4)+SCtmp(i,j,k,6).ge.ve%Lmax**2) then
+                              flag(i,j,k)=.true.
+                           else
+                              flag(i,j,k)=.false.
+                           end if
+                        end do
+                     end do
+                  end do
+               case (lptt,oldroydb)
+                  do k=ve%cfg%kmino_,ve%cfg%kmaxo_
+                     do j=ve%cfg%jmino_,ve%cfg%jmaxo_
+                        do i=ve%cfg%imino_,ve%cfg%imaxo_
+                           if (SCtmp(i,j,k,1).le.0.0_WP.or.SCtmp(i,j,k,4).le.0.0_WP.or.SCtmp(i,j,k,6).le.0.0_WP) then
+                              flag(i,j,k)=.true.
+                           else
+                              flag(i,j,k)=.false.
+                           end if
+                        end do
+                     end do
+                  end do
+               end select
+               ! Adjust metrics
+               call ve%metric_adjust(SCtmp,flag)
+               ! Clean up
+               deallocate(flag)
+               ! Recompute drhoSC/dt
+               call ve%get_drhoSCdt(resSC,fs%Uold,fs%Vold,fs%Wold)
+            end block bquick
             
-            ! ! Add viscoleastic source terms
-            ! viscoelastic_src: block
-            !    use fene_class, only: fenep,lptt,eptt
-            !    ! Streching and distortion term
-            !    call ve%get_CgradU(gradU,SCtmp);  resSC=resSC+SCtmp
-            !    ! Relaxation term
-            !    call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
-            !    ! Affine term (lPTT and ePTT only)
-            !    if (ve%model.eq.lptt.or.ve%model.eq.eptt) then
-            !       call fs%get_strainrate(SR)
-            !       call ve%get_affine(SR,SCtmp);  resSC=resSC+SCtmp
-            !    end if
-            ! end block viscoelastic_src
+            ! Add viscoleastic source terms
+            viscoelastic_src: block
+               use viscoelastic_class, only: fenep,lptt,eptt
+               ! Streching and distortion term
+               call ve%get_CgradU(gradU,SCtmp);  resSC=resSC+SCtmp
+               ! Relaxation term
+               call ve%get_relax(SCtmp,time%dt); resSC=resSC+SCtmp
+               ! Affine term (lPTT and ePTT only)
+               if (ve%model.eq.lptt.or.ve%model.eq.eptt) then
+                  call fs%get_strainrate(SR)
+                  call ve%get_affine(SR,SCtmp);  resSC=resSC+SCtmp
+               end if
+            end block viscoelastic_src
             
-            ! ! Assemble explicit residual
-            ! resSC=-2.0_WP*(ve%SC-ve%SCold)+time%dt*resSC
+            ! Assemble explicit residual
+            resSC=-2.0_WP*(ve%SC-ve%SCold)+time%dt*resSC
             
-            ! ! Form implicit residual
-            ! call ve%solve_implicit(time%dt,resSC,fs%Uold,fs%Vold,fs%Wold)
+            ! Form implicit residual
+            call ve%solve_implicit(time%dt,resSC,fs%Uold,fs%Vold,fs%Wold)
             
-            ! ! Update scalars
-            ! ve%SC=2.0_WP*ve%SC-ve%SCold+resSC
+            ! Update scalars
+            ve%SC=2.0_WP*ve%SC-ve%SCold+resSC
             
-            ! ! Apply all other boundary conditions on the resulting field
-            ! call ve%apply_bcond(time%t,time%dt)
-            ! ! ===================================================
+            ! Apply all other boundary conditions on the resulting field
+            call ve%apply_bcond(time%t,time%dt)
+            ! ===================================================
 
             ! ============= VELOCITY SOLVER ======================
             
