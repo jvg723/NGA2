@@ -325,6 +325,8 @@ contains
          use multiscalar_class,   only: bquick
          use viscoelastic_class,  only: fenep
          integer :: i,j,k
+         ! use density of 1
+         ve%rho=1.00_WP
          ! Create FENE model solver
          call ve%init(cfg=cfg,model=fenep,scheme=bquick,name='FENE')
          ! Maximum extensibility of polymer chain
