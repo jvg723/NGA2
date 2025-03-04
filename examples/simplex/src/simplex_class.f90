@@ -847,8 +847,6 @@ contains
       class(simplex), intent(inout) :: this
       real(WP), dimension(:)    , allocatable :: svol
       real(WP), dimension(:)    , allocatable :: slen
-      real(WP), dimension(:)    , allocatable :: snum
-      real(WP), dimension(:)    , allocatable :: sper
       real(WP), dimension(:,:)  , allocatable :: spos
       real(WP), dimension(:,:)  , allocatable :: svel
       real(WP), dimension(:,:,:), allocatable :: smoi
@@ -857,9 +855,6 @@ contains
       real(WP), dimension(:)    , allocatable :: xmin,xmax,ymin,ymax,zmin,zmax
       integer :: n,m,ierr,i,j,k,l,ii,jj,kk,iunit,totalnewp,np_start,np_old,count,ip,rank
       real(WP) :: x,y,z,x0,y0,z0,smax,smid,smin
-      integer :: nneigh_thickness
-      real(WP) :: tmpvol,tmparea
-      real(WP), dimension(:,:,:,:), allocatable :: thickness
       integer :: nmain,nsat
       integer :: nmax
       real(WP) :: Vt,Vl,Vd,minor_radius,diam,Vrim,Lrim, Lrp
@@ -873,50 +868,18 @@ contains
 
       ! Query optimal work array size
       if (.not.allocated(work)) then
-      call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
-      lwork=int(lwork_query(1)); allocate(work(lwork))
+         call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+         lwork=int(lwork_query(1)); allocate(work(lwork))
       end if
 
       ! Start by performing a CCL based on buffer criteria
       call this%ccl_buffer%build(make_label,same_label)
 
-      ! Get thickness and local struct_type for global information calculation
-      allocate(thickness(this%ccl_buffer%nstruct,this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_));thickness=0.0_WP
-
       if (this%ccl_buffer%nstruct.ge.1) then
-         ! First pass to accumulate structure thickness
-         nneigh_thickness=3
-         do n=1,this%ccl_buffer%nstruct
-            do k=this%vf%cfg%kmin_,this%vf%cfg%kmax_
-               do j=this%vf%cfg%jmin_,this%vf%cfg%jmax_
-                  do i=this%vf%cfg%imin_,this%vf%cfg%imax_
-                     ! calculate thickness
-                     tmpvol=0.0_WP; tmparea=0.0_WP
-                     do kk=k-nneigh_thickness,k+nneigh_thickness
-                        do jj=j-nneigh_thickness,j+nneigh_thickness
-                           do ii=i-nneigh_thickness,i+nneigh_thickness
-                              tmpvol=tmpvol+this%vf%VF(ii,jj,kk)*this%cfg%vol(i,j,k)
-                              tmparea=tmparea+this%vf%SD(ii,jj,kk)*this%cfg%vol(i,j,k)
-                           end do
-                        end do
-                     end do
-                     ! Calculate thickness
-                     if (this%vf%VF(i,j,k).le.VFlo) then
-                        thickness(n,i,j,k)=0.0_WP
-                     else if (tmparea.gt.0.0_WP) then    
-                        thickness(n,i,j,k)=2.0_WP*tmpvol/(tmparea+tiny(1.0_WP))
-                     else
-                        thickness(n,i,j,k)=3.5_WP*this%cfg%min_meshsize
-                     end if
-                  end do
-               end do
-            end do
-         end do
+
          ! Allocate ligament stats arrays
          allocate(svol (1:this%ccl_buffer%nstruct        )); svol=0.0_WP
          allocate(slen (1:this%ccl_buffer%nstruct        )); slen=0.0_WP
-         allocate(snum (1:this%ccl_buffer%nstruct        )); snum=0.0_WP
-         allocate(sper (1:this%ccl_buffer%nstruct        )); sper=0.0_WP
          allocate(spos (1:this%ccl_buffer%nstruct,1:3    )); spos=0.0_WP
          allocate(svel (1:this%ccl_buffer%nstruct,1:3    )); svel=0.0_WP
          allocate(smoi (1:this%ccl_buffer%nstruct,1:3,1:3)); smoi=0.0_WP
@@ -925,10 +888,9 @@ contains
          allocate(xmin(1:this%ccl_buffer%nstruct),xmax(1:this%ccl_buffer%nstruct)); xmin=HUGE(x);xmax=-HUGE(x)
          allocate(ymin(1:this%ccl_buffer%nstruct),ymax(1:this%ccl_buffer%nstruct)); ymin=HUGE(x);ymax=-HUGE(x)
          allocate(zmin(1:this%ccl_buffer%nstruct),zmax(1:this%ccl_buffer%nstruct)); zmin=HUGE(x);zmax=-HUGE(x)
-         ! Second pass to accumulate volume, position, min thickness and ligament percentage
+
+         ! first pass to accumulate volume, position, and velocity
          do n=1,this%ccl_buffer%nstruct
-            ! Loop over cells in structure
-            snum(n)=snum(n)+1.0_WP*this%ccl_buffer%struct(n)%n_
             do m=1,this%ccl_buffer%struct(n)%n_
                 ! Get cell indices
                 i=this%ccl_buffer%struct(n)%map(1,m)
@@ -938,11 +900,10 @@ contains
                 x=this%vf%cfg%xm(i)-this%ccl_buffer%struct(n)%per(1)*this%vf%cfg%xL
                 y=this%vf%cfg%ym(j)-this%ccl_buffer%struct(n)%per(2)*this%vf%cfg%yL
                 z=this%vf%cfg%zm(k)-this%ccl_buffer%struct(n)%per(3)*this%vf%cfg%zL
-                ! Accumulate volume and position. Get min thickness and ligament percentage
+                ! Accumulate volume and position
                 svol(n  )=svol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
                 spos(n,:)=spos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
                 svel(n,:)=svel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
-                sper(n)=sper(n)+1.0_WP
                 ! Check if ligament touches auto-transfer layer
                 if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
                 &   j.le.this%vf%cfg%jmin+this%nlayer.or.&
@@ -964,15 +925,14 @@ contains
          call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,srem,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,snum,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,sper,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,xmin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,ymin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,zmin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,xmax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,ymax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,zmax,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-         ! Third pass to accumulate moment of inertia
+
+         ! second pass to accumulate moment of inertia
          do n=1,this%ccl_buffer%nstruct
             ! Get ligament barycenter
             x0=spos(n,1)/svol(n)
@@ -998,7 +958,8 @@ contains
             end do
          end do
          call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
-         ! Fourth pass to generalize ligament stats
+
+         ! third pass to generalize ligament stats
          do n=1,this%ccl_buffer%nstruct
             ! Get ligament, accounting for periodicity
             spos(n,:)=spos(n,:)/svol(n)
@@ -1007,8 +968,6 @@ contains
             if (this%vf%cfg%zper.and.spos(n,3).lt.this%vf%cfg%z(this%vf%cfg%kmin)) spos(n,3)=spos(n,3)+this%vf%cfg%zL
             ! Get drop velocity
             svel(n,:)=svel(n,:)/svol(n)
-            ! Calculate the percentage of ligament structure type
-            sper(n)=sper(n)/snum(n)
             ! Calculate maximum length of the structure
             A=smoi(n,:,:)
             call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
@@ -1024,13 +983,16 @@ contains
             ! Compute eccentricity
             s_ecc(n)=sqrt(1.0_WP-smin**2/(smax**2+epsilon(1.0_WP)))
             ! Use max of bounding box and MoI-derived lengths as length
-            slen(n) = max(sqrt((xmax(n)-xmin(n))**2+(ymax(n)-ymin(n))**2+(zmax(n)-zmin(n))**2),smax)
+            slen(n)=max(sqrt((xmax(n)-xmin(n))**2+(ymax(n)-ymin(n))**2+(zmax(n)-zmin(n))**2),smax)
          end do
+
          ! Find the liquid core
          nmax=maxloc(svol,dim=1)
+
          ! Zero out monitoring variables
          this%vof_tf_buf=0.0_WP
          this%np_buf=0
+
          ! Perform transfer
          do n=1,this%ccl_buffer%nstruct
             ! Cycle if struct is core
@@ -1079,12 +1041,12 @@ contains
                      this%lp%p(this%lp%np_)%Acol=0.0_WP                                                                                  
                      this%lp%p(this%lp%np_)%Tcol=0.0_WP
                   end do
-                  ! Increment monitoring variables
-                  this%lp%np_new=this%lp%np_new+nmain+nsat
-                  this%np_buf=this%np_buf+nmain+nsat
-                  this%vof_tf_buf=this%vof_tf_buf+svol(n)
-                  this%lp%vp_new=this%lp%vp_new+svol(n)
                end if
+               ! Increment monitoring variables
+               this%lp%np_new=this%lp%np_new+nmain+nsat
+               this%np_buf=this%np_buf+nmain+nsat
+               this%vof_tf_buf=this%vof_tf_buf+svol(n)
+               this%lp%vp_new=this%lp%vp_new+svol(n)
             else
                !>Convert to drop
                diam=(6.0_WP*svol(n)/pi)**(1.0_WP/3.0_WP)
@@ -1105,12 +1067,12 @@ contains
                   this%lp%p(this%lp%np_)%dt  =0.0_WP
                   this%lp%p(this%lp%np_)%Acol=0.0_WP
                   this%lp%p(this%lp%np_)%Tcol=0.0_WP
-                  ! Increment monitoring variables
-                  this%lp%np_new=this%lp%np_new+1
-                  this%np_buf=this%np_buf+1
-                  this%vof_tf_buf=this%vof_tf_buf+svol(n)
-                  this%lp%vp_new=this%lp%vp_new+svol(n)
                end if
+               ! Increment monitoring variables
+               this%lp%np_new=this%lp%np_new+1
+               this%np_buf=this%np_buf+1
+               this%vof_tf_buf=this%vof_tf_buf+svol(n)
+               this%lp%vp_new=this%lp%vp_new+svol(n)
             end if
 
             ! empty out the VF
@@ -1120,16 +1082,20 @@ contains
             end do    
 
          end do
+
          ! Synchronize VF fields
          call this%vf%cfg%sync(this%vf%VF)
          call this%vf%clean_irl_and_band()
+
          ! Synchronize particles
          call this%lp%sync()
+
          ! Integrate monitoring variables 
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_tf_buf,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%np_buf    ,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
-         deallocate(thickness)
-         deallocate(svol,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
+
+         deallocate(svol,slen,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
+
       end if
 
    contains
