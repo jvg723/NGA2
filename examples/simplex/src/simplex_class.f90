@@ -846,7 +846,6 @@ contains
       implicit none
       class(simplex), intent(inout) :: this
       real(WP), dimension(:)    , allocatable :: svol
-      real(WP), dimension(:)    , allocatable :: sthc
       real(WP), dimension(:)    , allocatable :: slen
       real(WP), dimension(:)    , allocatable :: snum
       real(WP), dimension(:)    , allocatable :: sper
@@ -915,7 +914,6 @@ contains
          end do
          ! Allocate ligament stats arrays
          allocate(svol (1:this%ccl_buffer%nstruct        )); svol=0.0_WP
-         allocate(sthc (1:this%ccl_buffer%nstruct        )); sthc=HUGE(x)
          allocate(slen (1:this%ccl_buffer%nstruct        )); slen=0.0_WP
          allocate(snum (1:this%ccl_buffer%nstruct        )); snum=0.0_WP
          allocate(sper (1:this%ccl_buffer%nstruct        )); sper=0.0_WP
@@ -944,7 +942,6 @@ contains
                 svol(n  )=svol(n  )+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)
                 spos(n,:)=spos(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[x,y,z]
                 svel(n,:)=svel(n,:)+this%cfg%vol(i,j,k)*this%vf%VF(i,j,k)*[this%Ui(i,j,k),this%Vi(i,j,k),this%Wi(i,j,k)]
-                sthc(n)=min(sthc(n),thickness(n,i,j,k))
                 sper(n)=sper(n)+1.0_WP
                 ! Check if ligament touches auto-transfer layer
                 if (i.ge.this%vf%cfg%imax-this%nlayer.or.&
@@ -967,7 +964,6 @@ contains
          call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,srem,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MAX,this%vf%cfg%comm,ierr)
-         call MPI_ALLREDUCE(MPI_IN_PLACE,sthc,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,snum,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,sper,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,xmin,1*this%ccl_buffer%nstruct,MPI_REAL_WP,MPI_MIN,this%vf%cfg%comm,ierr)
@@ -1133,7 +1129,7 @@ contains
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%vof_tf_buf,1,MPI_REAL_WP,MPI_SUM,this%vf%cfg%comm,ierr)
          call MPI_ALLREDUCE(MPI_IN_PLACE,this%np_buf    ,1,MPI_INTEGER,MPI_SUM,this%vf%cfg%comm,ierr)
          deallocate(thickness)
-         deallocate(svol,sthc,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
+         deallocate(svol,slen,snum,sper,spos,svel,smoi,srem,s_ecc,xmin,ymin,zmin)
       end if
 
    contains
