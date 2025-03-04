@@ -23,8 +23,6 @@ Angular velocity          : 0
 Polymer viscosity :             0.01
 Polymer relaxation time :       1.0   
 Maximum polymer extensibility : 10
-Extensional viscosity parameter : 0.25
-Affine parameter                : 0.0
 
 
 # Time integration
