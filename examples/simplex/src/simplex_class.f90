@@ -976,7 +976,7 @@ contains
             smoi(n,:,:)=A
             ! Get characteristic lengths of drop
             smax=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n))
-            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n," lmax=",lmax," d(2)=",d(2)," d(1)=",d(1)," d(3)=",d(3)," lvol(n)=",lvol(n)
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n," smax=",smax," d(2)=",d(2)," d(1)=",d(1)," d(3)=",d(3)," svol(n)=",svol(n)
             smid=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n))
             smin=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n))
             if (smin.eq.0.0_WP) smin=smid ! Handle 2D case
@@ -993,19 +993,29 @@ contains
          this%vof_tf_buf=0.0_WP
          this%np_buf=0
 
+         ! Record initial droplets in each processor for future outputing purpose
+         np_start=this%lp%np_
+
          ! Perform transfer
          do n=1,this%ccl_buffer%nstruct
             ! Cycle if struct is core
             if (n.eq.nmax) cycle
+
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " slen(n)=",slen(n), " s_ecc=",s_ecc(n), " srem=",srem(n)
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " xmax(n)=",xmax(n), " xmin(n)=",xmin(n), " ymax(n)=",ymax(n), " ymin(n)=",ymin(n), " zmax(n)=",zmax(n), " zmin(n)=",zmin(n)
 
             ! Only convert if structure is toucing buffer
             if(srem(n).gt.0.0_WP) then
             else
                cycle
             end if
+            
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " post cycle"
 
             ! Skip if negative
             if (slen(n).le.0.0_WP) cycle
+
+            ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " post skip"
 
             ! Check eccentricity for conversion
             diam=0.0_WP
@@ -1017,10 +1027,11 @@ contains
                nmain=floor(this%dw*Lrim/(twoPi*minor_radius))
                nsat=nmain+1
                diam=(6.0_WP*Vrim/pi/(real(nmain,WP)+this%size_ratio**3*real(nsat,WP)))**(1.0_WP/3.0_WP)
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrim=",Lrim, " Vrim=",Vrim," diam=",diam," nmain=",nmain," nsat=",nsat
                ! Only the main processor is in charge of creating droplets
                if (this%cfg%amRoot) then
-                  np_start=this%lp%np_
                   Lrp = twoPi*minor_radius/this%dw
+                  ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " pre-conversion"," Lrp=",Lrp
                   do l=1,nsat+nmain
                      ! Increment particle counter
                      this%lp%np_=this%lp%np_+1
@@ -1034,22 +1045,33 @@ contains
                         this%lp%p(this%lp%np_)%d=diam                                                                                    
                      end if
                      this%lp%p(this%lp%np_)%pos=spos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*smoi(n,:,1)
+                     ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " spos(n,1)=",spos(n,1), " spos(n,2)=",spos(n,2), " spos(n,3)=",spos(n,3)
+                     ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " Lrp=",Lrp
+                     ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " smoi(n,1,1)=",smoi(n,1,1), " smoi(n,2,1)=",smoi(n,2,1), " smoi(n,3,1)=",smoi(n,3,1)
+                     ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " pos(1)=",this%lp%p(this%lp%np_)%pos(1), " pos(2)=",this%lp%p(this%lp%np_)%pos(2), " pos(3)=",this%lp%p(this%lp%np_)%pos(3)  
                      this%lp%p(this%lp%np_)%vel =svel(n,:)
+                     ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " svel(n,1)=",svel(n,1), " svel(n,2)=",svel(n,2), " svel(n,3)=",svel(n,3)
                      this%lp%p(this%lp%np_)%ind =this%cfg%get_ijk_global(this%lp%p(this%lp%np_)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
-                     this%lp%p(this%lp%np_)%flag=0                                                                                        
+                     ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " ind(1)=",this%lp%p(this%lp%np_)%ind(1), " ind(2)=",this%lp%p(this%lp%np_)%ind(2), " ind(3)=",this%lp%p(this%lp%np_)%ind(3)   
+                     if (ABS(this%lp%p(this%lp%np_)%pos(1)).ge.this%cfg%xL/2.00_WP.or.ABS(this%lp%p(this%lp%np_)%pos(2)).ge.this%cfg%yL/2.00_WP.or.ABS(this%lp%p(this%lp%np_)%pos(3)).ge.this%cfg%zL/2.00_WP) then
+                        this%lp%p(this%lp%np_)%flag=1 
+                     else
+                        this%lp%p(this%lp%np_)%flag=0 
+                     end if                                                                                
                      this%lp%p(this%lp%np_)%dt  =0.0_WP                                                                                  
                      this%lp%p(this%lp%np_)%Acol=0.0_WP                                                                                  
                      this%lp%p(this%lp%np_)%Tcol=0.0_WP
                   end do
+                  ! Increment monitoring variables
+                  this%lp%np_new=this%lp%np_new+nmain+nsat
+                  this%np_buf=this%np_buf+nmain+nsat
+                  this%vof_tf_buf=this%vof_tf_buf+svol(n)
+                  this%lp%vp_new=this%lp%vp_new+svol(n)
                end if
-               ! Increment monitoring variables
-               this%lp%np_new=this%lp%np_new+nmain+nsat
-               this%np_buf=this%np_buf+nmain+nsat
-               this%vof_tf_buf=this%vof_tf_buf+svol(n)
-               this%lp%vp_new=this%lp%vp_new+svol(n)
             else
                !>Convert to drop
                diam=(6.0_WP*svol(n)/pi)**(1.0_WP/3.0_WP)
+               ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n," diam=",diam
                ! Root creates a new Lagrangian drop
                if (this%vf%cfg%amRoot) then
                   np_start=this%lp%np_
@@ -1067,12 +1089,12 @@ contains
                   this%lp%p(this%lp%np_)%dt  =0.0_WP
                   this%lp%p(this%lp%np_)%Acol=0.0_WP
                   this%lp%p(this%lp%np_)%Tcol=0.0_WP
+                  ! Increment monitoring variables
+                  this%lp%np_new=this%lp%np_new+1
+                  this%np_buf=this%np_buf+1
+                  this%vof_tf_buf=this%vof_tf_buf+svol(n)
+                  this%lp%vp_new=this%lp%vp_new+svol(n)
                end if
-               ! Increment monitoring variables
-               this%lp%np_new=this%lp%np_new+1
-               this%np_buf=this%np_buf+1
-               this%vof_tf_buf=this%vof_tf_buf+svol(n)
-               this%lp%vp_new=this%lp%vp_new+svol(n)
             end if
 
             ! empty out the VF
@@ -1104,7 +1126,7 @@ contains
       logical function make_label(i,j,k)
          implicit none
          integer, intent(in) :: i,j,k
-         if ((this%vf%VF(i,j,k).gt.VFlo).and.this%cfg%xm(i).gt.0.0_WP)then
+         if ((this%vf%VF(i,j,k).gt.VFlo))then
             make_label=.true.
          else
             make_label=.false.
@@ -1994,7 +2016,9 @@ contains
          this%resU=this%fs%rho_g
          this%resV=this%fs%visc_g
          call this%tlpadv%start()
+         ! if (this%vf%cfg%amRoot) print *, "pre advance lpt"
          call this%lp%advance(dt=this%time%dt,U=this%fs%U,V=this%fs%V,W=this%fs%W,rho=this%resU,visc=this%resV)
+         ! if (this%vf%cfg%amRoot) print *, "post advance lpt"
          call this%tlpadv%stop()
       end if
       
