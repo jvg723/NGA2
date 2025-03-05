@@ -37,7 +37,6 @@ Surface tension coefficient : 0.024         # 0.0225      # 0.0728
 # Break-up model
 Transfer drops     : .true.
 Transfer ligaments : .true.
-Transfer buffer    : .true.
 
 # Time integration
 Max timestep size : 2e-6
