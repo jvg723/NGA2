@@ -401,6 +401,8 @@ contains
          
          ! Perform transfer
          if (transfer) then
+
+            if (dlen(n).le.0.0_WP) cycle
             
             if (decc(n).gt.this%emax) then !> convert as a ligament
                !>Break-up as ligament (Drop size method from Kim & Moin (2020))
@@ -413,6 +415,7 @@ contains
                ! Only the main processor is in charge of creating droplets
                if (this%cfg%amRoot) then
                   Lrp = twoPi*minor_radius/this%dw
+                  ! if (this%vf%cfg%amRoot) print *, "ligament This paritcle id id=", n, " Lrp=",Lrp," Lrim=", Lrim, " Vrim=",Vrim, " minor_radius=", minor_radius, " diam=", diam
                   ! if (this%vf%cfg%amRoot) print *, "This paritcle id id=", n, " pre-conversion"," Lrp=",Lrp
                   do l=1,nsat+nmain
                      ! Increment particle counter
@@ -427,8 +430,13 @@ contains
                         this%lp%p(this%lp%np_)%d=diam                                                                                    
                      end if
                      this%lp%p(this%lp%np_)%pos=dpos(n,:)+0.5_WP*Lrp*(l-(nmain+1))*dmoi(n,:,1)  
+                     ! if (this%vf%cfg%amRoot) print *, "ligament This paritcle id id=", n, " dpos(n,1)=",dpos(n,1), " dpos(n,2)=",dpos(n,2), " dpos(n,3)=",dpos(n,3)
+                     ! if (this%vf%cfg%amRoot) print *, "ligament This paritcle id id=", n, " dmoi(n,1,1)=",dmoi(n,1,1), " dmoi(n,2,1)=",dmoi(n,2,1), " dmoi(n,3,1)=",dmoi(n,3,1)
+                     ! if (this%vf%cfg%amRoot) print *, "ligament This paritcle id id=", n, " pos(1)=",this%lp%p(this%lp%np_)%pos(1), " pos(2)=",this%lp%p(this%lp%np_)%pos(2), " pos(3)=",this%lp%p(this%lp%np_)%pos(3)   
                      this%lp%p(this%lp%np_)%vel=dvel(n,:)
+                     ! if (this%vf%cfg%amRoot) print *, "ligament This paritcle id id=", n, " dvel(n,1)=",dvel(n,1), " dvel(n,2)=",dvel(n,2), " dvel(n,3)=",dvel(n,3)
                      this%lp%p(this%lp%np_)%ind=this%cfg%get_ijk_global(this%lp%p(this%lp%np_)%pos,[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])  
+                     ! if (this%vf%cfg%amRoot) print *, "ligament This paritcle id id=", n, " ind(1)=",this%lp%p(this%lp%np_)%ind(1), " ind(2)=",this%lp%p(this%lp%np_)%ind(2), " ind(3)=",this%lp%p(this%lp%np_)%ind(3)   
                      if (ABS(this%lp%p(this%lp%np_)%pos(1)).ge.this%cfg%xL/2.00_WP.or.ABS(this%lp%p(this%lp%np_)%pos(2)).ge.this%cfg%yL/2.00_WP.or.ABS(this%lp%p(this%lp%np_)%pos(3)).ge.this%cfg%zL/2.00_WP) then
                         this%lp%p(this%lp%np_)%flag=1 
                      else
@@ -456,8 +464,13 @@ contains
                   this%lp%p(this%lp%np_)%id  =int(1,8)
                   this%lp%p(this%lp%np_)%d   =diam
                   this%lp%p(this%lp%np_)%pos =dpos(n,:)
+                  ! if (this%vf%cfg%amRoot) print *, "drop This paritcle id id=", n, " dpos(n,1)=",dpos(n,1), " dpos(n,2)=",dpos(n,2), " dpos(n,3)=",dpos(n,3)
+                  ! if (this%vf%cfg%amRoot) print *, "drop This paritcle id id=", n, " dmoi(n,1,1)=",dmoi(n,1,1), " dmoi(n,2,1)=",dmoi(n,2,1), " dmoi(n,3,1)=",dmoi(n,3,1)
+                  ! if (this%vf%cfg%amRoot) print *, "drop This paritcle id id=", n, " pos(1)=",this%lp%p(this%lp%np_)%pos(1), " pos(2)=",this%lp%p(this%lp%np_)%pos(2), " pos(3)=",this%lp%p(this%lp%np_)%pos(3)   
                   this%lp%p(this%lp%np_)%vel =dvel(n,:)
+                  ! if (this%vf%cfg%amRoot) print *, "drop This paritcle id id=", n, " dvel(n,1)=",dvel(n,1), " dvel(n,2)=",dvel(n,2), " dvel(n,3)=",dvel(n,3)
                   this%lp%p(this%lp%np_)%ind =this%lp%cfg%get_ijk_global(dpos(n,:),[this%lp%cfg%imin,this%lp%cfg%jmin,this%lp%cfg%kmin])
+                  ! if (this%vf%cfg%amRoot) print *, "drop This paritcle id id=", n, " ind(1)=",this%lp%p(this%lp%np_)%ind(1), " ind(2)=",this%lp%p(this%lp%np_)%ind(2), " ind(3)=",this%lp%p(this%lp%np_)%ind(3)   
                   this%lp%p(this%lp%np_)%flag=0
                   this%lp%p(this%lp%np_)%dt  =0.0_WP
                   this%lp%p(this%lp%np_)%Acol=0.0_WP
