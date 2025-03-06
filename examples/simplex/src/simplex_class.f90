@@ -250,10 +250,10 @@ contains
       allocate(dmoi(1:this%ccl%nstruct,1:3,1:3)); dmoi=0.0_WP
       allocate(drem(1:this%ccl%nstruct        )); drem=0.0_WP
       allocate(dlen(1:this%ccl%nstruct        )); dlen=0.0_WP
+      allocate(decc(1:this%ccl%nstruct)); decc=0.0_WP
       allocate(xmin(1:this%ccl%nstruct),xmax(1:this%ccl%nstruct)); xmin=HUGE(x);xmax=-HUGE(x)
       allocate(ymin(1:this%ccl%nstruct),ymax(1:this%ccl%nstruct)); ymin=HUGE(x);ymax=-HUGE(x)
       allocate(zmin(1:this%ccl%nstruct),zmax(1:this%ccl%nstruct)); zmin=HUGE(x);zmax=-HUGE(x)
-      allocate(decc(1:this%ccl%nstruct)); decc=0.0_WP
       
       ! First pass to accumulate volume, position, and velocity
       do n=1,this%ccl%nstruct
@@ -367,7 +367,10 @@ contains
          diam=(6.0_WP*dvol(n)/pi)**(1.0_WP/3.0_WP)
          
          ! Decide if struct is being transfered
-         if (diam.le.this%ddel) then
+         if (diam.gt.this%dmax) then
+            ! Too big to transfer
+            transfer=.false.
+         else if (diam.le.this%ddel) then
             ! Too small to track, delete immediately
             transfer=.false.
             ! Zero out VF in the structure
@@ -380,17 +383,18 @@ contains
             ! Small enough to transfer automatically
             transfer=.true.
          else
+            ! In between, check eccentricity from moment of inertia tensor
             if (decc(n).gt.this%emax) then
                ! Too eccentric to transfer yet
                transfer=.false.
-            else if (drem(n).gt.0.0_WP) then 
-               ! But transfer if it is in the buffer region
-               transfer=.true.
             else
                ! Spherical enough to transfer
                transfer=.true.
             end if
          end if
+
+         ! Force transfer if drop touches auto-transfer layer
+         if (drem(n).gt.0.0_WP) transfer=.true.
          
          ! But prevent transfer if that's the core
          if (n.eq.nmax) transfer=.false.
@@ -398,7 +402,7 @@ contains
          ! Perform transfer
          if (transfer) then
             
-            if (decc(n).gt.this%emax.and.drem(n).gt.0.0_WP) then !> convert as a ligament
+            if (decc(n).gt.this%emax) then !> convert as a ligament
                !>Break-up as ligament (Drop size method from Kim & Moin (2020))
                Lrim=dlen(n) 
                Vrim=dvol(n)
@@ -440,7 +444,7 @@ contains
                   this%lp%np_new=this%lp%np_new+nmain+nsat
                   this%lp%vp_new=this%lp%vp_new+dvol(n)
                end if
-            else !>Convert to drop
+            else !> convert to drop
                ! Root creates a new Lagrangian drop
                if (this%vf%cfg%amRoot) then
                   np_start=this%lp%np_
