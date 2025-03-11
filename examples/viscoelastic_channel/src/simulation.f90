@@ -99,7 +99,7 @@ contains
       deallocate(Uavg,Uavg_,vol,vol_)
    end subroutine postproc_vel
 
-   !> Specialized subroutine that outputs the velocity distribution
+   !> Specialized subroutine that outputs the conformation tensor and stress distribution
    subroutine postproc_ct()
       use string,    only: str_medium
       use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM
