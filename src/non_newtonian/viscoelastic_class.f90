@@ -29,6 +29,7 @@ module viscoelastic_class
       real(WP) :: Lmax                                     !< Polymer maximum extensibility in FENE model
       real(WP) :: affinecoeff                              !< Parameter for affine motion in PTT model
       real(WP) :: elongvisc                                !< Extensional parameter for elognational viscosity in PTT model
+      real(WP) :: visc_p                                   !< Viscosity of polymer
    contains
       procedure :: init                                    !< Viscoelastic model initialization (different name is used because of extension)
       procedure :: get_CgradU                              !< Calculate streching and distrortion term
