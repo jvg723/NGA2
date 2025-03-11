@@ -1,5 +1,5 @@
-!> Definition for a simplex class
-module simplex_class
+!> Definition for a atom class
+module atom_class
    use precision,         only: WP
    use string,            only: str_medium
    use inputfile_class,   only: inputfile
@@ -22,10 +22,10 @@ module simplex_class
    implicit none
    private
    
-   public :: simplex
+   public :: atom
    
-   !> Simplex object
-   type :: simplex
+   !> atom object
+   type :: atom
       
       !> Provide a pardata and an event tracker for saving restarts
       type(event)    :: save_evt
@@ -92,11 +92,11 @@ module simplex_class
       real(WP) :: Ucoflow,mfr,Apipe
       
    contains
-      procedure :: init                            !< Initialize simplex simulation
-      procedure :: step                            !< Advance simplex simulation by one time step
-      procedure :: final                           !< Finalize simplex simulation
+      procedure :: init                            !< Initialize atom simulation
+      procedure :: step                            !< Advance atom simulation by one time step
+      procedure :: final                           !< Finalize atom simulation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
-   end type simplex
+   end type atom
    
    
 contains
@@ -109,7 +109,7 @@ contains
       use filesys,  only: makedir,isdir
       use string,   only: str_medium
       implicit none
-      class(simplex), intent(inout) :: this
+      class(atom), intent(inout) :: this
       real(WP), dimension(:), allocatable :: CSA_s,CSA_f,CSA_l,CSA_g !< Solid, fluid, liquid, and gas cross-sectional areas
       real(WP), dimension(:), allocatable :: VFR_s,VFR_f,VFR_l,VFR_g !< Solid, fluid, liquid, and gas volume flow rates
       character(len=str_medium) :: filename,timestamp
@@ -168,16 +168,16 @@ contains
    end subroutine analyze_flowrate
 
    
-   !> Initialization of simplex simulation
+   !> Initialization of atom simulation
    subroutine init(this)
       implicit none
-      class(simplex), intent(inout) :: this
+      class(atom), intent(inout) :: this
       
       
       ! Setup an input file
       read_input: block
          use parallel, only: amRoot
-         this%input=inputfile(amRoot=amRoot,filename='simplex.input')
+         this%input=inputfile(amRoot=amRoot,filename='atomization.input')
       end block read_input
       
       
@@ -228,7 +228,7 @@ contains
             z(k)=z(k-1)+sratio_yz*(z(k-1)-z(k-2))
          end do
          ! General serial grid object
-         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='simplex')
+         grid=sgrid(coord=cartesian,no=3,x=x,y=y,z=z,xper=.false.,yper=.false.,zper=.false.,name='atom')
          ! Read in partition
          call this%input%read('Partition',partition)
          ! Create ibconfig
@@ -236,12 +236,12 @@ contains
       end block create_config
       
       
-      ! Now initialize simplex nozzle geometry
-      create_simplex: block
+      ! Now initialize atom nozzle geometry
+      create_atom: block
          use ibconfig_class, only: sharp
          integer :: i,j,k
          ! Create polygon
-         call this%poly%initialize(nvert=10,name='simplex')
+         call this%poly%initialize(nvert=10,name='atom')
          this%poly%vert(:, 1)=[-0.01000_WP,0.00000_WP]
          this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
@@ -277,42 +277,6 @@ contains
          call this%cfg%calculate_normal()
          ! Get VF field
          call this%cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
-         ! Carve out inlet pipes
-         !create_inlet_pipes: block
-         !   use mms_geom, only: cube_refine_vol
-         !   integer :: si,sj,sk,n
-         !   real(WP), dimension(3,8) :: cube_vertex
-         !   real(WP), dimension(3) :: v_cent,a_cent
-         !   real(WP) :: vol,area,contact
-         !   integer, parameter :: amr_ref_lvl=4
-         !   do k=this%cfg%kmino_,this%cfg%kmaxo_
-         !      do j=this%cfg%jmino_,this%cfg%jmaxo_
-         !         do i=this%cfg%imino_,this%cfg%imaxo_
-         !            ! Only work to the left of the plenum
-         !            if (this%cfg%xm(i)-this%p1(1).gt.this%cfg%min_meshsize) cycle
-         !            ! Set cube vertices
-         !            n=0
-         !            do sk=0,1
-         !               do sj=0,1
-         !                  do si=0,1
-         !                     n=n+1; cube_vertex(:,n)=[this%cfg%x(i+si),this%cfg%y(j+sj),this%cfg%z(k+sk)]
-         !                  end do
-         !               end do
-         !            end do
-         !            ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 1
-         !            vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-         !            call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_1,0.0_WP,amr_ref_lvl)
-         !            this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k), vol/this%cfg%vol(i,j,k))
-         !            this%cfg%SD(i,j,k)=max(this%cfg%SD(i,j,k),area/this%cfg%vol(i,j,k))
-         !            ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 2
-         !            vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-         !            call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_2,0.0_WP,amr_ref_lvl)
-         !            this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k), vol/this%cfg%vol(i,j,k))
-         !            this%cfg%SD(i,j,k)=max(this%cfg%SD(i,j,k),area/this%cfg%vol(i,j,k))
-         !         end do
-         !      end do
-         !   end do
-         !end block create_inlet_pipes
          ! Apply Neumann on VF and apply stair-stepping at entrance
          if (this%cfg%iproc.eq.1) then
             ! Stair-step entrance
@@ -324,38 +288,7 @@ contains
          end if
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
-      end block create_simplex
-      
-      
-      ! Initialize flow rate
-      set_flowrate: block
-         use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-         use parallel, only: MPI_REAL_WP
-         use string,   only: str_long
-         use messager, only: log
-         integer :: j,k,ierr
-         character(len=str_long) :: message
-         ! Read mass flow rate
-         call this%input%read('Mass flow rate',this%mfr)
-         ! Read coflow velocity
-         call this%input%read('Coflow velocity',this%Ucoflow)
-         ! Integrate inlet pipe surface area
-         this%Apipe=0.0_WP
-         if (this%cfg%iproc.eq.1) then
-            do k=this%cfg%kmin_,this%cfg%kmax_
-               do j=this%cfg%jmin_,this%cfg%jmax_
-                  if (sqrt(this%cfg%ym(j)**2+this%cfg%zm(k)**2).lt.this%Rinlet) then
-                     this%Apipe=this%Apipe+this%cfg%VF(this%cfg%imin,j,k)*this%cfg%dy(j)*this%cfg%dz(k)
-                  end if
-               end do
-            end do
-         end if
-         call MPI_ALLREDUCE(MPI_IN_PLACE,this%Apipe,1,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
-         ! Log this info
-         if (this%cfg%amRoot) then
-            write(message,'("Inlet pipe area is ",es12.5)') this%Apipe; call log(message)
-         end if
-      end block set_flowrate
+      end block create_atom
       
       
       ! Initialize time tracker with 2 subiterations
@@ -401,15 +334,16 @@ contains
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
                do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
-                  rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
-                  ! Ensure the nozzle is filled with liquid up to the throat with wet walls
-                  if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.this%Rinlet) then
-                     this%vf%VF(i,j,k)=1.0_WP
-                  else if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.this%Rexit) then
-                     this%vf%VF(i,j,k)=1.0_WP
-                  else
-                     this%vf%VF(i,j,k)=0.0_WP
-                  end if
+                  this%vf%VF(i,j,k)=0.0_WP
+                  ! rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+                  ! ! Ensure the nozzle is filled with liquid up to the throat with wet walls
+                  ! if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.this%Rinlet) then
+                  !    this%vf%VF(i,j,k)=1.0_WP
+                  ! else if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.this%Rexit) then
+                  !    this%vf%VF(i,j,k)=1.0_WP
+                  ! else
+                  !    this%vf%VF(i,j,k)=0.0_WP
+                  ! end if
                   ! Initialize phasic barycenters
                   this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
                   this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
@@ -485,17 +419,17 @@ contains
          real(WP) :: rad
          ! Zero velocity except if restarting
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
-         ! Apply Dirichlet condition at inlets
-         call this%fs%get_bcond('inlets',mybc)
-         do n=1,mybc%itr%no_
-            i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            rad=sqrt(this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)
-            if (rad.lt.this%Rinlet) then
-               this%fs%U(i,j,k)=this%cfg%VF(i,j,k)*this%mfr/(this%fs%rho_l*this%Apipe)
-            else if (rad.gt.this%Rcoflow) then
-               this%fs%U(i,j,k)=this%Ucoflow
-            end if
-         end do
+         ! ! Apply Dirichlet condition at inlets
+         ! call this%fs%get_bcond('inlets',mybc)
+         ! do n=1,mybc%itr%no_
+         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+         !    rad=sqrt(this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)
+         !    if (rad.lt.this%Rinlet) then
+         !       this%fs%U(i,j,k)=this%cfg%VF(i,j,k)*this%mfr/(this%fs%rho_l*this%Apipe)
+         !    else if (rad.gt.this%Rcoflow) then
+         !       this%fs%U(i,j,k)=this%Ucoflow
+         !    end if
+         ! end do
          ! Apply all other boundary conditions
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          ! Adjust MFR for global mass balance
@@ -537,7 +471,7 @@ contains
          ! Perform pardata initialization
          if (this%restarted) then
             ! We are restarting, read the file
-            call this%df%initialize(pg=this%cfg,iopartition=iopartition,fdata='restart/data_'//trim(timestamp))
+            call this%df%initialize(pg=this%cfg,iopartition=iopartition,fdata='restart_atom/data_'//trim(timestamp))
             ! Read in the planes directly and set the IRL interface
             allocate(P11(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P11',var=P11)
             allocate(P12(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P12',var=P12)
@@ -630,7 +564,7 @@ contains
          else
             ! We are not restarting, prepare a new directory for storing restart files
             if (this%cfg%amRoot) then
-               if (.not.isdir('restart')) call makedir('restart')
+               if (.not.isdir('restart_atom')) call makedir('restart_atom')
             end if
             ! Prepare pardata object for saving restart files
             call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=15)
@@ -676,7 +610,7 @@ contains
       ! Add Ensight output
       create_ensight: block
          ! Create Ensight output from cfg
-         this%ens_out=ensight(cfg=this%cfg,name='simplex')
+         this%ens_out=ensight(cfg=this%cfg,name='atom')
          ! Create event for Ensight output
          this%ens_evt=event(time=this%time,name='Ensight output')
          call this%input%read('Ensight output period',this%ens_evt%tper)
@@ -697,7 +631,7 @@ contains
          call this%fs%get_max()
          call this%vf%get_max()
          ! Create simulation monitor
-         this%mfile=monitor(this%fs%cfg%amRoot,'simulation_simplex')
+         this%mfile=monitor(this%fs%cfg%amRoot,'simulation_atom')
          call this%mfile%add_column(this%time%n,'Timestep number')
          call this%mfile%add_column(this%time%t,'Time')
          call this%mfile%add_column(this%time%dt,'Timestep size')
@@ -714,7 +648,7 @@ contains
          call this%mfile%add_column(this%fs%psolv%rerr,'Pressure error')
          call this%mfile%write()
          ! Create CFL monitor
-         this%cflfile=monitor(this%fs%cfg%amRoot,'cfl_simplex')
+         this%cflfile=monitor(this%fs%cfg%amRoot,'cfl_atom')
          call this%cflfile%add_column(this%time%n,'Timestep number')
          call this%cflfile%add_column(this%time%t,'Time')
          call this%cflfile%add_column(this%fs%CFLst,'STension CFL')
@@ -875,7 +809,7 @@ contains
    subroutine step(this)
       use tpns_class, only: arithmetic_visc
       implicit none
-      class(simplex), intent(inout) :: this
+      class(atom), intent(inout) :: this
       
       ! Reset all timers and start timestep timer
       call this%tstep%reset()
@@ -1208,14 +1142,14 @@ contains
    end subroutine step
    
    
-   !> Finalize simplex simulation
+   !> Finalize atom simulation
    subroutine final(this)
       implicit none
-      class(simplex), intent(inout) :: this
+      class(atom), intent(inout) :: this
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
       deallocate(this%gradU,this%Uib,this%Vib,this%Wib,this%SR)
    end subroutine final
    
    
-end module simplex_class
+end module atom_class

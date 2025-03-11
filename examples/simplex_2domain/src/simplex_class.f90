@@ -277,42 +277,6 @@ contains
          call this%cfg%calculate_normal()
          ! Get VF field
          call this%cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
-         ! Carve out inlet pipes
-         !create_inlet_pipes: block
-         !   use mms_geom, only: cube_refine_vol
-         !   integer :: si,sj,sk,n
-         !   real(WP), dimension(3,8) :: cube_vertex
-         !   real(WP), dimension(3) :: v_cent,a_cent
-         !   real(WP) :: vol,area,contact
-         !   integer, parameter :: amr_ref_lvl=4
-         !   do k=this%cfg%kmino_,this%cfg%kmaxo_
-         !      do j=this%cfg%jmino_,this%cfg%jmaxo_
-         !         do i=this%cfg%imino_,this%cfg%imaxo_
-         !            ! Only work to the left of the plenum
-         !            if (this%cfg%xm(i)-this%p1(1).gt.this%cfg%min_meshsize) cycle
-         !            ! Set cube vertices
-         !            n=0
-         !            do sk=0,1
-         !               do sj=0,1
-         !                  do si=0,1
-         !                     n=n+1; cube_vertex(:,n)=[this%cfg%x(i+si),this%cfg%y(j+sj),this%cfg%z(k+sk)]
-         !                  end do
-         !               end do
-         !            end do
-         !            ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 1
-         !            vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-         !            call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_1,0.0_WP,amr_ref_lvl)
-         !            this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k), vol/this%cfg%vol(i,j,k))
-         !            this%cfg%SD(i,j,k)=max(this%cfg%SD(i,j,k),area/this%cfg%vol(i,j,k))
-         !            ! Call adaptive refinement code to get volume fraction recursively - inlet pipe 2
-         !            vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
-         !            call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_inlet_pipe_2,0.0_WP,amr_ref_lvl)
-         !            this%cfg%VF(i,j,k)=max(this%cfg%VF(i,j,k), vol/this%cfg%vol(i,j,k))
-         !            this%cfg%SD(i,j,k)=max(this%cfg%SD(i,j,k),area/this%cfg%vol(i,j,k))
-         !         end do
-         !      end do
-         !   end do
-         !end block create_inlet_pipes
          ! Apply Neumann on VF and apply stair-stepping at entrance
          if (this%cfg%iproc.eq.1) then
             ! Stair-step entrance
@@ -537,7 +501,7 @@ contains
          ! Perform pardata initialization
          if (this%restarted) then
             ! We are restarting, read the file
-            call this%df%initialize(pg=this%cfg,iopartition=iopartition,fdata='restart/data_'//trim(timestamp))
+            call this%df%initialize(pg=this%cfg,iopartition=iopartition,fdata='restart_smpx/data_'//trim(timestamp))
             ! Read in the planes directly and set the IRL interface
             allocate(P11(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P11',var=P11)
             allocate(P12(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); call this%df%pull(name='P12',var=P12)
@@ -630,7 +594,7 @@ contains
          else
             ! We are not restarting, prepare a new directory for storing restart files
             if (this%cfg%amRoot) then
-               if (.not.isdir('restart')) call makedir('restart')
+               if (.not.isdir('restart_smpx')) call makedir('restart_smpx')
             end if
             ! Prepare pardata object for saving restart files
             call this%df%initialize(pg=this%cfg,iopartition=iopartition,filename=trim(this%cfg%name),nval=2,nvar=15)
@@ -1199,7 +1163,7 @@ contains
             call this%df%push(name='P22',var=P22         )
             call this%df%push(name='P23',var=P23         )
             call this%df%push(name='P24',var=P24         )
-            call this%df%write(fdata='restart/data_'//trim(adjustl(timestamp)))
+            call this%df%write(fdata='restart_smpx/data_'//trim(adjustl(timestamp)))
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
          end block save_restart
