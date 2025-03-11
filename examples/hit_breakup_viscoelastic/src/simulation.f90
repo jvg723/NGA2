@@ -159,165 +159,165 @@ contains
    !    end if
    ! end subroutine analyse_drops
 
-   ! !> Analyse structures
-   ! subroutine analyse_structs()
-   !    use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
-   !    use parallel,  only: MPI_REAL_WP
-   !    use mathtools, only: pi
-   !    use string,    only: str_medium
-   !    use filesys,   only: makedir,isdir
-   !    character(len=str_medium) :: filename,timestamp
-   !    real(WP), dimension(:)    , allocatable :: svol
-   !    real(WP), dimension(:,:)  , allocatable :: spos
-   !    real(WP), dimension(:,:)  , allocatable :: svel
-   !    real(WP), dimension(:,:,:), allocatable :: smoi
-   !    real(WP), dimension(:,:)  , allocatable :: slen
-   !    real(WP), dimension(:)    , allocatable :: secc
-   !    real(WP), dimension(:)    , allocatable :: diam
-   !    integer :: n,m,ierr,i,j,k,iunit
-   !    real(WP) :: x,y,z,x0,y0,z0
+   !> Analyse structures
+   subroutine analyse_structs()
+      use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_MAX,MPI_IN_PLACE
+      use parallel,  only: MPI_REAL_WP
+      use mathtools, only: pi
+      use string,    only: str_medium
+      use filesys,   only: makedir,isdir
+      character(len=str_medium) :: filename,timestamp
+      real(WP), dimension(:)    , allocatable :: svol
+      real(WP), dimension(:,:)  , allocatable :: spos
+      real(WP), dimension(:,:)  , allocatable :: svel
+      real(WP), dimension(:,:,:), allocatable :: smoi
+      real(WP), dimension(:,:)  , allocatable :: slen
+      real(WP), dimension(:)    , allocatable :: secc
+      real(WP), dimension(:)    , allocatable :: diam
+      integer :: n,m,ierr,i,j,k,iunit
+      real(WP) :: x,y,z,x0,y0,z0
 
-   !    ! Moment of inertia calculation using lapack
-   !    real(WP), dimension(:), allocatable, save :: work !< Saved!
-   !    integer, save :: lwork                            !< Saved!
-   !    real(WP), dimension(1) :: lwork_query
-   !    real(WP), dimension(3) :: d
-   !    real(WP), dimension(3,3) :: A
-   !    integer :: info
+      ! Moment of inertia calculation using lapack
+      real(WP), dimension(:), allocatable, save :: work !< Saved!
+      integer, save :: lwork                            !< Saved!
+      real(WP), dimension(1) :: lwork_query
+      real(WP), dimension(3) :: d
+      real(WP), dimension(3,3) :: A
+      integer :: info
       
-   !    ! Query optimal work array size
-   !    if (.not.allocated(work)) then
-   !       call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
-   !       lwork=int(lwork_query(1)); allocate(work(lwork))
-   !    end if
+      ! Query optimal work array size
+      if (.not.allocated(work)) then
+         call dsyev('V','U',3,A,3,d,lwork_query,-1,info)
+         lwork=int(lwork_query(1)); allocate(work(lwork))
+      end if
       
-   !    ! Start by performing a CCL
-   !    call ccl%build(make_label,same_label)
+      ! Start by performing a CCL
+      call ccl%build(make_label,same_label)
       
-   !    ! Allocate structure stats arrays
-   !    allocate(svol(1:ccl%nstruct        )); svol=0.0_WP
-   !    allocate(spos(1:ccl%nstruct,1:3    )); spos=0.0_WP
-   !    allocate(svel(1:ccl%nstruct,1:3    )); svel=0.0_WP
-   !    allocate(smoi(1:ccl%nstruct,1:3,1:3)); smoi=0.0_WP
-   !    allocate(slen(1:ccl%nstruct,1:3    )); slen=0.0_WP
-   !    allocate(secc(1:ccl%nstruct        )); secc=0.0_WP
-   !    allocate(diam(1:ccl%nstruct        )); diam=0.0_WP
+      ! Allocate structure stats arrays
+      allocate(svol(1:ccl%nstruct        )); svol=0.0_WP
+      allocate(spos(1:ccl%nstruct,1:3    )); spos=0.0_WP
+      allocate(svel(1:ccl%nstruct,1:3    )); svel=0.0_WP
+      allocate(smoi(1:ccl%nstruct,1:3,1:3)); smoi=0.0_WP
+      allocate(slen(1:ccl%nstruct,1:3    )); slen=0.0_WP
+      allocate(secc(1:ccl%nstruct        )); secc=0.0_WP
+      allocate(diam(1:ccl%nstruct        )); diam=0.0_WP
       
-   !    ! First pass to accumulate volume, position, and velocity
-   !    do n=1,ccl%nstruct
-   !       ! Loop over cells in structure
-   !       do m=1,ccl%struct(n)%n_
-   !          ! Get cell indices
-   !          i=ccl%struct(n)%map(1,m)
-   !          j=ccl%struct(n)%map(2,m)
-   !          k=ccl%struct(n)%map(3,m)
-   !          ! Get cell position, accounting for periodicity
-   !          x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL
-   !          y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL
-   !          z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL
-   !          ! Accumulate volume, position, and velocity
-   !          svol(n  )=svol(n  )+cfg%vol(i,j,k)*vf%VF(i,j,k)
-   !          spos(n,:)=spos(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[x,y,z]
-   !          svel(n,:)=svel(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[Ui(i,j,k),Vi(i,j,k),Wi(i,j,k)]
-   !       end do
-   !    end do
-   !    call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-   !    call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
-   !    call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      ! First pass to accumulate volume, position, and velocity
+      do n=1,ccl%nstruct
+         ! Loop over cells in structure
+         do m=1,ccl%struct(n)%n_
+            ! Get cell indices
+            i=ccl%struct(n)%map(1,m)
+            j=ccl%struct(n)%map(2,m)
+            k=ccl%struct(n)%map(3,m)
+            ! Get cell position, accounting for periodicity
+            x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL
+            y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL
+            z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL
+            ! Accumulate volume, position, and velocity
+            svol(n  )=svol(n  )+cfg%vol(i,j,k)*vf%VF(i,j,k)
+            spos(n,:)=spos(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[x,y,z]
+            svel(n,:)=svel(n,:)+cfg%vol(i,j,k)*vf%VF(i,j,k)*[Ui(i,j,k),Vi(i,j,k),Wi(i,j,k)]
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svol,1*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,spos,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,svel,3*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       
-   !    ! Second pass to accumulate moment of inertia
-   !    do n=1,ccl%nstruct
-   !       ! Get drop barycenter
-   !       x0=spos(n,1)/svol(n)
-   !       y0=spos(n,2)/svol(n)
-   !       z0=spos(n,3)/svol(n)
-   !       ! Loop over cells in structure
-   !       do m=1,ccl%struct(n)%n_
-   !          ! Get cell indices
-   !          i=ccl%struct(n)%map(1,m)
-   !          j=ccl%struct(n)%map(2,m)
-   !          k=ccl%struct(n)%map(3,m)
-   !          ! Get cell position relative to drop barycenter, accounting for periodicity
-   !          x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL-x0
-   !          y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL-y0
-   !          z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL-z0
-   !          ! Accumulate moment of inertia
-   !          smoi(n,1,1)=smoi(n,1,1)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(y**2+z**2)
-   !          smoi(n,2,2)=smoi(n,2,2)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(z**2+x**2)
-   !          smoi(n,3,3)=smoi(n,3,3)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(x**2+y**2)
-   !          smoi(n,1,2)=smoi(n,1,2)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*y)
-   !          smoi(n,1,3)=smoi(n,1,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*z)
-   !          smoi(n,2,3)=smoi(n,2,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(y*z)
-   !       end do
-   !    end do
-   !    call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
+      ! Second pass to accumulate moment of inertia
+      do n=1,ccl%nstruct
+         ! Get drop barycenter
+         x0=spos(n,1)/svol(n)
+         y0=spos(n,2)/svol(n)
+         z0=spos(n,3)/svol(n)
+         ! Loop over cells in structure
+         do m=1,ccl%struct(n)%n_
+            ! Get cell indices
+            i=ccl%struct(n)%map(1,m)
+            j=ccl%struct(n)%map(2,m)
+            k=ccl%struct(n)%map(3,m)
+            ! Get cell position relative to drop barycenter, accounting for periodicity
+            x=vf%cfg%xm(i)-ccl%struct(n)%per(1)*vf%cfg%xL-x0
+            y=vf%cfg%ym(j)-ccl%struct(n)%per(2)*vf%cfg%yL-y0
+            z=vf%cfg%zm(k)-ccl%struct(n)%per(3)*vf%cfg%zL-z0
+            ! Accumulate moment of inertia
+            smoi(n,1,1)=smoi(n,1,1)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(y**2+z**2)
+            smoi(n,2,2)=smoi(n,2,2)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(z**2+x**2)
+            smoi(n,3,3)=smoi(n,3,3)+cfg%vol(i,j,k)*vf%VF(i,j,k)*(x**2+y**2)
+            smoi(n,1,2)=smoi(n,1,2)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*y)
+            smoi(n,1,3)=smoi(n,1,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(x*z)
+            smoi(n,2,3)=smoi(n,2,3)-cfg%vol(i,j,k)*vf%VF(i,j,k)*(y*z)
+         end do
+      end do
+      call MPI_ALLREDUCE(MPI_IN_PLACE,smoi,9*ccl%nstruct,MPI_REAL_WP,MPI_SUM,vf%cfg%comm,ierr)
       
-   !    ! Third pass to generate normalized drop stats
-   !    do n=1,ccl%nstruct
-   !       ! Get drop barycenter, accounting for periodicity
-   !       spos(n,:)=spos(n,:)/svol(n)
-   !       if (vf%cfg%xper.and.spos(n,1).lt.vf%cfg%x(vf%cfg%imin)) spos(n,1)=spos(n,1)+vf%cfg%xL
-   !       if (vf%cfg%yper.and.spos(n,2).lt.vf%cfg%y(vf%cfg%jmin)) spos(n,2)=spos(n,2)+vf%cfg%yL
-   !       if (vf%cfg%zper.and.spos(n,3).lt.vf%cfg%z(vf%cfg%kmin)) spos(n,3)=spos(n,3)+vf%cfg%zL
-   !       ! Get drop velocity
-   !       svel(n,:)=svel(n,:)/svol(n)
-   !    end do
+      ! Third pass to generate normalized drop stats
+      do n=1,ccl%nstruct
+         ! Get drop barycenter, accounting for periodicity
+         spos(n,:)=spos(n,:)/svol(n)
+         if (vf%cfg%xper.and.spos(n,1).lt.vf%cfg%x(vf%cfg%imin)) spos(n,1)=spos(n,1)+vf%cfg%xL
+         if (vf%cfg%yper.and.spos(n,2).lt.vf%cfg%y(vf%cfg%jmin)) spos(n,2)=spos(n,2)+vf%cfg%yL
+         if (vf%cfg%zper.and.spos(n,3).lt.vf%cfg%z(vf%cfg%kmin)) spos(n,3)=spos(n,3)+vf%cfg%zL
+         ! Get drop velocity
+         svel(n,:)=svel(n,:)/svol(n)
+      end do
 
-   !    ! Fourth pass to calculate characteristic lengths, principal axes, and eccentricity
-   !    do n=1,ccl%nstruct
-   !       ! In between, check eccentricity from moment of inertia tensor
-   !       A=smoi(n,:,:)
-   !       ! Calculate eigenvalue
-   !       call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
-   !       d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
-   !       ! Get characteristic lengths of drop
-   !       slen(n,1)=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n)) !>lmax
-   !       slen(n,2)=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n)) !>lmid
-   !       slen(n,3)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n)) !>lmin
-   !       ! Calculate its eccentricity
-   !       secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
-   !       ! Calculate a diameter
-   !       diam(n)=(6.0_WP*svol(n)/Pi)**(1.0_WP/3.0_WP)
-   !    end do
+      ! Fourth pass to calculate characteristic lengths, principal axes, and eccentricity
+      do n=1,ccl%nstruct
+         ! In between, check eccentricity from moment of inertia tensor
+         A=smoi(n,:,:)
+         ! Calculate eigenvalue
+         call dsyev('V','U',3,A,3,d,work,lwork,info) !< On exit, A contains eigenvectors and d contains eigenvalues in ascending order
+         d=max(0.0_WP,d)                             !< Get rid of very small negative values (due to machine accuracy)
+         ! Get characteristic lengths of drop
+         slen(n,1)=sqrt(5.0_WP/2.0_WP*abs(d(2)+d(3)-d(1))/svol(n)) !>lmax
+         slen(n,2)=sqrt(5.0_WP/2.0_WP*abs(d(3)+d(1)-d(2))/svol(n)) !>lmid
+         slen(n,3)=sqrt(5.0_WP/2.0_WP*abs(d(1)+d(2)-d(3))/svol(n)) !>lmin
+         ! Calculate its eccentricity
+         secc(n)=sqrt(1.0_WP-slen(n,3)**2/(slen(n,1)**2+epsilon(1.0_WP)))
+         ! Calculate a diameter
+         diam(n)=(6.0_WP*svol(n)/Pi)**(1.0_WP/3.0_WP)
+      end do
 
-   !    ! Only root process outputs to a file
-   !    if (cfg%amRoot) then
-   !       if (.not.isdir('stats')) call makedir('stats')
-   !       filename='structure_'; write(timestamp,'(es12.5)') time%t
-   !       open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-   !       write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'diam','vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','len1','len2','len3','secc'
-   !       do n=1,ccl%nstruct
-   !                                                                                                                                                                                                           ! diam  ,'vol', 'xpos'    ,'ypos'   ,'zpos'   ,'xvel'   ,'yvel'    ,'zvel'   ,'moi11'   ,'moi22'   ,'moi33'     ,'moi12'    ,'moi13'    ,'moi23'    ,'len1'   ,'len2'    ,'len3'   ,'secc'
-   !          write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') diam(n),svol(n),spos(n,1),spos(n,2),spos(n,3),svel(n,1),svel(n,2),svel(n,3),smoi(n,1,1),smoi(n,2,2),smoi(n,3,3),smoi(n,1,2),smoi(n,1,3),smoi(n,2,3),slen(n,1), slen(n,2),slen(n,3),secc(n)
-   !       end do
-   !       close(iunit)
-   !    end if
+      ! Only root process outputs to a file
+      if (cfg%amRoot) then
+         if (.not.isdir('stats')) call makedir('stats')
+         filename='structure_'; write(timestamp,'(es12.5)') time%t
+         open(newunit=iunit,file='stats/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12,3x,a12)') 'diam','vol','xpos','ypos','zpos','xvel','yvel','zvel','moi11','moi22','moi33','moi12','moi13','moi23','len1','len2','len3','secc'
+         do n=1,ccl%nstruct
+                                                                                                                                                                                                             ! diam  ,'vol', 'xpos'    ,'ypos'   ,'zpos'   ,'xvel'   ,'yvel'    ,'zvel'   ,'moi11'   ,'moi22'   ,'moi33'     ,'moi12'    ,'moi13'    ,'moi23'    ,'len1'   ,'len2'    ,'len3'   ,'secc'
+            write(iunit,'(es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5,3x,es12.5)') diam(n),svol(n),spos(n,1),spos(n,2),spos(n,3),svel(n,1),svel(n,2),svel(n,3),smoi(n,1,1),smoi(n,2,2),smoi(n,3,3),smoi(n,1,2),smoi(n,1,3),smoi(n,2,3),slen(n,1), slen(n,2),slen(n,3),secc(n)
+         end do
+         close(iunit)
+      end if
       
       
-   !    ! Deallocate all but work array
-   !    deallocate(svol,spos,svel,smoi,slen,secc,diam)
+      ! Deallocate all but work array
+      deallocate(svol,spos,svel,smoi,slen,secc,diam)
       
-   ! contains
+   contains
       
-   !    !> Function that identifies cells that need a label
-   !    logical function make_label(i,j,k)
-   !       implicit none
-   !       integer, intent(in) :: i,j,k
-   !       if (vf%VF(i,j,k).gt.0.0_WP) then
-   !          make_label=.true.
-   !       else
-   !          make_label=.false.
-   !       end if
-   !    end function make_label
+      !> Function that identifies cells that need a label
+      logical function make_label(i,j,k)
+         implicit none
+         integer, intent(in) :: i,j,k
+         if (vf%VF(i,j,k).gt.0.0_WP) then
+            make_label=.true.
+         else
+            make_label=.false.
+         end if
+      end function make_label
       
-   !    !> Function that identifies if cell pairs have same label
-   !    logical function same_label(i1,j1,k1,i2,j2,k2)
-   !       implicit none
-   !       integer, intent(in) :: i1,j1,k1,i2,j2,k2
-   !       same_label=.true.
-   !    end function same_label
+      !> Function that identifies if cell pairs have same label
+      logical function same_label(i1,j1,k1,i2,j2,k2)
+         implicit none
+         integer, intent(in) :: i1,j1,k1,i2,j2,k2
+         same_label=.true.
+      end function same_label
       
-   ! end subroutine analyse_structs
+   end subroutine analyse_structs
 
    
    
