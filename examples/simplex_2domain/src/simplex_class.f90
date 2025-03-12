@@ -701,7 +701,7 @@ contains
          this%tpres  =timer(comm=this%cfg%comm,name='Pressure')
          this%tsgs   =timer(comm=this%cfg%comm,name='SGSmodel')
          ! Create corresponding monitor file
-         this%timefile=monitor(this%fs%cfg%amRoot,'timing')
+         this%timefile=monitor(this%fs%cfg%amRoot,'timing_smpx')
          call this%timefile%add_column(this%time%n,'Timestep number')
          call this%timefile%add_column(this%time%t,'Time')
          call this%timefile%add_column(this%tstep%time ,trim(this%tstep%name))

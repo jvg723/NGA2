@@ -671,7 +671,7 @@ contains
          this%tpres  =timer(comm=this%cfg%comm,name='Pressure')
          this%tsgs   =timer(comm=this%cfg%comm,name='SGSmodel')
          ! Create corresponding monitor file
-         this%timefile=monitor(this%fs%cfg%amRoot,'timing')
+         this%timefile=monitor(this%fs%cfg%amRoot,'timing_atom')
          call this%timefile%add_column(this%time%n,'Timestep number')
          call this%timefile%add_column(this%time%t,'Time')
          call this%timefile%add_column(this%tstep%time ,trim(this%tstep%name))
@@ -1133,7 +1133,7 @@ contains
             call this%df%push(name='P22',var=P22         )
             call this%df%push(name='P23',var=P23         )
             call this%df%push(name='P24',var=P24         )
-            call this%df%write(fdata='restart/data_'//trim(adjustl(timestamp)))
+            call this%df%write(fdata='restart_atom/data_'//trim(adjustl(timestamp)))
             ! Deallocate
             deallocate(P11,P12,P13,P14,P21,P22,P23,P24)
          end block save_restart
