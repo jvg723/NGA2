@@ -156,7 +156,7 @@ contains
       call MPI_ALLREDUCE(MPI_IN_PLACE,VFR_g,this%cfg%nx,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
       ! Only root process outputs to a file
       if (this%cfg%amRoot) then
-         if (.not.isdir('flowrate')) call makedir('flowrate')
+         if (.not.isdir('flowrate_smpx')) call makedir('flowrate_smpx')
          filename='flowrate_'; write(timestamp,'(es12.5)') this%time%t
          open(newunit=iunit,file='flowrate/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(999999(a12,x))') 'xm','CSA_s','CSA_f','CSA_l','CSA_g','VFR_s','VFR_f','VFR_l','VFR_g'
@@ -411,7 +411,7 @@ contains
          use tpns_class,      only: clipped_neumann,dirichlet,slip
          use hypre_str_class, only: pcg_pfmg2
          ! Create flow solver
-         this%fs=tpns(cfg=this%cfg,name='Two-Phase NS')
+         this%fs=tpns(cfg=this%cfg,name='smpx TPNS')
          ! Set the flow properties
          call this%input%read('Liquid dynamic viscosity',this%fs%visc_l)
          call this%input%read('Gas dynamic viscosity'   ,this%fs%visc_g)

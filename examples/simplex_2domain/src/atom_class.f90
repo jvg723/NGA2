@@ -156,7 +156,7 @@ contains
       call MPI_ALLREDUCE(MPI_IN_PLACE,VFR_g,this%cfg%nx,MPI_REAL_WP,MPI_SUM,this%cfg%comm,ierr)
       ! Only root process outputs to a file
       if (this%cfg%amRoot) then
-         if (.not.isdir('flowrate')) call makedir('flowrate')
+         if (.not.isdir('flowrate_atom')) call makedir('flowrate_atom')
          filename='flowrate_'; write(timestamp,'(es12.5)') this%time%t
          open(newunit=iunit,file='flowrate/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(999999(a12,x))') 'xm','CSA_s','CSA_f','CSA_l','CSA_g','VFR_s','VFR_f','VFR_l','VFR_g'
@@ -258,11 +258,6 @@ contains
                do i=this%cfg%imino_,this%cfg%imaxo_
                   ! Calculate distance from object obtained by revolution of polygon for the plenum
                   this%cfg%Gib(i,j,k)=-this%poly%get_distance([this%cfg%xm(i),sqrt(this%cfg%ym(j)**2+this%cfg%zm(k)**2)])
-                  ! Add inlet pipes
-                  if (this%cfg%xm(i).lt.this%p1(1)) then
-                     this%cfg%Gib(i,j,k)=min(this%cfg%Gib(i,j,k),-levelset_inlet_pipe_1([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)],0.0_WP))
-                     this%cfg%Gib(i,j,k)=min(this%cfg%Gib(i,j,k),-levelset_inlet_pipe_2([this%cfg%xm(i),this%cfg%ym(j),this%cfg%zm(k)],0.0_WP))
-                  end if
                end do
             end do
          end do
@@ -335,15 +330,6 @@ contains
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
                do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
                   this%vf%VF(i,j,k)=0.0_WP
-                  ! rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
-                  ! ! Ensure the nozzle is filled with liquid up to the throat with wet walls
-                  ! if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.this%Rinlet) then
-                  !    this%vf%VF(i,j,k)=1.0_WP
-                  ! else if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.this%Rexit) then
-                  !    this%vf%VF(i,j,k)=1.0_WP
-                  ! else
-                  !    this%vf%VF(i,j,k)=0.0_WP
-                  ! end if
                   ! Initialize phasic barycenters
                   this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
                   this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
@@ -381,7 +367,7 @@ contains
          use tpns_class,      only: clipped_neumann,dirichlet,slip
          use hypre_str_class, only: pcg_pfmg2
          ! Create flow solver
-         this%fs=tpns(cfg=this%cfg,name='Two-Phase NS')
+         this%fs=tpns(cfg=this%cfg,name='atom TPNS')
          ! Set the flow properties
          call this%input%read('Liquid dynamic viscosity',this%fs%visc_l)
          call this%input%read('Gas dynamic viscosity'   ,this%fs%visc_g)
@@ -419,17 +405,6 @@ contains
          real(WP) :: rad
          ! Zero velocity except if restarting
          this%fs%U=0.0_WP; this%fs%V=0.0_WP; this%fs%W=0.0_WP
-         ! ! Apply Dirichlet condition at inlets
-         ! call this%fs%get_bcond('inlets',mybc)
-         ! do n=1,mybc%itr%no_
-         !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-         !    rad=sqrt(this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)
-         !    if (rad.lt.this%Rinlet) then
-         !       this%fs%U(i,j,k)=this%cfg%VF(i,j,k)*this%mfr/(this%fs%rho_l*this%Apipe)
-         !    else if (rad.gt.this%Rcoflow) then
-         !       this%fs%U(i,j,k)=this%Ucoflow
-         !    end if
-         ! end do
          ! Apply all other boundary conditions
          call this%fs%apply_bcond(this%time%t,this%time%dt)
          ! Adjust MFR for global mass balance
@@ -774,32 +749,6 @@ contains
          isIn=.false.
          if (k.eq.pg%kmin) isIn=.true.
       end function zm_locator
-      
-      
-      !> Function that defines a level set function for inlet pipe 1
-      function levelset_inlet_pipe_1(xyz,t) result(G)
-         implicit none
-         real(WP), dimension(3),intent(in) :: xyz
-         real(WP), intent(in) :: t
-         real(WP), dimension(3) :: v,p
-         real(WP) :: G
-         v=xyz-this%p1
-         p=v-this%n1*dot_product(v,this%n1)
-         G=this%Rpipe-sqrt(dot_product(p,p))
-      end function levelset_inlet_pipe_1
-      
-      
-      !> Function that defines a level set function for inlet pipe 2
-      function levelset_inlet_pipe_2(xyz,t) result(G)
-         implicit none
-         real(WP), dimension(3),intent(in) :: xyz
-         real(WP), intent(in) :: t
-         real(WP), dimension(3) :: v,p
-         real(WP) :: G
-         v=xyz-this%p2
-         p=v-this%n2*dot_product(v,this%n2)
-         G=this%Rpipe-sqrt(dot_product(p,p))
-      end function levelset_inlet_pipe_2
       
       
    end subroutine init
