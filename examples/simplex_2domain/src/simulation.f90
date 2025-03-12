@@ -14,7 +14,8 @@ module simulation
    type(atom) :: atomization
 
    !> Couplers from simplex to atomization
-   type(coupler) :: xcpl_s2a,ycpl_s2a,zcpl_s2a
+   type(coupler) :: xcpl_s2a,ycpl_s2a,zcpl_s2a !> Velocity
+   type(coupler) :: vfcpl_s2a
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -34,9 +35,10 @@ contains
       ! Initialize couplers from injector to atomization
       create_coupler_s2a: block
          use parallel, only: group
-         xcpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom'); call xcpl_s2a%set_src(spx%cfg,'x'); call xcpl_s2a%set_dst(atomization%cfg,'x'); call xcpl_s2a%initialize()
-         ycpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom'); call ycpl_s2a%set_src(spx%cfg,'y'); call ycpl_s2a%set_dst(atomization%cfg,'y'); call ycpl_s2a%initialize()
-         zcpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom'); call zcpl_s2a%set_src(spx%cfg,'z'); call zcpl_s2a%set_dst(atomization%cfg,'z'); call zcpl_s2a%initialize()
+         xcpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom');  call xcpl_s2a%set_src(spx%cfg,'x');  call xcpl_s2a%set_dst(atomization%cfg,'x');  call xcpl_s2a%initialize()
+         ycpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom');  call ycpl_s2a%set_src(spx%cfg,'y');  call ycpl_s2a%set_dst(atomization%cfg,'y');  call ycpl_s2a%initialize()
+         zcpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom');  call zcpl_s2a%set_src(spx%cfg,'z');  call zcpl_s2a%set_dst(atomization%cfg,'z');  call zcpl_s2a%initialize()
+         vfcpl_s2a=coupler(src_grp=group,dst_grp=group,name='simplex_to_atom'); call vfcpl_s2a%set_src(spx%cfg,'c'); call vfcpl_s2a%set_dst(atomization%cfg,'c'); call vfcpl_s2a%initialize()
       end block create_coupler_s2a
       
    end subroutine simulation_init
@@ -60,9 +62,10 @@ contains
             integer :: n,i,j,k
             type(bcond), pointer :: mybc
             ! Exchange data using cpl12x/y/z couplers
-            call xcpl_s2a%push(spx%fs%U); call xcpl_s2a%transfer(); call xcpl_s2a%pull(atomization%resU)
-            call ycpl_s2a%push(spx%fs%V); call ycpl_s2a%transfer(); call ycpl_s2a%pull(atomization%resV)
-            call zcpl_s2a%push(spx%fs%W); call zcpl_s2a%transfer(); call zcpl_s2a%pull(atomization%resW)
+            call xcpl_s2a%push(spx%fs%U);   call xcpl_s2a%transfer();  call xcpl_s2a%pull(atomization%resU)
+            call ycpl_s2a%push(spx%fs%V);   call ycpl_s2a%transfer();  call ycpl_s2a%pull(atomization%resV)
+            call zcpl_s2a%push(spx%fs%W);   call zcpl_s2a%transfer();  call zcpl_s2a%pull(atomization%resW)
+            call vfcpl_s2a%push(spx%vf%VF); call vfcpl_s2a%transfer(); call vfcpl_s2a%pull(atomization%vf%VF)
             ! Apply time-varying Dirichlet conditions
             call atomization%fs%get_bcond('inlets',mybc)
             do n=1,mybc%itr%no_
