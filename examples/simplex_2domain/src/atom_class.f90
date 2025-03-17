@@ -261,26 +261,26 @@ contains
                end do
             end do
          end do
-         ! Apply Neumann on distance at inlet
-         if (this%cfg%iproc.eq.1) then
-            ! Copy into overlap layer
-            do i=this%cfg%imino,this%cfg%imin-1
-               this%cfg%Gib(i,:,:)=this%cfg%Gib(this%cfg%imin,:,:)
-            end do
-         end if
+         ! ! Apply Neumann on distance at inlet
+         ! if (this%cfg%iproc.eq.1) then
+         !    ! Copy into overlap layer
+         !    do i=this%cfg%imino,this%cfg%imin-1
+         !       this%cfg%Gib(i,:,:)=this%cfg%Gib(this%cfg%imin,:,:)
+         !    end do
+         ! end if
          ! Get normal vector
          call this%cfg%calculate_normal()
          ! Get VF field
          call this%cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
-         ! Apply Neumann on VF and apply stair-stepping at entrance
-         if (this%cfg%iproc.eq.1) then
-            ! Stair-step entrance
-            this%cfg%VF(this%cfg%imin,:,:)=max(real(nint(this%cfg%VF(this%cfg%imin,:,:)),WP),epsilon(1.0_WP))
-            ! Copy into overlap layer
-            do i=this%cfg%imino,this%cfg%imin-1
-               this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
-            end do
-         end if
+         ! ! Apply Neumann on VF and apply stair-stepping at entrance
+         ! if (this%cfg%iproc.eq.1) then
+         !    ! Stair-step entrance
+         !    this%cfg%VF(this%cfg%imin,:,:)=max(real(nint(this%cfg%VF(this%cfg%imin,:,:)),WP),epsilon(1.0_WP))
+         !    ! Copy into overlap layer
+         !    do i=this%cfg%imino,this%cfg%imin-1
+         !       this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
+         !    end do
+         ! end if
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
       end block create_atom
@@ -511,16 +511,16 @@ contains
             call this%df%pull(name='Pjy',var=this%fs%Pjy)
             call this%df%pull(name='Pjz',var=this%fs%Pjz)
             ! Reapply inflow boundary conditions in case input has changed
-            call this%fs%get_bcond('inlets',mybc)
-            do n=1,mybc%itr%no_
-               i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-               rad=sqrt(this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)
-               if (rad.lt.this%Rinlet) then
-                  this%fs%U(i,j,k)=this%cfg%VF(i,j,k)*this%mfr/(this%fs%rho_l*this%Apipe)
-               else if (rad.gt.this%Rcoflow) then
-                  this%fs%U(i,j,k)=this%Ucoflow
-               end if
-            end do
+            ! call this%fs%get_bcond('inlets',mybc)
+            ! do n=1,mybc%itr%no_
+            !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
+            !    rad=sqrt(this%fs%cfg%ym(j)**2+this%fs%cfg%zm(k)**2)
+            !    if (rad.lt.this%Rinlet) then
+            !       this%fs%U(i,j,k)=this%cfg%VF(i,j,k)*this%mfr/(this%fs%rho_l*this%Apipe)
+            !    else if (rad.gt.this%Rcoflow) then
+            !       this%fs%U(i,j,k)=this%Ucoflow
+            !    end if
+            ! end do
             ! Apply all other boundary conditions
             call this%fs%apply_bcond(this%time%t,this%time%dt)
             ! Compute MFR through all boundary conditions
