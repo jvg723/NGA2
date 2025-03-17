@@ -750,7 +750,11 @@ contains
          integer, intent(in) :: i,j,k
          logical :: isIn
          isIn=.false.
-         if (i.ge.pg%imax-this%nlayer) isIn=.true.
+         if (i.ge.pg%imax-this%nlayer.or.&
+         &   (j.le.pg%jmin+this%nlayer.and.this%vf%cfg%xm(i).gt.0.0_WP).or.&
+         &   (j.ge.pg%jmax-this%nlayer.and.this%vf%cfg%xm(i).gt.0.0_WP).or.&
+         &   (k.le.pg%kmin+this%nlayer.and.this%vf%cfg%xm(i).gt.0.0_WP).or.&
+         &   (k.ge.pg%kmax-this%nlayer.and.this%vf%cfg%xm(i).gt.0.0_WP)) isIn=.true.
          ! if (i.ge.pg%imax-this%nlayer.or.&
          ! &   j.le.pg%jmin+this%nlayer.or.&
          ! &   j.ge.pg%jmax-this%nlayer.or.&
