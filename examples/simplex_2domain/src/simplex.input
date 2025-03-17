@@ -4,12 +4,12 @@ I/O partition : 1 1 1
 
 # Mesh definition
 X shift : 0.005
-Lx :  0.007
-Ly :  0.007
-Lz :  0.007
-nx :  90  ! 180, 360
-ny :  90  ! 180, 360
-nz :  90  ! 180, 360
+Lx :  0.0075
+Ly :  0.00375
+Lz :  0.00375
+nx :  96
+ny :  48
+nz :  48
 Stretched cells in x :  !32
 Stretched cells in yz : !32
 Stretch ratio in x :    1.05

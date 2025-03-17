@@ -750,11 +750,12 @@ contains
          integer, intent(in) :: i,j,k
          logical :: isIn
          isIn=.false.
-         if (i.ge.pg%imax-this%nlayer.or.&
-         &   j.le.pg%jmin+this%nlayer.or.&
-         &   j.ge.pg%jmax-this%nlayer.or.&
-         &   k.le.pg%kmin+this%nlayer.or.&
-         &   k.ge.pg%kmax-this%nlayer) isIn=.true.
+         if (i.ge.pg%imax-this%nlayer) isIn=.true.
+         ! if (i.ge.pg%imax-this%nlayer.or.&
+         ! &   j.le.pg%jmin+this%nlayer.or.&
+         ! &   j.ge.pg%jmax-this%nlayer.or.&
+         ! &   k.le.pg%kmin+this%nlayer.or.&
+         ! &   k.ge.pg%kmax-this%nlayer) isIn=.true.
       end function vof_removal_layer_locator
       
       
@@ -766,7 +767,7 @@ contains
          integer, intent(in) :: i,j,k
          logical :: isIn
          isIn=.false.
-         if (j.eq.pg%jmax+1) isIn=.true.
+         if (j.eq.pg%jmax+1.and.this%vf%cfg%xm(i).gt.0.0_WP) isIn=.true.
       end function yp_locator
       
       
@@ -778,7 +779,7 @@ contains
          integer, intent(in) :: i,j,k
          logical :: isIn
          isIn=.false.
-         if (j.eq.pg%jmin) isIn=.true.
+         if (j.eq.pg%jmin.and.this%vf%cfg%xm(i).gt.0.0_WP) isIn=.true.
       end function ym_locator
       
       
@@ -790,7 +791,7 @@ contains
          integer, intent(in) :: i,j,k
          logical :: isIn
          isIn=.false.
-         if (k.eq.pg%kmax+1) isIn=.true.
+         if (k.eq.pg%kmax+1.and.this%vf%cfg%xm(i).gt.0.0_WP) isIn=.true.
       end function zp_locator
       
       
@@ -802,7 +803,7 @@ contains
          integer, intent(in) :: i,j,k
          logical :: isIn
          isIn=.false.
-         if (k.eq.pg%kmin) isIn=.true.
+         if (k.eq.pg%kmin.and.this%vf%cfg%xm(i).gt.0.0_WP) isIn=.true.
       end function zm_locator
       
       
