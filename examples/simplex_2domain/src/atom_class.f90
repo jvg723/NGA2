@@ -158,7 +158,7 @@ contains
       if (this%cfg%amRoot) then
          if (.not.isdir('flowrate_atom')) call makedir('flowrate_atom')
          filename='flowrate_'; write(timestamp,'(es12.5)') this%time%t
-         open(newunit=iunit,file='flowrate/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         open(newunit=iunit,file='flowrate_atom/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
          write(iunit,'(999999(a12,x))') 'xm','CSA_s','CSA_f','CSA_l','CSA_g','VFR_s','VFR_f','VFR_l','VFR_g'
          do i=this%cfg%imin,this%cfg%imax
             write(iunit,'(999999(es12.5,x))') this%cfg%xm(i),CSA_s(i),CSA_f(i),CSA_l(i),CSA_g(i),VFR_s(i),VFR_f(i),VFR_l(i),VFR_g(i)
