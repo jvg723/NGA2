@@ -49,7 +49,7 @@ contains
 
       ! Create region to couple VOF between domains
       create_coupler_region: block
-         atomization%vfcouple_xmin=-1.00_WP*atomization%xshift
+         atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin)
          atomization%vfcouple_xmax=spx%cfg%xm(spx%cfg%imax-spx%nlayer)
          atomization%vfcouple_ymin=spx%cfg%ym(spx%cfg%jmin)
          atomization%vfcouple_ymax=spx%cfg%ym(spx%cfg%jmax)
@@ -104,19 +104,25 @@ contains
 
          ! Handle coupling VOF between simplex and atomization
          coupling_vof_s2a: block
-            use tpns_class, only: bcond
-            integer :: n,i,j,k
-            type(bcond), pointer :: mybc
+            integer :: i,j,k
             ! Exchange data using cell center coupler
             tempVF=0.0_WP
             call vfcpl_s2a%push(spx%vf%VF); call vfcpl_s2a%transfer(); call vfcpl_s2a%pull(tempVF)
-            ! call atomization%fs%get_bcond('inlets',mybc)
-            ! do n=1,mybc%itr%no_
-            !    i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
-            !    atomization%fs%U(i  ,j,k)=atomization%resU(i  ,j,k)*sum(atomization%fs%itpr_x(:,i  ,j,k)*atomization%cfg%VF(i-1:i,    j,    k))
-            !    atomization%fs%V(i-1,j,k)=atomization%resV(i-1,j,k)*sum(atomization%fs%itpr_y(:,i-1,j,k)*atomization%cfg%VF(i-1  ,j-1:j,    k))
-            !    atomization%fs%W(i-1,j,k)=atomization%resW(i-1,j,k)*sum(atomization%fs%itpr_z(:,i-1,j,k)*atomization%cfg%VF(i-1  ,j    ,k-1:k))
-            ! end do
+            ! Exchange VOF based upon x/y/z position
+            do k=atomization%vf%cfg%kmino_,atomization%vf%cfg%kmaxo_
+               do j=atomization%vf%cfg%jmino_,atomization%vf%cfg%jmaxo_
+                  do i=atomization%vf%cfg%imino_,atomization%vf%cfg%imaxo_
+                     if ((atomization%vf%cfg%xm(i).ge.atomization%vfcouple_xmin.or.atomization%vf%cfg%xm(i).le.atomization%vfcouple_xmax).and.&
+                     &   (atomization%vf%cfg%ym(j).ge.atomization%vfcouple_ymin.or.atomization%vf%cfg%ym(j).le.atomization%vfcouple_ymax).and.&
+                     &   (atomization%vf%cfg%zm(k).ge.atomization%vfcouple_zmin.or.atomization%vf%cfg%zm(k).le.atomization%vfcouple_zmax)) then
+                        atomization%vf%VF(i,j,k)=0.0_WP
+                        atomization%vf%VF(i,j,k)=tempVF(i,j,k)
+                     end if
+                  end do
+               end do
+            end do
+            !> Sync arrays
+            call atomization%cfg%sync(atomization%vf%VF)
          end block coupling_vof_s2a
       
          ! Advance atomization simulation
