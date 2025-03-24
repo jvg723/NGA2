@@ -96,6 +96,8 @@ module atom_class
       real(WP) :: vfcouple_ymin,vfcouple_ymax
       real(WP) :: vfcouple_zmin,vfcouple_zmax
       real(WP) :: xshift
+      !> Storage for passing VOF
+      real(WP), dimension(:,:,:), allocatable :: tempVF
       
    contains
       procedure :: init                            !< Initialize atom simulation
@@ -316,6 +318,8 @@ contains
          allocate(this%Uib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Vib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
          allocate(this%Wib (this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_))
+         ! allocate storage for temp VOF
+         allocate(this%tempVF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_,this%cfg%kmino_:this%cfg%kmaxo_)); this%tempVF=0.0_WP 
       end block allocate_work_arrays
       
       
@@ -600,6 +604,7 @@ contains
          call this%ens_out%add_scalar('VOF',this%vf%VF)
          call this%ens_out%add_scalar('divergence',this%fs%div)
          call this%ens_out%add_surface('plic',this%smesh)
+         call this%ens_out%add_scalar('tmpVOF',this%tempVF)
          ! Output to ensight
          if (this%ens_evt%occurs()) call this%ens_out%write_data(this%time%t)
       end block create_ensight
@@ -1103,7 +1108,7 @@ contains
       class(atom), intent(inout) :: this
       ! Deallocate work arrays
       deallocate(this%resU,this%resV,this%resW,this%Ui,this%Vi,this%Wi)
-      deallocate(this%gradU,this%Uib,this%Vib,this%Wib,this%SR)
+      deallocate(this%gradU,this%Uib,this%Vib,this%Wib,this%SR,this%tempVF)
    end subroutine final
    
    
