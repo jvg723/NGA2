@@ -47,6 +47,16 @@ contains
          allocate(tempVF(atomization%cfg%imino_:atomization%cfg%imaxo_,atomization%cfg%jmino_:atomization%cfg%jmaxo_,atomization%cfg%kmino_:atomization%cfg%kmaxo_)); tempVF=0.0_WP 
       end block create_coupler_s2a
 
+      ! Create region to couple VOF between domains
+      create_coupler_region: block
+         atomization%vfcouple_xmin=-1.00_WP*atomization%xshift
+         atomization%vfcouple_xmax=spx%cfg%xm(spx%cfg%imax-spx%nlayer)
+         atomization%vfcouple_ymin=spx%cfg%ym(spx%cfg%jmin)
+         atomization%vfcouple_ymax=spx%cfg%ym(spx%cfg%jmax)
+         atomization%vfcouple_zmin=spx%cfg%zm(spx%cfg%kmin)
+         atomization%vfcouple_zmax=spx%cfg%zm(spx%cfg%kmax)
+      end block create_coupler_region
+
       
    end subroutine simulation_init
    
@@ -98,6 +108,7 @@ contains
             integer :: n,i,j,k
             type(bcond), pointer :: mybc
             ! Exchange data using cell center coupler
+            tempVF=0.0_WP
             call vfcpl_s2a%push(spx%vf%VF); call vfcpl_s2a%transfer(); call vfcpl_s2a%pull(tempVF)
             ! call atomization%fs%get_bcond('inlets',mybc)
             ! do n=1,mybc%itr%no_

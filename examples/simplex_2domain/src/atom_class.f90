@@ -90,6 +90,12 @@ module atom_class
       real(WP), dimension(3) :: n1=[+0.6_WP,-0.8_WP,0.0_WP]
       real(WP), dimension(3) :: n2=[+0.6_WP,+0.8_WP,0.0_WP]
       real(WP) :: Ucoflow,mfr,Apipe
+
+      !> Region for VOF coupling
+      real(WP) :: vfcouple_xmin,vfcouple_xmax
+      real(WP) :: vfcouple_ymin,vfcouple_ymax
+      real(WP) :: vfcouple_zmin,vfcouple_zmax
+      real(WP) :: xshift
       
    contains
       procedure :: init                            !< Initialize atom simulation
@@ -187,16 +193,16 @@ contains
          use sgrid_class, only: cartesian,sgrid
          type(sgrid) :: grid
          integer :: i,j,k,nx,ny,nz,ns_yz,ns_x
-         real(WP) :: Lx,Ly,Lz,xshift,sratio_yz,sratio_x
+         real(WP) :: Lx,Ly,Lz,sratio_yz,sratio_x !,xshift
          real(WP), dimension(:), allocatable :: x_uni,y_uni,z_uni,x,y,z
          integer, dimension(3) :: partition
          ! Read in grid definition
-         call this%input%read('Lx',Lx); call this%input%read('nx',nx); allocate(x_uni(nx+1)); call this%input%read('X shift',xshift)
+         call this%input%read('Lx',Lx); call this%input%read('nx',nx); allocate(x_uni(nx+1)); call this%input%read('X shift',this%xshift)
          call this%input%read('Ly',Ly); call this%input%read('ny',ny); allocate(y_uni(ny+1))
          call this%input%read('Lz',Lz); call this%input%read('nz',nz); allocate(z_uni(nz+1))
          ! Create simple rectilinear grid
          do i=1,nx+1
-            x_uni(i)=real(i-1,WP)/real(nx,WP)*Lx-xshift
+            x_uni(i)=real(i-1,WP)/real(nx,WP)*Lx-this%xshift
          end do
          do j=1,ny+1
             y_uni(j)=real(j-1,WP)/real(ny,WP)*Ly-0.5_WP*Ly
