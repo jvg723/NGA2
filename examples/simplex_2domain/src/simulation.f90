@@ -16,6 +16,9 @@ module simulation
    !> Couplers from simplex to atomization
    type(coupler) :: xcpl_s2a,ycpl_s2a,zcpl_s2a !> Velocity
    type(coupler) :: vfcpl_s2a
+
+   !> for VOF coupling
+   integer :: vof_couple=4    !<number of cells over which VOF is coupled between domains
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -45,10 +48,10 @@ contains
       ! Create region to couple VOF between domains
       create_coupler_region: block
          atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin)
-         ! print*, atomization%vfcouple_xmin
-         atomization%vfcouple_xmax=spx%cfg%xm(spx%cfg%imax-spx%nlayer)
+         print*, atomization%vfcouple_xmin
+         atomization%vfcouple_xmax=atomization%cfg%xm(atomization%cfg%imin+vof_couple)
          ! atomization%vfcouple_xmax=0.0_WP
-         ! print*, atomization%vfcouple_xmax
+         print*, atomization%vfcouple_xmax
          atomization%vfcouple_ymin=spx%cfg%ym(spx%cfg%jmin)
          atomization%vfcouple_ymax=spx%cfg%ym(spx%cfg%jmax)
          atomization%vfcouple_zmin=spx%cfg%zm(spx%cfg%kmin)
@@ -88,8 +91,6 @@ contains
             call xcpl_s2a%push(spx%fs%U);   call xcpl_s2a%transfer();  call xcpl_s2a%pull(atomization%resU)
             call ycpl_s2a%push(spx%fs%V);   call ycpl_s2a%transfer();  call ycpl_s2a%pull(atomization%resV)
             call zcpl_s2a%push(spx%fs%W);   call zcpl_s2a%transfer();  call zcpl_s2a%pull(atomization%resW)
-            !>Pass VF field to atomization domain
-            call vfcpl_s2a%push(spx%vf%VF); call vfcpl_s2a%transfer(); call vfcpl_s2a%pull(atomization%vf%VF)
             call atomization%fs%get_bcond('inlets',mybc)
             do n=1,mybc%itr%no_
                i=mybc%itr%map(1,n); j=mybc%itr%map(2,n); k=mybc%itr%map(3,n)
@@ -110,19 +111,20 @@ contains
             do k=atomization%vf%cfg%kmino_,atomization%vf%cfg%kmaxo_
                do j=atomization%vf%cfg%jmino_,atomization%vf%cfg%jmaxo_
                   do i=atomization%vf%cfg%imino_,atomization%vf%cfg%imaxo_
-                     if ((atomization%vf%cfg%xm(i).ge.atomization%vfcouple_xmin.or.atomization%vf%cfg%xm(i).le.atomization%vfcouple_xmax).and.&
-                     &   (atomization%vf%cfg%ym(j).ge.atomization%vfcouple_ymin.or.atomization%vf%cfg%ym(j).le.atomization%vfcouple_ymax).and.&
-                     &   (atomization%vf%cfg%zm(k).ge.atomization%vfcouple_zmin.or.atomization%vf%cfg%zm(k).le.atomization%vfcouple_zmax)) then
-                        atomization%vf%VF(i,j,k)=0.0_WP
+                     if (atomization%vf%cfg%xm(i).ge.atomization%vfcouple_xmin.or.atomization%vf%cfg%xm(i).le.atomization%vfcouple_xmax) then
+                     ! if ((atomization%vf%cfg%xm(i).ge.atomization%vfcouple_xmin.or.atomization%vf%cfg%xm(i).le.atomization%vfcouple_xmax).and.&
+                     ! &   (atomization%vf%cfg%ym(j).ge.atomization%vfcouple_ymin.or.atomization%vf%cfg%ym(j).le.atomization%vfcouple_ymax).and.&
+                     ! &   (atomization%vf%cfg%zm(k).ge.atomization%vfcouple_zmin.or.atomization%vf%cfg%zm(k).le.atomization%vfcouple_zmax)) then
                         atomization%vf%VF(i,j,k)=atomization%tempVF(i,j,k)
                      end if
                   end do
                end do
             end do
             !> sync arrays
-            ! call atomization%cfg%sync(atomization%vf%VF)
+            call atomization%cfg%sync(atomization%vf%VF)
             ! Build interface and update moments
-            call atomization%vf%build_interface()
+            ! call atomization%vf%build_interface()
+            ! call atomization%vf%reset_volume_moments()
          end block coupling_vof_s2a
       
          ! Advance atomization simulation
