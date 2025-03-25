@@ -18,7 +18,8 @@ module simulation
    type(coupler) :: vfcpl_s2a
 
    !> for VOF coupling
-   integer :: vof_couple=4    !<number of cells over which VOF is coupled between domains
+   integer :: vof_couple=5    !<number of cells over which VOF is coupled between domains
+   integer :: vof_couple_2=1    !<number of cells over which VOF is coupled between domains
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -47,7 +48,7 @@ contains
 
       ! Create region to couple VOF between domains
       create_coupler_region: block
-         atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin)
+         atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin+vof_couple_2)
          print*, atomization%vfcouple_xmin
          atomization%vfcouple_xmax=atomization%cfg%xm(atomization%cfg%imin+vof_couple)
          ! atomization%vfcouple_xmax=0.0_WP
@@ -122,8 +123,15 @@ contains
             end do
             !> sync arrays
             call atomization%cfg%sync(atomization%vf%VF)
-            ! Build interface and update moments
+            ! call atomization%vf%advect_interface(dt=atomization%time%dt,U=atomization%fs%U,V=atomization%fs%V,W=atomization%fs%W)
+            ! call atomization%vf%reset_moments()
+            ! call atomization%vf%sync_and_clean_barycenters()   -> causes blow up? yes.... 
+            call atomization%vf%update_band()
             ! call atomization%vf%build_interface()
+            ! call atomization%vf%polygonalize_interface()
+            ! call atomization%vf%distance_from_polygon()
+            ! call atomization%vf%subcell_vol()
+            ! call atomization%vf%get_curvature()
             ! call atomization%vf%reset_volume_moments()
          end block coupling_vof_s2a
       

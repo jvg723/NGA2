@@ -269,26 +269,26 @@ contains
                end do
             end do
          end do
-         ! ! Apply Neumann on distance at inlet
-         ! if (this%cfg%iproc.eq.1) then
-         !    ! Copy into overlap layer
-         !    do i=this%cfg%imino,this%cfg%imin-1
-         !       this%cfg%Gib(i,:,:)=this%cfg%Gib(this%cfg%imin,:,:)
-         !    end do
-         ! end if
+         ! Apply Neumann on distance at inlet
+         if (this%cfg%iproc.eq.1) then
+            ! Copy into overlap layer
+            do i=this%cfg%imino,this%cfg%imin-1
+               this%cfg%Gib(i,:,:)=this%cfg%Gib(this%cfg%imin,:,:)
+            end do
+         end if
          ! Get normal vector
          call this%cfg%calculate_normal()
          ! Get VF field
          call this%cfg%calculate_vf(method=sharp,allow_zero_vf=.false.)
-         ! ! Apply Neumann on VF and apply stair-stepping at entrance
-         ! if (this%cfg%iproc.eq.1) then
-         !    ! Stair-step entrance
-         !    this%cfg%VF(this%cfg%imin,:,:)=max(real(nint(this%cfg%VF(this%cfg%imin,:,:)),WP),epsilon(1.0_WP))
-         !    ! Copy into overlap layer
-         !    do i=this%cfg%imino,this%cfg%imin-1
-         !       this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
-         !    end do
-         ! end if
+         ! Apply Neumann on VF and apply stair-stepping at entrance
+         if (this%cfg%iproc.eq.1) then
+            ! Stair-step entrance
+            this%cfg%VF(this%cfg%imin,:,:)=max(real(nint(this%cfg%VF(this%cfg%imin,:,:)),WP),epsilon(1.0_WP))
+            ! Copy into overlap layer
+            do i=this%cfg%imino,this%cfg%imin-1
+               this%cfg%VF(i,:,:)=this%cfg%VF(this%cfg%imin,:,:)
+            end do
+         end if
          ! Recompute domain volume
          call this%cfg%calc_fluid_vol()
       end block create_atom
@@ -339,7 +339,16 @@ contains
          do k=this%vf%cfg%kmino_,this%vf%cfg%kmaxo_
             do j=this%vf%cfg%jmino_,this%vf%cfg%jmaxo_
                do i=this%vf%cfg%imino_,this%vf%cfg%imaxo_
-                  this%vf%VF(i,j,k)=0.0_WP
+                  ! Compute our local radius
+                  rad=sqrt(this%vf%cfg%ym(j)**2+this%vf%cfg%zm(k)**2)
+                  ! Ensure the nozzle is filled with liquid up to the throat with wet walls
+                  if (this%vf%cfg%xm(i).lt.-0.0015_WP.and.rad.le.this%Rinlet) then
+                     this%vf%VF(i,j,k)=1.0_WP
+                  else if (this%vf%cfg%xm(i).ge.-0.0015_WP.and.this%vf%cfg%xm(i).lt.0.0_WP.and.rad.le.this%Rexit) then
+                     this%vf%VF(i,j,k)=1.0_WP
+                  else
+                     this%vf%VF(i,j,k)=0.0_WP
+                  end if
                   ! Initialize phasic barycenters
                   this%vf%Lbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
                   this%vf%Gbary(:,i,j,k)=[this%vf%cfg%xm(i),this%vf%cfg%ym(j),this%vf%cfg%zm(k)]
