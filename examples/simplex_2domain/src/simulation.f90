@@ -127,12 +127,12 @@ contains
             ! call atomization%vf%reset_moments()
             ! call atomization%vf%sync_and_clean_barycenters()   -> causes blow up? yes.... 
             ! call atomization%vf%update_band()
-            ! call atomization%vf%build_interface()
+            call atomization%vf%build_interface()
             ! call atomization%vf%polygonalize_interface()
             ! call atomization%vf%distance_from_polygon()
             ! call atomization%vf%subcell_vol()
             ! call atomization%vf%get_curvature()
-            ! call atomization%vf%reset_volume_moments()
+            call atomization%vf%reset_volume_moments()
          end block coupling_vof_s2a
       
          ! Advance atomization simulation
