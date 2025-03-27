@@ -44,23 +44,23 @@ contains
       use mpi_f08,     only: MPI_Group,MPI_Group_range_incl
       implicit none
 
-      mpi_groups: block
-         integer, dimension(3,1) :: grange
-         integer :: ierr
-         ! Read in partition
-         input_spx =inputfile(amRoot=amRoot,filename='simplex.input')
-         input_atom=inputfile(amRoot=amRoot,filename='atomization.input')
-         call input_spx%read('Partition',partition_spx)
-         call input_atom%read('Partition',partition_atom)
-         ! Create an MPI group along with logical for the simplex nozzle on the lowest ranks
-         grange(:,1)=[0,product(partition_spx)-1,1]
-         call MPI_Group_range_incl(group,1,grange,group_spx,ierr)
-         isInGrp_spx=.false.; if (rank.le.product(partition_spx)-1) isInGrp_spx=.true.
-         ! Create an MPI group along with logical for the atomization domain on the highest ranks
-         grange(:,1)=[nproc-product(partition_atom),nproc-1,1]
-         call MPI_Group_range_incl(group,1,grange,group_atom,ierr)
-         isInGrp_atom=.false.; if (rank.ge.nproc-product(partition_atom)) isInGrp_atom=.true.
-      end block mpi_groups
+      ! mpi_groups: block
+      !    integer, dimension(3,1) :: grange
+      !    integer :: ierr
+      !    ! Read in partition
+      !    input_spx =inputfile(amRoot=amRoot,filename='simplex.input')
+      !    input_atom=inputfile(amRoot=amRoot,filename='atomization.input')
+      !    call input_spx%read('Partition',partition_spx)
+      !    call input_atom%read('Partition',partition_atom)
+      !    ! Create an MPI group along with logical for the simplex nozzle on the lowest ranks
+      !    grange(:,1)=[0,product(partition_spx)-1,1]
+      !    call MPI_Group_range_incl(group,1,grange,group_spx,ierr)
+      !    isInGrp_spx=.false.; if (rank.le.product(partition_spx)-1) isInGrp_spx=.true.
+      !    ! Create an MPI group along with logical for the atomization domain on the highest ranks
+      !    grange(:,1)=[nproc-product(partition_atom),nproc-1,1]
+      !    call MPI_Group_range_incl(group,1,grange,group_atom,ierr)
+      !    isInGrp_atom=.false.; if (rank.ge.nproc-product(partition_atom)) isInGrp_atom=.true.
+      ! end block mpi_groups
       
       ! Initialize simplex simulation
       call spx%init()
