@@ -18,8 +18,8 @@ module simulation
    type(coupler) :: vfcpl_s2a
 
    !> for VOF coupling
-   integer :: vof_couple=5    !<number of cells over which VOF is coupled between domains
-   integer :: vof_couple_2=1    !<number of cells over which VOF is coupled between domains
+   integer :: vof_couple_max=5    !<number of cells over which VOF is coupled between domains
+   integer :: vof_couple_min=1    !<number of cells over which VOF is coupled between domains
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -48,8 +48,8 @@ contains
 
       ! Create region to couple VOF between domains
       create_coupler_region: block
-         atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin+vof_couple_2)
-         atomization%vfcouple_xmax=atomization%cfg%xm(atomization%cfg%imin+vof_couple)
+         atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin+vof_couple_min)
+         atomization%vfcouple_xmax=atomization%cfg%xm(atomization%cfg%imin+vof_couple_max)
       end block create_coupler_region
 
       
