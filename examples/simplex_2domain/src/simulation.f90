@@ -49,14 +49,7 @@ contains
       ! Create region to couple VOF between domains
       create_coupler_region: block
          atomization%vfcouple_xmin=atomization%cfg%xm(atomization%cfg%imin+vof_couple_2)
-         ! print*, atomization%vfcouple_xmin
          atomization%vfcouple_xmax=atomization%cfg%xm(atomization%cfg%imin+vof_couple)
-         ! atomization%vfcouple_xmax=0.0_WP
-         ! print*, atomization%vfcouple_xmax
-         atomization%vfcouple_ymin=spx%cfg%ym(spx%cfg%jmin)
-         atomization%vfcouple_ymax=spx%cfg%ym(spx%cfg%jmax)
-         atomization%vfcouple_zmin=spx%cfg%zm(spx%cfg%kmin)
-         atomization%vfcouple_zmax=spx%cfg%zm(spx%cfg%kmax)
       end block create_coupler_region
 
       
@@ -76,12 +69,10 @@ contains
       ! end do
       
       ! Simplex drives overall time integration
-      do while (.not.atomization%time%done())
+      do while (.not.spx%time%done())
          
-         ! Advance simplex simulation until it's caught up
-         do while (spx%time%t.le.atomization%time%t)
-            call spx%step()
-         end do
+         ! Advance simplex simulation
+         call spx%step()
 
          ! Handle coupling velocity between simplex and atomization
          coupling_velocity_s2a: block
@@ -113,9 +104,6 @@ contains
                do j=atomization%vf%cfg%jmino_,atomization%vf%cfg%jmaxo_
                   do i=atomization%vf%cfg%imino_,atomization%vf%cfg%imaxo_
                      if (atomization%vf%cfg%xm(i).ge.atomization%vfcouple_xmin.and.atomization%vf%cfg%xm(i).le.atomization%vfcouple_xmax) then
-                     ! if ((atomization%vf%cfg%xm(i).ge.atomization%vfcouple_xmin.or.atomization%vf%cfg%xm(i).le.atomization%vfcouple_xmax).and.&
-                     ! &   (atomization%vf%cfg%ym(j).ge.atomization%vfcouple_ymin.or.atomization%vf%cfg%ym(j).le.atomization%vfcouple_ymax).and.&
-                     ! &   (atomization%vf%cfg%zm(k).ge.atomization%vfcouple_zmin.or.atomization%vf%cfg%zm(k).le.atomization%vfcouple_zmax)) then
                         atomization%vf%VF(i,j,k)=atomization%tempVF(i,j,k)
                      end if
                   end do
@@ -123,20 +111,15 @@ contains
             end do
             !> sync arrays
             call atomization%cfg%sync(atomization%vf%VF)
-            ! call atomization%vf%advect_interface(dt=atomization%time%dt,U=atomization%fs%U,V=atomization%fs%V,W=atomization%fs%W)
-            ! call atomization%vf%reset_moments()
-            ! call atomization%vf%sync_and_clean_barycenters()   -> causes blow up? yes.... 
-            ! call atomization%vf%update_band()
+            !> Reconstruct interface to get updated VF and moments
             call atomization%vf%build_interface()
-            ! call atomization%vf%polygonalize_interface()
-            ! call atomization%vf%distance_from_polygon()
-            ! call atomization%vf%subcell_vol()
-            ! call atomization%vf%get_curvature()
             call atomization%vf%reset_volume_moments()
          end block coupling_vof_s2a
       
-         ! Advance atomization simulation
-         call atomization%step()
+         ! Advance atomization simulation until it's caught up
+         do while (atomization%time%t.le.spx%time%t)
+            call atomization%step()
+         end do
 
       end do
       
