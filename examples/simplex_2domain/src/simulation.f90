@@ -1,9 +1,11 @@
 !> Various definitions and tools for running an NGA2 simulation
 module simulation
-   use precision,     only: WP
-   use simplex_class, only: simplex
-   use atom_class,    only: atom
-   use coupler_class, only: coupler
+   use mpi_f08,         only: MPI_Group
+   use precision,       only: WP
+   use simplex_class,   only: simplex
+   use atom_class,      only: atom
+   use coupler_class,   only: coupler
+   use inputfile_class, only: inputfile
    implicit none
    private
    
@@ -13,6 +15,9 @@ module simulation
    !> Atomization simulation
    type(atom) :: atomization
 
+   !> Input files to read in patitions
+   type(inputfile) :: input_spx, input_atom
+
    !> Couplers from simplex to atomization
    type(coupler) :: xcpl_s2a,ycpl_s2a,zcpl_s2a !> Velocity
    type(coupler) :: vfcpl_s2a
@@ -20,6 +25,13 @@ module simulation
    !> for VOF coupling
    integer :: vof_couple_max=5    !<number of cells over which VOF is coupled between domains
    integer :: vof_couple_min=1    !<number of cells over which VOF is coupled between domains
+
+   !> For MPI groups
+   public :: group_spx,isInGrp_spx
+   public :: group_atom,isInGrp_atom
+   integer, dimension(3) :: partition_spx,partition_atom
+   logical :: isInGrp_spx,isInGrp_atom
+   type(MPI_Group) :: group_spx,group_atom
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -28,7 +40,27 @@ contains
    
    !> Initialization of our simulation
    subroutine simulation_init
+      use parallel,    only: comm,group,nproc,rank,amRoot
+      use mpi_f08,     only: MPI_Group,MPI_Group_range_incl
       implicit none
+
+      mpi_groups: block
+         integer, dimension(3,1) :: grange
+         integer :: ierr
+         ! Read in partition
+         input_spx =inputfile(amRoot=amRoot,filename='simplex.input')
+         input_atom=inputfile(amRoot=amRoot,filename='atomization.input')
+         call input_spx%read('Partition',partition_spx)
+         call input_atom%read('Partition',partition_atom)
+         ! Create an MPI group along with logical for the simplex nozzle on the lowest ranks
+         grange(:,1)=[0,product(partition_spx)-1,1]
+         call MPI_Group_range_incl(group,1,grange,group_spx,ierr)
+         isInGrp_spx=.false.; if (rank.le.product(partition_spx)-1) isInGrp_spx=.true.
+         ! Create an MPI group along with logical for the atomization domain on the highest ranks
+         grange(:,1)=[nproc-product(partition_atom),nproc-1,1]
+         call MPI_Group_range_incl(group,1,grange,group_atom,ierr)
+         isInGrp_atom=.false.; if (rank.ge.nproc-product(partition_atom)) isInGrp_atom=.true.
+      end block mpi_groups
       
       ! Initialize simplex simulation
       call spx%init()
