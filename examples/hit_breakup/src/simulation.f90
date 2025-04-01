@@ -28,9 +28,10 @@ module simulation
    type(ensight)  :: ens_out
    type(event)    :: ens_evt,inj_evt,drop_evt
    type(surfmesh) :: smesh
+   type(event)    :: curv_out
   
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,hitfile,cvgfile
+   type(monitor) :: mfile,cflfile,hitfile,cvgfile,enstrile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -39,6 +40,7 @@ module simulation
    real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi
    real(WP), dimension(:,:,:,:), allocatable :: SR
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
+   real(WP), dimension(:,:,:,:),   allocatable :: vort
    
    !> Fluid, forcing, and particle parameters
    real(WP) :: visc,rho,meanU,meanV,meanW
@@ -60,6 +62,10 @@ module simulation
    real(WP) :: Re_L,Re_lambda
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
+
+   ! For post processing
+   integer :: counter=0
+   real(WP) :: l_enstrophy, g_enstrophy
   
 
 contains
@@ -315,6 +321,38 @@ contains
       end function same_label
       
    end subroutine analyse_structs
+
+   !> Compute Enstrophy
+   subroutine get_enstrophy()
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      integer :: i,j,k,ierr
+      real(WP) :: my_lvol,lvol
+      real(WP) :: my_gvol,gvol
+      real(WP) :: my_lenst, my_genst
+      my_lvol=0.0_WP;  lvol=0.0_WP
+      my_gvol=0.0_WP;  gvol=0.0_WP
+      my_lenst=0.0_WP; my_genst=0.0_WP
+      do k=vf%cfg%kmin_,vf%cfg%kmax_
+         do j=vf%cfg%jmin_,vf%cfg%jmax_
+            do i=vf%cfg%imin_,vf%cfg%imax_
+               ! liquid and gas volumes
+               my_lvol=my_lvol+vf%VF(i,j,k)*cfg%vol(i,j,k)
+               my_gvol=my_gvol+(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
+               ! liquid and gas enstrophy
+               my_lenst=my_lenst+((vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)*vf%VF(i,j,k)*cfg%vol(i,j,k))
+               my_genst=my_genst+((vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k))
+            end do
+         end do
+      end do
+      call MPI_ALLREDUCE(my_lvol, lvol,       1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_gvol, gvol,       1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_lenst,l_enstrophy,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_genst,g_enstrophy,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      l_enstrophy=0.5_WP*(l_enstrophy/lvol)
+      g_enstrophy=0.5_WP*(g_enstrophy/gvol)
+   end subroutine
    
    
    !> Initialization of problem solver
@@ -332,6 +370,7 @@ contains
          allocate(Wi           (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(SR       (1:6,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(vort     (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); vort=0.0_WP
       end block allocate_work_arrays
       
       ! Initialize time tracker with 2 subiterations
@@ -499,6 +538,8 @@ contains
          call fs%get_div()
          ! Compute turbulence stats
          call compute_stats()
+         ! Compute voricity
+         call fs%get_vorticity(vort)
       end block initialize_velocity
 
       ! Check for initial injection
@@ -516,19 +557,38 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for structure id
-         smesh=surfmesh(nvar=1,name='plic')
+         smesh=surfmesh(nvar=7,name='plic')
          smesh%varname(1)='id'
+         smesh%varname(2)='curvature'
+         smesh%varname(3)='curvness'
+         smesh%varname(4)='vort1'
+         smesh%varname(5)='vort2'
+         smesh%varname(6)='vort3'
+         smesh%varname(7)='vortmag'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
          smesh%var(1,:)=0.0_WP
+         smesh%var(2,:)=0.0_WP
+         smesh%var(3,:)=0.0_WP
+         smesh%var(4,:)=0.0_WP
+         smesh%var(5,:)=0.0_WP
+         smesh%var(6,:)=0.0_WP
+         smesh%var(7,:)=0.0_WP
          np=0
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
                do i=vf%cfg%imin_,vf%cfg%imax_
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                        np=np+1; 
+                        smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                        smesh%var(2,np)=vf%curv(i,j,k)
+                        smesh%var(3,np)=vf%curvness(i,j,k)
+                        smesh%var(4,np)=vort(1,i,j,k)
+                        smesh%var(5,np)=vort(2,i,j,k)
+                        smesh%var(6,np)=vort(3,i,j,k)
+                        smesh%var(7,np)=sqrt(vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)
                      end if
                   end do
                end do
@@ -561,6 +621,7 @@ contains
          call fs%get_cfl(time%dt,time%cfl)
          call fs%get_max()
          call vf%get_max()
+         call get_enstrophy()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -617,6 +678,13 @@ contains
          call cvgfile%add_column(dx_eta,'dx/eta')
          call cvgfile%add_column(ell_Lx,'ell/Lx')
          call cvgfile%write()
+         ! Create enstophy monitor
+         enstrile=monitor(fs%cfg%amRoot,'enstrophy')
+         call enstrile%add_column(time%n,'Timestep number')
+         call enstrile%add_column(time%t,'Time')
+         call enstrile%add_column(l_enstrophy,'liq enstr')
+         call enstrile%add_column(g_enstrophy,'gas enstr')
+         call enstrile%write()
       end block create_monitor
 
 
@@ -626,6 +694,15 @@ contains
          call param_read('Drop analysis period',drop_evt%tper)
          if (drop_evt%occurs()) call analyse_structs()
       end block drop_analysis
+
+      curvature_analysis: block
+         use filesys,               only: makedir,isdir
+         curv_out=event(time=time,name='curvness output') 
+         call param_read('Curvness output period',curv_out%tper)
+         if (cfg%amRoot) then
+            if (.not.isdir('curvness')) call makedir('curvness')
+         end if
+      end block curvature_analysis
       
    end subroutine simulation_init
    
@@ -658,6 +735,7 @@ contains
          call fs%get_olddensity(vf=vf)
          
          ! VOF solver step
+         vf%curvness=0.0_WP
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
          
          ! Prepare new staggered viscosity (at n+1)
@@ -749,6 +827,10 @@ contains
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
          
+         ! Compute voricity
+         vort=0.0_WP
+         call fs%get_vorticity(vort)
+         
          ! Output to ensight
          if (ens_evt%occurs()) then
             ! Update surfmesh object
@@ -759,13 +841,26 @@ contains
                call vf%update_surfmesh(smesh)
                ! Also populate id variable
                smesh%var(1,:)=0.0_WP
+               smesh%var(2,:)=0.0_WP
+               smesh%var(3,:)=0.0_WP
+               smesh%var(4,:)=0.0_WP
+               smesh%var(5,:)=0.0_WP
+               smesh%var(6,:)=0.0_WP
+               smesh%var(7,:)=0.0_WP
                np=0
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
                      do i=vf%cfg%imin_,vf%cfg%imax_
                         do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                              np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                              np=np+1; 
+                              smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                              smesh%var(2,np)=vf%curv(i,j,k)
+                              smesh%var(3,np)=vf%curvness(i,j,k)
+                              smesh%var(4,np)=vort(1,i,j,k)
+                              smesh%var(5,np)=vort(2,i,j,k)
+                              smesh%var(6,np)=vort(3,i,j,k)
+                              smesh%var(7,np)=sqrt(vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)
                            end if
                         end do
                      end do
@@ -774,11 +869,47 @@ contains
             end block update_smesh
             call ens_out%write_data(time%t)
          end if
+
+         output_curvness : block
+            use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+            integer :: i,j,k,np,nplane,rank,ierr
+            character(len=20) :: filename
+            if (curv_out%occurs()) then
+               write(filename, '(A, I0, A)') "curvness/", counter, ".csv"
+               do rank=0,cfg%nproc-1
+                  if (rank.eq.cfg%rank) then
+                     ! Open the file
+                     open(unit=10, file=filename, status="unknown", position="append", action="write")
+                     ! Output diameters and velocities
+                     do k=cfg%kmin_,cfg%kmax_
+                        do j=cfg%jmin_,cfg%jmax_
+                        do i=cfg%imin_,cfg%imax_
+                              if (vf%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                              do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                                 if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                                    write(10,*) vf%curvness(i,j,k)
+                                 end if
+                              end do
+                        end do 
+                        end do 
+                     end do
+                     ! Close the file
+                     close(10)
+                  end if
+                  ! Force synchronization
+                  call MPI_BARRIER(cfg%comm,ierr)
+               end do
+               counter=counter+1
+            end if
+         end block output_curvness
          
          ! Analyse droplets
          if (drop_evt%occurs()) then 
             call analyse_structs()
          end if
+
+         ! Compute volume average enstrophy in the domain
+         call get_enstrophy()
          
          ! Perform and output monitoring
          call compute_stats()
@@ -788,6 +919,7 @@ contains
          call cflfile%write()
          call hitfile%write()
          call cvgfile%write()
+         call enstrile%write()
          
       end do
       
@@ -896,7 +1028,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU,vort)
       
    end subroutine simulation_final
    
