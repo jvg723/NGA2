@@ -65,6 +65,8 @@ module simulation
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
 
+   integer :: counter=0
+
 contains
    
    
@@ -546,7 +548,7 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for structure id
-         smesh=surfmesh(nvar=8,name='plic')
+         smesh=surfmesh(nvar=10,name='plic')
          smesh%varname(1)='id'
          smesh%varname(2)='trC'
          smesh%varname(3)='Cxx'
@@ -555,6 +557,8 @@ contains
          smesh%varname(6)='Cyy'
          smesh%varname(7)='Cyz'
          smesh%varname(8)='Czz'
+         smesh%varname(9)='curvature'
+         smesh%varname(10)='curvness'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
@@ -566,20 +570,25 @@ contains
          smesh%var(6,:)=0.0_WP
          smesh%var(7,:)=0.0_WP
          smesh%var(8,:)=0.0_WP
+         smesh%var(9,:)=0.0_WP
+         smesh%var(10,:)=0.0_WP
          np=0
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
                do i=vf%cfg%imin_,vf%cfg%imax_
                   do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
                      if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
-                        np=np+1; smesh%var(1,np)=real(ccl%id(i,j,k),WP)
-                        smesh%var(1,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
-                        smesh%var(2,np)=ve%SCrec(i,j,k,1)
-                        smesh%var(3,np)=ve%SCrec(i,j,k,2)
-                        smesh%var(4,np)=ve%SCrec(i,j,k,3)
-                        smesh%var(5,np)=ve%SCrec(i,j,k,4)
-                        smesh%var(6,np)=ve%SCrec(i,j,k,5)
-                        smesh%var(7,np)=ve%SCrec(i,j,k,6)
+                        np=np+1; 
+                        smesh%var(1,np)=real(ccl%id(i,j,k),WP)
+                        smesh%var(2,np)=ve%SCrec(i,j,k,1)+ve%SCrec(i,j,k,4)+ve%SCrec(i,j,k,6)
+                        smesh%var(3,np)=ve%SCrec(i,j,k,1)
+                        smesh%var(4,np)=ve%SCrec(i,j,k,2)
+                        smesh%var(5,np)=ve%SCrec(i,j,k,3)
+                        smesh%var(6,np)=ve%SCrec(i,j,k,4)
+                        smesh%var(7,np)=ve%SCrec(i,j,k,5)
+                        smesh%var(8,np)=ve%SCrec(i,j,k,6)
+                        smesh%var(9,np)=vf%curv(i,j,k)
+                        smesh%var(10,np)=vf%curvness(i,j,k)
                      end if
                   end do
                end do
@@ -734,6 +743,7 @@ contains
          call fs%get_olddensity(vf=vf)
          
          ! VOF solver step
+         vf%curvness=0.0_WP
          call vf%advance(dt=time%dt,U=fs%U,V=fs%V,W=fs%W)
 
          ! Calculate grad(U)
@@ -945,6 +955,8 @@ contains
                smesh%var(6,:)=0.0_WP
                smesh%var(7,:)=0.0_WP
                smesh%var(8,:)=0.0_WP
+               smesh%var(9,:)=0.0_WP
+               smesh%var(10,:)=0.0_WP
                np=0
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
@@ -960,6 +972,8 @@ contains
                               smesh%var(6,np)=ve%SCrec(i,j,k,4)
                               smesh%var(7,np)=ve%SCrec(i,j,k,5)
                               smesh%var(8,np)=ve%SCrec(i,j,k,6)
+                              smesh%var(9,np)=vf%curv(i,j,k)
+                              smesh%var(10,np)=vf%curvness(i,j,k)
                            end if
                         end do
                      end do
@@ -968,6 +982,39 @@ contains
             end block update_smesh
             call ens_out%write_data(time%t)
          end if
+
+         output_curvness : block
+            use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+            integer :: i,j,k,np,nplane,rank,ierr
+            character(len=20) :: filename
+            if (curv_out%occurs()) then
+               write(filename, '(A, I0, A)') "curvness/", counter, ".csv"
+               do rank=0,cfg%nproc-1
+                  if (rank.eq.cfg%rank) then
+                     ! Open the file
+                     open(unit=10, file=filename, status="unknown", position="append", action="write")
+                     ! Output diameters and velocities
+                     do k=cfg%kmin_,cfg%kmax_
+                        do j=cfg%jmin_,cfg%jmax_
+                        do i=cfg%imin_,cfg%imax_
+                              if (vf%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                              do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                                 if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                                    write(10,*) vf%curvness(i,j,k)
+                                 end if
+                              end do
+                        end do 
+                        end do 
+                     end do
+                     ! Close the file
+                     close(10)
+                  end if
+                  ! Force synchronization
+                  call MPI_BARRIER(cfg%comm,ierr)
+               end do
+               counter=counter+1
+            end if
+         end block output_curvness
          
          ! Analyse droplets
          if (drop_evt%occurs()) then 

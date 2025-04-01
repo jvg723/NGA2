@@ -4309,6 +4309,7 @@ contains
       ddF_dtds=sol(5)
       mycurv=-((1.0_WP+dF_dt**2)*ddF_dsds-2.0_WP*dF_dt*dF_ds*ddF_dtds+(1.0_WP+dF_ds**2)*ddF_dtdt)/(1.0_WP+dF_dt**2+dF_ds**2)**(1.5_WP)
       mycurv=mycurv/this%cfg%meshsize(i,j,k)
+      this%curvness(i,j,k)=sqrt(abs((ddF_dsds*ddF_dtdt-ddF_dtds**(2.0_WP))/(1.0_WP+dF_dt**2+dF_ds**2)**(2.0_WP)))
       
    contains
       

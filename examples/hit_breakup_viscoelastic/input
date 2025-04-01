@@ -17,7 +17,7 @@ Weissenberg Number    : 1.0
 # Turbulence file
 Keep forcing :            .true.            ! does forcing continue after injection
 #Turbulence file :         hit.192           ! file from which to restart
-Droplet injection time :   5                 ! is multiplied by eddy turnover-time
+Droplet injection time :   0.5                 ! is multiplied by eddy turnover-time
 
 # Time integration
 Max timestep size : 1e-3
