@@ -1,0 +1,781 @@
+!> Various definitions and tools for running an NGA2 simulation
+module simulation
+   use precision,         only: WP
+   use geometry,          only: cfg
+   use hypre_str_class,   only: hypre_str
+   use ddadi_class,       only: ddadi
+   use tpns_class,        only: tpns
+   use vfs_class,         only: vfs
+   use timetracker_class, only: timetracker
+   use ensight_class,     only: ensight
+   use surfmesh_class,    only: surfmesh
+   use event_class,       only: event
+   use monitor_class,     only: monitor
+   implicit none
+   private
+   
+   !> Single two-phase flow solver and volume fraction solver and corresponding time tracker
+   type(hypre_str),   public :: ps
+   type(ddadi),       public :: vs
+   type(tpns),        public :: fs
+   type(vfs),         public :: vf
+   type(timetracker), public :: time
+   
+   !> Ensight postprocessing
+   type(surfmesh) :: smesh     !< Surface mesh for interface
+   type(ensight) :: ens_out
+   type(event)   :: ens_evt
+   type(event)   :: curv_out
+   
+   !> Simulation monitor file
+   type(monitor) :: mfile,cflfile
+   
+   public :: simulation_init,simulation_run,simulation_final
+   
+   !> Private work arrays
+   real(WP), dimension(:,:,:), allocatable :: resU,resV,resW      !< Residuals
+   real(WP), dimension(:,:,:), allocatable :: Ui,Vi,Wi            !< Cell-centered velocities (based on Umid)
+   real(WP), dimension(:,:,:,:), allocatable :: vel               !< Other cell-centered velocity (based on U)
+   
+   real(WP) :: amp_pavg1,amp_pavg2 !Amplitude of a single column and Amplitude of a plane average
+   real(WP), dimension(:,:,:), allocatable :: VF_initial
+   integer :: counter=0
+contains
+   
+   
+   !> Incorrect if paraellized in Y!!
+subroutine postproc_data()
+   use irl_fortran_interface
+   use mathtools, only: Pi
+   use string,    only: str_medium
+   use mpi_f08,   only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE,MPI_MAX
+   use parallel,  only: MPI_REAL_WP
+   implicit none
+   integer :: ierr,i,j,k,my_size,jint
+   real(WP) , dimension(:), allocatable :: alpha_pavg,count_pavg,alpha_pavg2
+   allocate(alpha_pavg(cfg%jmino_:cfg%jmaxo_));alpha_pavg=0.0_WP
+   allocate(alpha_pavg2(cfg%jmino_:cfg%jmaxo_));alpha_pavg2=0.0_WP
+   allocate(count_pavg(cfg%jmino_:cfg%jmaxo_));count_pavg=0.0_WP
+   ! Plane averaged amplitude
+   do k=cfg%kmin_,cfg%kmax_
+       do i=cfg%imin_,cfg%imax_
+          do j=cfg%jmin_,cfg%jmax_
+             alpha_pavg(j)=alpha_pavg(j)+vf%VF(i,j,k)
+             alpha_pavg2(j)=alpha_pavg2(j)+abs(vf%VF(i,j,k)-VF_initial(i,j,k))
+             count_pavg(j)=count_pavg(j)+1.0_WP
+          end do 
+       end do 
+    end do
+    call MPI_ALLREDUCE(MPI_IN_PLACE,alpha_pavg,size(alpha_pavg),MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+    call MPI_ALLREDUCE(MPI_IN_PLACE,alpha_pavg2,size(alpha_pavg2),MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+    call MPI_ALLREDUCE(MPI_IN_PLACE,count_pavg,size(count_pavg),MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+    alpha_pavg = alpha_pavg/count_pavg; amp_pavg1=0.0_WP;amp_pavg2=0.0_WP
+    alpha_pavg2 = alpha_pavg2/count_pavg; 
+    do j=cfg%jmin_,cfg%jmax_
+       if (cfg%y(j).gt.0.0_WP) then
+         amp_pavg1=amp_pavg1+alpha_pavg(j)*cfg%dy(j)
+       end if
+       amp_pavg2=amp_pavg2+alpha_pavg2(j)*cfg%dy(j)
+   end do
+   deallocate(alpha_pavg,alpha_pavg2,count_pavg)
+
+ end subroutine postproc_data
+   
+   
+   !> Initialization of problem solver
+   subroutine simulation_init
+      use param, only: param_read,param_exists
+      implicit none
+      integer :: nwaveX,nwaveZ
+      real(WP) :: wamp
+      real(WP), dimension(:), allocatable :: wnumbX,wshiftX,wnumbZ,wshiftZ
+      
+      ! Allocate work arrays
+      allocate_work_arrays: block
+         allocate(resU(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resV(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(resW(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Ui  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Vi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(Wi  (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(vel (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(VF_initial(cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+      end block allocate_work_arrays
+      
+      
+      ! Initialize time tracker with 2 subiterations
+      initialize_timetracker: block
+         time=timetracker(amRoot=cfg%amRoot)
+         call param_read('Max timestep size',time%dtmax)
+         call param_read('Max cfl number',time%cflmax)
+         call param_read('Max time',time%tmax)
+         time%dt=time%dtmax
+         time%itmax=2
+      end block initialize_timetracker
+      
+      
+      ! Initialize our VOF solver and field
+      create_and_initialize_vof: block
+         use filesys,               only: makedir,isdir
+         use mms_geom,  only: cube_refine_vol
+         use vfs_class, only: plicnet,VFhi,VFlo,remap,flux
+         use mathtools, only: twoPi
+         use random,    only: random_uniform
+         use parallel,  only: MPI_REAL_WP
+         use string,    only: str_long
+         use messager,  only: log
+         use mpi_f08
+         character(str_long) :: message
+         integer :: i,j,k,n,si,sj,sk,ierr
+         !,seed_size
+         !integer, allocatable, dimension(:)  :: seed
+         real(WP), dimension(3,8) :: cube_vertex
+         real(WP), dimension(3) :: v_cent,a_cent
+         real(WP) :: vol,area
+         integer, parameter :: amr_ref_lvl=4
+         ! call random_seed(size=seed_size)
+         !  allocate(seed(seed_size))
+         !  seed = 123456
+         !  call random_seed(put=seed)
+         !  deallocate(seed)
+         ! Create a VOF solver
+         call vf%initialize(cfg=cfg,reconstruction_method=plicnet,transport_method=flux,name='VOF')
+         ! Prepare interface disturbance in X
+         call param_read('Wave amplitude',wamp)
+         call param_read('NwaveX',NwaveX,default=-1)
+         if (NwaveX.gt.0) then
+            allocate(wnumbX(nwaveX),wshiftX(nwaveX))
+            call param_read('wnumbX',wnumbX)
+            call param_read('wshiftX',wshiftX)
+         else
+            nwaveX=6
+            allocate(wnumbX(nwaveX),wshiftX(nwaveX))
+            wnumbX=[3.0_WP,4.0_WP,5.0_WP,6.0_WP,7.0_WP,8.0_WP]*twoPi/cfg%xL
+            if (cfg%amRoot) then
+               do n=1,nwaveX
+                  wshiftX(n)=random_uniform(lo=-0.5_WP*cfg%xL,hi=+0.5_WP*cfg%xL)
+               end do
+            end if
+            call MPI_BCAST(wshiftX,nwaveX,MPI_REAL_WP,0,cfg%comm,ierr)
+         end if
+         ! Prepare interface disturbance in Z
+         call param_read('NwaveZ',NwaveZ,default=-1)
+         if (NwaveZ.gt.0) then
+            allocate(wnumbZ(nwaveZ),wshiftZ(nwaveZ))
+            call param_read('wnumbZ',wnumbZ)
+            call param_read('wshiftZ',wshiftZ)
+         else
+            nwaveZ=6
+            allocate(wnumbZ(nwaveZ),wshiftZ(nwaveZ))
+            wnumbZ=[3.0_WP,4.0_WP,5.0_WP,6.0_WP,7.0_WP,8.0_WP]*twoPi/cfg%zL
+            if (cfg%amRoot) then
+               do n=1,nwaveZ
+                  wshiftZ(n)=random_uniform(lo=-0.5_WP*cfg%zL,hi=+0.5_WP*cfg%zL)
+               end do
+            end if
+            call MPI_BCAST(wshiftZ,nwaveZ,MPI_REAL_WP,0,cfg%comm,ierr)
+         end if
+         ! Print out initial disturbance
+         if (vf%cfg%amRoot) then
+            write(message,'("[Initial conditions] =>  NwaveX =",i6)')              nwaveX; call log(message)
+            write(message,'("[Initial conditions] =>  wnumbX =",1000(es12.5,x))')  wnumbX; call log(message)
+            write(message,'("[Initial conditions] => wshiftX =",1000(es12.5,x))') wshiftX; call log(message)
+            write(message,'("[Initial conditions] =>  NwaveZ =",i6)')              nwaveZ; call log(message)
+            write(message,'("[Initial conditions] =>  wnumbZ =",1000(es12.5,x))')  wnumbZ; call log(message)
+            write(message,'("[Initial conditions] => wshiftZ =",1000(es12.5,x))') wshiftZ; call log(message)
+         end if
+         ! Create the wavy interface
+         do k=vf%cfg%kmino_,vf%cfg%kmaxo_
+            do j=vf%cfg%jmino_,vf%cfg%jmaxo_
+               do i=vf%cfg%imino_,vf%cfg%imaxo_
+                  ! Set cube vertices
+                  n=0
+                  do sk=0,1
+                     do sj=0,1
+                        do si=0,1
+                           n=n+1; cube_vertex(:,n)=[vf%cfg%x(i+si),vf%cfg%y(j+sj),vf%cfg%z(k+sk)]
+                        end do
+                     end do
+                  end do
+                  ! Call adaptive refinement code to get volume and barycenters recursively
+                  vol=0.0_WP; area=0.0_WP; v_cent=0.0_WP; a_cent=0.0_WP
+                  call cube_refine_vol(cube_vertex,vol,area,v_cent,a_cent,levelset_wavy,0.0_WP,amr_ref_lvl)
+                  vf%VF(i,j,k)=vol/vf%cfg%vol(i,j,k)
+                  if (vf%VF(i,j,k).ge.VFlo.and.vf%VF(i,j,k).le.VFhi) then
+                     vf%Lbary(:,i,j,k)=v_cent
+                     vf%Gbary(:,i,j,k)=([vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]-vf%VF(i,j,k)*vf%Lbary(:,i,j,k))/(1.0_WP-vf%VF(i,j,k))
+                  else
+                     vf%Lbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
+                     vf%Gbary(:,i,j,k)=[vf%cfg%xm(i),vf%cfg%ym(j),vf%cfg%zm(k)]
+                  end if
+               end do
+            end do
+         end do
+         ! Update the band
+         call vf%update_band()
+         ! Perform interface reconstruction from VOF field
+         call vf%build_interface()
+         ! Set interface planes at the boundaries
+         call vf%set_full_bcond()
+         ! Create discontinuous polygon mesh from IRL interface
+         call vf%polygonalize_interface()
+         ! Calculate distance from polygons
+         call vf%distance_from_polygon()
+         ! Calculate subcell phasic volumes
+         call vf%subcell_vol()
+         ! Calculate curvature
+         call vf%get_curvature()
+         ! Reset moments to guarantee compatibility with interface reconstruction
+         call vf%reset_volume_moments()
+         VF_initial = vf%VF
+         if (cfg%amRoot) then
+            if (.not.isdir('curvness')) call makedir('curvness')
+         end if
+      end block create_and_initialize_vof
+      
+      
+      ! Create a two-phase flow solver with bconds
+      create_flow_solver: block
+         use hypre_str_class, only: pcg_pfmg2
+         use tpns_class,      only: slip
+         ! Create flow solver
+         call fs%initialize(cfg=cfg,name='Two-phase NS')
+         fs%theta=fs%theta+1.0e-2_WP
+         ! Read in flow conditions
+         call param_read('Gas Reynolds number',fs%visc_g); fs%visc_g=1.0_WP/fs%visc_g
+         call param_read('Viscosity ratio'    ,fs%visc_l); fs%visc_l=fs%visc_l*fs%visc_g
+         call param_read('Density ratio'      ,fs%rho_l); fs%rho_g=1.0_WP; fs%rho_l=fs%rho_l*fs%rho_g
+         call param_read('Gas Weber number'   ,fs%sigma); fs%sigma=1.0_WP/fs%sigma
+         ! Add slip conditions top and bottom
+         call fs%add_bcond(name='bc_yp',type=slip,face='y',dir=+1,canCorrect=.false.,locator=yp_locator)
+         call fs%add_bcond(name='bc_ym',type=slip,face='y',dir=-1,canCorrect=.false.,locator=ym_locator)
+         ! Configure pressure solver
+			ps=hypre_str(cfg=cfg,name='Pressure',method=pcg_pfmg2,nst=7)
+         call param_read('Pressure iteration',ps%maxit)
+         call param_read('Pressure tolerance',ps%rcvg)
+         ! Configure implicit velocity solver
+         vs=ddadi(cfg=cfg,name='Velocity',nst=7)
+         ! Setup the solver
+         call fs%setup(pressure_solver=ps,implicit_solver=vs)
+      end block create_flow_solver
+      
+      
+      ! Initialize velocity field
+      initialize_velocity: block
+         use string,   only: str_long
+         use messager, only: log
+         use random,   only: random_uniform
+         character(str_long) :: message
+         real(WP) :: dg,dl,di,Ug,Ul,Uint,namp
+         integer :: i,j,k
+         ! Initialize density
+         resU=fs%rho_l*vf%VF+fs%rho_g*(1.0_WP-vf%VF); call fs%update_density(rho=resU)
+         ! Read in initial velocity parameters
+         call param_read('Gas thickness',dg)
+         call param_read('Liquid thickness',dl)
+         call param_read('Gas velocity',Ug)
+         call param_read('Liquid velocity',Ul)
+         call param_read('Deficit parameter',di)
+         call param_read('Noise amplitude',namp)
+         ! Calculate interface velocity
+         Uint=di*dg*(Ul*fs%visc_l/dl+Ug*fs%visc_g/dg)/(fs%visc_l+fs%visc_g)
+         ! Impose the profile
+         do k=fs%cfg%kmino_,fs%cfg%kmaxo_
+            do j=fs%cfg%jmino_,fs%cfg%jmaxo_
+               do i=fs%cfg%imino_,fs%cfg%imaxo_
+                  if (fs%cfg%ym(j).le.0.0_WP) then
+                     ! Use the liquid profile
+                     fs%U(i,j,k)=Ul*erf(abs(fs%cfg%ym(j))/dl)
+                  else
+                     ! Use the gas profile
+                     fs%U(i,j,k)=Ug*erf(abs(fs%cfg%ym(j))/dg)
+                  end if
+                  ! Add the deficit
+                  fs%U(i,j,k)=fs%U(i,j,k)+Uint*(1.0_WP-erf(abs(fs%cfg%ym(j))/(dg*di)))
+                  ! Add fluctuations
+                  fs%U(i,j,k)=fs%U(i,j,k)+random_uniform(lo=-0.5_WP*namp,hi=+0.5_WP*namp)
+               end do
+            end do
+         end do
+         call fs%cfg%sync(fs%U)
+         ! Apply all other boundary conditions
+         call fs%apply_bcond(time%t,time%dt)
+         ! Copy to Umid and make it solenoidal
+         call fs%get_Umid()
+         call fs%correct_mfr()
+         call fs%update_laplacian()
+         call fs%get_div()
+         fs%psolv%rhs=-fs%cfg%vol*fs%div
+         fs%psolv%sol=0.0_WP
+         call fs%psolv%solve()
+         call fs%shift_p(fs%psolv%sol)
+         call fs%get_pgrad(fs%psolv%sol,resU,resV,resW)
+         fs%Umid=fs%Umid-resU/(fs%sRHOX**2); fs%U=fs%Umid
+         fs%Vmid=fs%Vmid-resV/(fs%sRHOY**2); fs%V=fs%Vmid
+         fs%Wmid=fs%Wmid-resW/(fs%sRHOZ**2); fs%W=fs%Wmid
+         call fs%get_U()
+         ! Calculate cell-centered velocities and divergence
+         call fs%interp_velmid(Ui,Vi,Wi)
+         call fs%interp_vel(vel(1,:,:,:),vel(2,:,:,:),vel(3,:,:,:))
+         call fs%get_div()
+         ! Print out mixing layer definition
+         if (fs%cfg%amRoot) then
+            write(message,'("[Initial conditions] => Gas thickness =",es12.5)')   dg; call log(message)
+            write(message,'("[Initial conditions] => Gas  velocity =",es12.5)')   Ug; call log(message)
+            write(message,'("[Initial conditions] => Liq thickness =",es12.5)')   dl; call log(message)
+            write(message,'("[Initial conditions] => Liq  velocity =",es12.5)')   Ul; call log(message)
+            write(message,'("[Initial conditions] => Deficit param =",es12.5)')   di; call log(message)
+            write(message,'("[Initial conditions] => Interface vel =",es12.5)') Uint; call log(message)
+         end if
+      end block initialize_velocity
+
+      
+      ! ! Create surfmesh object for interface polygon output
+      ! create_smesh: block
+      !    smesh=surfmesh(nvar=0,name='plic')
+      !    call vf%update_surfmesh(smesh)
+      ! end block create_smesh
+
+
+       ! Create surfmesh object for interface polygon output
+      create_smesh: block
+         use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+         integer :: i,j,k,np,nplane
+         smesh=surfmesh(nvar=2,name='plic')
+         smesh%varname(1)='curvature'
+         smesh%varname(2)='curvness'
+         call vf%update_surfmesh(smesh)
+         np=0
+         do k=cfg%kmin_,cfg%kmax_
+            do j=cfg%jmin_,cfg%jmax_
+               do i=cfg%imin_,cfg%imax_
+                  if (vf%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                  do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                     if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                        np=np+1
+                        smesh%var(1,np)=vf%curv(i,j,k)
+                        smesh%var(2,np)=vf%curvness(i,j,k)
+                     end if
+                  end do
+               end do 
+            end do 
+         end do
+      end block create_smesh
+
+      ! Add Ensight output
+      create_ensight: block
+         ! Create Ensight output from cfg
+         ens_out=ensight(cfg=cfg,name='MPKH')
+         ! Create event for Ensight output
+         ens_evt=event(time=time,name='Ensight output')
+         call param_read('Ensight output period',ens_evt%tper)
+         ! Add variables to output
+         call ens_out%add_vector('velocity',Ui,Vi,Wi)
+         call ens_out%add_vector('othervel',vel(1,:,:,:),vel(2,:,:,:),vel(3,:,:,:))
+         call ens_out%add_scalar('VOF',vf%VF)
+         call ens_out%add_scalar('pressure',fs%P)
+         call ens_out%add_scalar('curvature',vf%curv)
+         call ens_out%add_surface('plic',smesh)
+         ! Output to ensight
+         if (ens_evt%occurs()) call ens_out%write_data(time%t)
+      end block create_ensight
+
+      curv_out=event(time=time,name='curvness output') 
+      call param_read('Curvness output period',curv_out%tper)
+
+
+      ! Create a monitor file
+      create_monitor: block
+         ! Prepare some info about fields
+         call fs%get_cfl(time%dt,time%cfl)
+         call fs%get_max()
+         call vf%get_max()
+         call postproc_data()
+         ! Create simulation monitor
+         mfile=monitor(fs%cfg%amRoot,'simulation')
+         call mfile%add_column(time%n,'Timestep number')
+         call mfile%add_column(time%t,'Time')
+         call mfile%add_column(time%dt,'Timestep size')
+         call mfile%add_column(time%cfl,'Maximum CFL')
+         call mfile%add_column(fs%Umax,'Umax')
+         call mfile%add_column(fs%Vmax,'Vmax')
+         call mfile%add_column(fs%Wmax,'Wmax')
+         call mfile%add_column(fs%Pmax,'Pmax')
+         call mfile%add_column(vf%VFmax,'VOF maximum')
+         call mfile%add_column(vf%VFmin,'VOF minimum')
+         call mfile%add_column(vf%VFint,'VOF integral')
+         call mfile%add_column(fs%divmax,'Maximum divergence')
+         call mfile%add_column(fs%psolv%it,'Pressure iteration')
+         call mfile%add_column(fs%psolv%rerr,'Pressure error')
+         call mfile%add_column(amp_pavg1,'pavg amp1')
+         call mfile%add_column(amp_pavg2,'pavg amp2')
+         call mfile%write()
+         ! Create CFL monitor
+         cflfile=monitor(fs%cfg%amRoot,'cfl')
+         call cflfile%add_column(time%n,'Timestep number')
+         call cflfile%add_column(time%t,'Time')
+         call cflfile%add_column(fs%CFLst,'STension CFL')
+         call cflfile%add_column(fs%CFLc_x,'Convective xCFL')
+         call cflfile%add_column(fs%CFLc_y,'Convective yCFL')
+         call cflfile%add_column(fs%CFLc_z,'Convective zCFL')
+         call cflfile%add_column(fs%CFLv_x,'Viscous xCFL')
+         call cflfile%add_column(fs%CFLv_y,'Viscous yCFL')
+         call cflfile%add_column(fs%CFLv_z,'Viscous zCFL')
+         call cflfile%write()
+      end block create_monitor
+      
+      
+   contains
+      
+      
+      !> Function that defines a level set function for a initial wavy interface
+      function levelset_wavy(xyz,t) result(G)
+         implicit none
+         real(WP), dimension(3),intent(in) :: xyz
+         real(WP), intent(in) :: t
+         real(WP) :: G
+         integer :: nX,nZ
+         G=-xyz(2)
+         ! do nX=1,nwaveX
+         !    do nZ=1,nwaveZ
+         !       G=G+wamp*cos(wnumbX(nX)*(xyz(1)-wshiftX(nX)))*cos(wnumbZ(nZ)*(xyz(3)-wshiftZ(nZ)))
+         !    end do
+         ! end do
+      end function levelset_wavy
+      
+
+      !> Function that localizes the top (y+) of the domain
+      function yp_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         implicit none
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (j.eq.pg%jmax+1) isIn=.true.
+      end function yp_locator
+      
+      
+      !> Function that localizes the bottom (y-) of the domain
+      function ym_locator(pg,i,j,k) result(isIn)
+         use pgrid_class, only: pgrid
+         implicit none
+         class(pgrid), intent(in) :: pg
+         integer, intent(in) :: i,j,k
+         logical :: isIn
+         isIn=.false.
+         if (j.eq.pg%jmin) isIn=.true.
+      end function ym_locator
+      
+
+   end subroutine simulation_init
+   
+   
+   !> Perform an NGA2 simulation - this mimicks NGA's old time integration for multiphase
+   subroutine simulation_run
+      use tpns_class, only: arithmetic_visc
+      implicit none
+      
+      ! Perform time integration
+      do while (.not.time%done())!.and.amp.lt.0.1_WP*vf%cfg%yL.and.time%t.lt.20.0_WP*tau)
+         
+         ! Increment time
+         call fs%get_cfl(time%dt,time%cfl)
+         call time%adjust_dt()
+         call time%increment()
+         
+         ! Remember old VOF
+         vf%VFold=vf%VF
+         
+         ! Remember old velocities and sRHOs
+         fs%Uold=fs%U; fs%sRHOxold=fs%sRHOx
+         fs%Vold=fs%V; fs%sRHOyold=fs%sRHOy
+         fs%Wold=fs%W; fs%sRHOzold=fs%sRHOz
+         
+         ! Apply time-varying Dirichlet conditions
+         ! This is where time-dpt Dirichlet would be enforced
+         
+         ! Perform sub-iterations
+         do while (time%it.le.time%itmax)
+            
+            ! VOF equation ====================================================
+            ! Advance VOF equation
+            vf%VF=vf%VFold
+            if (time%it.eq.time%itmax) then   
+               vf%curvness=0.0_WP
+               call vf%advance(dt=time%dt,U=fs%Umid,V=fs%Vmid,W=fs%Wmid)
+            else
+               call vf%advance_tmp(dt=time%dt,U=fs%Umid,V=fs%Vmid,W=fs%Wmid)
+            end if
+            
+            ! Update sqrt(face density) and momentum vector
+            resU=fs%rho_l*vf%VF+fs%rho_g*(1.0_WP-vf%VF); call fs%update_density(rho=resU)
+            fs%rhoU=fs%rho_l*vf%UFl(1,:,:,:)+fs%rho_g*vf%UFg(1,:,:,:)
+            fs%rhoV=fs%rho_l*vf%UFl(2,:,:,:)+fs%rho_g*vf%UFg(2,:,:,:)
+            fs%rhoW=fs%rho_l*vf%UFl(3,:,:,:)+fs%rho_g*vf%UFg(3,:,:,:)
+            
+            ! Prepare new staggered viscosity (at n+1)
+            call fs%get_viscosity(vf=vf,strat=arithmetic_visc)
+            ! Momentum equation ===============================================
+            ! Explicit calculation of drho*u/dt from NS
+            call fs%get_dmomdt(resU,resV,resW)
+            
+            ! Add momentum source terms
+            call fs%addsrc_gravity(resU,resV,resW)
+            
+            ! Assemble explicit residual
+            resU=-(fs%U*fs%sRHOX**2-fs%Uold*fs%sRHOXold**2)+time%dt*resU
+            resV=-(fs%V*fs%sRHOY**2-fs%Vold*fs%sRHOYold**2)+time%dt*resV
+            resW=-(fs%W*fs%sRHOZ**2-fs%Wold*fs%sRHOZold**2)+time%dt*resW
+            
+            ! Form implicit residuals
+            call fs%solve_implicit(time%dt,resU,resV,resW)
+            
+            ! Compute predictor U
+            fs%U=fs%U+resU
+            fs%V=fs%V+resV
+            fs%W=fs%W+resW
+            
+            ! Sync and apply boundary conditions
+            call fs%apply_bcond(time%t,time%dt)
+            
+            ! Poisson equation ================================================
+            ! Compute Umid from U and Uold
+            call fs%get_Umid()
+            
+            ! Solve Poisson equation
+            call fs%update_laplacian()
+            call fs%correct_mfr()
+            call fs%get_div()
+            call fs%add_surface_tension_jump(dt=time%dt,div=fs%div,vf=vf)
+            fs%psolv%rhs=-fs%cfg%vol*fs%div/time%dt
+            fs%psolv%sol=0.0_WP
+            call fs%psolv%solve()
+            call fs%shift_p(fs%psolv%sol)
+            
+            ! Correct pressure and Umid
+            call fs%get_pgrad(fs%psolv%sol,resU,resV,resW)
+            fs%P=fs%P+fs%psolv%sol
+            fs%Umid=fs%Umid-time%dt*resU/((fs%sRHOX+fs%sRHOXold*(1.0_WP-fs%theta)/fs%theta)*fs%sRHOX)
+            fs%Vmid=fs%Vmid-time%dt*resV/((fs%sRHOY+fs%sRHOYold*(1.0_WP-fs%theta)/fs%theta)*fs%sRHOY)
+            fs%Wmid=fs%Wmid-time%dt*resW/((fs%sRHOZ+fs%sRHOZold*(1.0_WP-fs%theta)/fs%theta)*fs%sRHOZ)
+            
+            ! Regenerate U from Umid and Uold
+            call fs%get_U()
+            
+            ! Increment sub-iteration counter =================================
+            time%it=time%it+1
+            
+         end do
+         
+         ! Recompute interpolated velocity and divergence
+         call fs%interp_velmid(Ui,Vi,Wi)
+         call fs%interp_vel(vel(1,:,:,:),vel(2,:,:,:),vel(3,:,:,:))
+         call fs%get_div()
+
+         call postproc_data()
+
+         ! Output to ensight
+         if (ens_evt%occurs()) then
+            ! call vf%update_surfmesh(smesh)
+            update_smesh: block
+               use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+               integer :: i,j,k,np,nplane
+                call vf%update_surfmesh(smesh)
+                np=0
+                do k=cfg%kmin_,cfg%kmax_
+                  do j=cfg%jmin_,cfg%jmax_
+                    do i=cfg%imin_,cfg%imax_
+                        if (cfg%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                        do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                            if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                                np=np+1
+                                smesh%var(1,np)=vf%curv(i,j,k)
+                                smesh%var(2,np)=vf%curvness(i,j,k)
+                            end if
+                        end do
+                    end do 
+                    end do 
+                end do
+            end block update_smesh
+            call ens_out%write_data(time%t)
+         end if
+
+         output_curvness : block
+            use irl_fortran_interface, only: getNumberOfPlanes,getNumberOfVertices
+            integer :: i,j,k,np,nplane,rank,ierr
+            character(len=20) :: filename
+            if (curv_out%occurs()) then
+               write(filename, '(A, I0, A)') "curvness/", counter, ".csv"
+               do rank=0,cfg%nproc-1
+                  if (rank.eq.cfg%rank) then
+                     ! Open the file
+                     open(unit=10, file=filename, status="unknown", position="append", action="write")
+                     ! Output diameters and velocities
+                     do k=cfg%kmin_,cfg%kmax_
+                        do j=cfg%jmin_,cfg%jmax_
+                        do i=cfg%imin_,cfg%imax_
+                              if (vf%VF(i,j,k).lt.2.0_WP*epsilon(1.0_WP)) cycle ! Skip cells below VF threshold
+                              do nplane=1,getNumberOfPlanes(vf%liquid_gas_interface(i,j,k))
+                                 if (getNumberOfVertices(vf%interface_polygon(nplane,i,j,k)).gt.0) then
+                                    write(10,*) vf%curvness(i,j,k)
+                                 end if
+                              end do
+                        end do 
+                        end do 
+                     end do
+
+                     ! Close the file
+                     close(10)
+                  end if
+                  ! Force synchronization
+                  call MPI_BARRIER(cfg%comm,ierr)
+               end do
+               counter=counter+1
+            end if
+         end block output_curvness
+         ! Perform and output monitoring
+         call fs%get_max()
+         call vf%get_max()
+         call mfile%write()
+         call cflfile%write()
+         
+      end do
+      
+      ! Post-process growth rate using ODRPACK
+      ! odr_fit: block
+      !    use, intrinsic :: iso_fortran_env, only: output_unit
+      !    use mathtools, only: twoPi
+      !    use messager,  only: log
+      !    use string,    only: str_long
+      !    character(len=str_long) :: message
+      !    integer :: i
+      !    ! ODRPACK variables - explicit model based on exponential of time
+      !    integer                       :: N                      !> Number of observations (number of polygons)
+      !    integer , parameter           :: M=1                    !> Number of elements per explanatory variables (1 time)
+      !    integer , parameter           :: NP=2                   !> Number of parameters in our model (2 for a normalized exponential in time with time shift)
+      !    integer , parameter           :: NQ=1                   !> Number of response per observation (only 1, the normalized amplitude)
+      !    real(WP), dimension(NP)       :: BETA=0.0_WP            !> Array of model parameter values (the growth rate and time shift)
+      !    real(WP), dimension(:,:)  , allocatable :: YY           !> Value of response variable (of size LDYYxNQ)
+      !    integer                       :: LDYY                   !> Leading dimension of YY (equals N since an explicit model is used)
+      !    real(WP), dimension(:,:)  , allocatable :: XX           !> Value of explanatory variable (of size LDXXxM)
+      !    integer                       :: LDXX                   !> Leading dimension of XX (equals N)
+      !    real(WP), dimension(:,:,:), allocatable :: WE           !> Weighting of response data (of size LDWExLD2WExNQ)
+      !    integer                       :: LDWE                   !> Leading dimension of WE (equals N since an explicit model is used)
+      !    integer                       :: LD2WE                  !> Second dimension of WE (equals NQ)
+      !    real(WP), dimension(:,:,:), allocatable :: WD           !> Weighting of explanatory data (of size LDWDxLD2WDxM)
+      !    integer                       :: LDWD                   !> Leading dimension of WD (equals N)
+      !    integer                       :: LD2WD                  !> Second dimension of WD (equals 1)
+      !    integer , dimension(NP)       :: IFIXB=-1               !> Whether any model parameters has to be kept constant
+      !    integer , parameter           :: LDIFX=1                !> Leading dimension of IFIXX (equals 1)
+      !    integer , dimension(LDIFX,M)  :: IFIXX=-1               !> Whether any explanatory variable data is to be treated as "fixed"
+      !    integer                       :: JOB=00030              !> 5-digit parameter flag that controls execution (this invokes analytical Jacobian with explicit model)
+      !    integer                       :: NDIGIT=1               !> Number of reliable digits in our model - let ODRPACK figure it out on its own
+      !    real(WP)                      :: TAUFAC=0.0_WP          !> To control size of first step (ignored here)
+      !    real(WP)                      :: SSTOL=-1.0_WP          !> Relative cvg of sum of squares: this sets it to 1e-8             ********* Need to change to sth else
+      !    real(WP)                      :: PARTOL=-1.0_WP         !> Relative cvg for model parameters: this sets it to 1e-11         ********* Need to change to sth else
+      !    integer                       :: MAXIT=-1               !> Maximum number of iterations                                     ********* Need to change to sth else
+      !    integer                       :: IPRINT=0               !> 4-digit parameter flag for controlling printing (default is -1)
+      !    integer                       :: LUNERR=10              !> Logical unit for error reporting (6 by default)
+      !    integer                       :: LUNRPT=10              !> Logical unit for reporting
+      !    real(WP), dimension(NP)       :: STPB=0.0_WP            !> Relative step sizes for Jacobian for model parameters (here, default)
+      !    integer , parameter           :: LDSTPD=1               !> Leading dimension of STPD, either 1 or N (here, 1)
+      !    real(WP), dimension(LDSTPD,1) :: STPD=0.0_WP            !> Relative step sizes for Jacobian for input errors (here, default)
+      !    real(WP), dimension(NP)       :: SCLB=1.0_WP            !> Scaling for the model parameters (here, not default but set to 1.0 to avoid rescaling 0 coefficients)
+      !    real(WP), dimension(:,:)  , allocatable :: SCLD         !> Scaling for the input errors (here, not default but set to 1.0 to avoid rescaling 0 coefficients)
+      !    integer                       :: LDSCLD                 !> Leading dimension of SCLD, either 1 or N (here, N)
+      !    integer                       :: LWORK                  !> Size of WORK array
+      !    real(WP), dimension(:)    , allocatable :: WORK         !> WORK array
+      !    integer , parameter           :: LiWORK=20+NP+NQ*(NP+M) !> Size of IWORK array
+      !    integer , dimension(LiWORK)   :: iWORK                  !> iWORK array
+      !    integer                       :: INFO                   !> Why the calculations stopped
+      !    ! Copy over data and sizes
+      !    N=size(all_time,dim=1)
+      !    LDYY=N; allocate(YY(LDYY,NQ)); YY(:,1)=all_amp/amp0
+      !    LDXX=N; allocate(XX(LDXX,M )); XX(:,1)=all_time
+      !    LDWE=N; LD2WE=NQ; allocate(WE(LDWE,LD2WE,NQ)); WE=1.0_WP
+      !    LDWD=N; LD2WD=1 ; allocate(WD(LDWD,LD2WD,M )); WD=1.0_WP
+      !    LDSCLD=N; allocate(SCLD(LDSCLD,M)); SCLD=1.0_WP
+      !    LWORK=18+11*NP+NP**2+M+M**2+4*N*NQ+6*N*M+2*N*NQ*NP+2*N*NQ*M+NQ**2+5*NQ+NQ*(NP+M)+(LDWE*LD2WE)*NQ; allocate(WORK(LWORK))
+      !    ! Call ODRPACK to find time shift
+      !    call DODRC(exponential_model,N,M,NP,NQ,BETA,YY,LDYY,XX,LDXX,WE,LDWE,LD2WE,WD,LDWD,LD2WD,IFIXB,IFIXX,LDIFX,JOB,NDIGIT,TAUFAC,&
+      !    &          SSTOL,PARTOL,MAXIT,IPRINT,LUNERR,LUNRPT,STPB,STPD,LDSTPD,SCLB,SCLD,LDSCLD,WORK,LWORK,iWORK,LiWORK,INFO)
+      !    ! Adjust weights to eliminate the early non-exponential part
+      !    do i=1,size(all_time,dim=1)
+      !       if (all_time(i).le.2.0_WP*BETA(2)) then
+      !          WE(i,1,1)=0.0_WP
+      !          WD(i,1,1)=0.0_WP
+      !       end if
+      !    end do
+      !    ! Call ODRPACK again to find growth rate
+      !    call DODRC(exponential_model,N,M,NP,NQ,BETA,YY,LDYY,XX,LDXX,WE,LDWE,LD2WE,WD,LDWD,LD2WD,IFIXB,IFIXX,LDIFX,JOB,NDIGIT,TAUFAC,&
+      !    &          SSTOL,PARTOL,MAXIT,IPRINT,LUNERR,LUNRPT,STPB,STPD,LDSTPD,SCLB,SCLD,LDSCLD,WORK,LWORK,iWORK,LiWORK,INFO)
+      !    ! Get back growth rate
+      !    if (fs%cfg%amRoot) then
+      !       write(output_unit,'(es12.5,x,es12.5,x,es12.5,x,es12.5)') lc,tau,twoPi/fs%cfg%xL*lc,BETA(1)*tau
+      !       write(message    ,'("Reference time scale   = ",es12.5)') tau               ; call log(message)
+      !       write(message    ,'("Cut-off length scale   = ",es12.5)') lc                ; call log(message)
+      !       write(message    ,'("Normalized growth rate = ",es12.5)') BETA(1)*tau       ; call log(message)
+      !       write(message    ,'("Normalized wave number = ",es12.5)') twoPi/fs%cfg%xL*lc; call log(message)
+      !    end if
+      ! end block odr_fit
+      
+      
+   end subroutine simulation_run
+   
+   
+   ! !> Definition of our exponential function of time model
+   ! subroutine exponential_model(N,M,NP,NQ,LDN,LDM,LDNP,BETA,XPLUSD,IFIXB,IFIXX,LDFIX,IDEVAL,F,FJACB,FJACD,ISTOP)
+   !    implicit none
+   !    ! Input parameters
+   !    integer , intent(in) :: IDEVAL,LDFIX,LDM,LDN,LDNP,M,N,NP,NQ
+   !    integer , dimension(NP)     , intent(in) :: IFIXB
+   !    integer , dimension(LDFIX,M), intent(in) :: IFIXX
+   !    real(WP), dimension(NP)     , intent(in) :: BETA
+   !    real(WP), dimension(LDN,M)  , intent(in) :: XPLUSD
+   !    ! Output parameters
+   !    real(WP), dimension(LDN,NQ) :: F
+   !    real(WP), dimension(LDN,LDNP,NQ) :: FJACB
+   !    real(WP), dimension(LDN,LDM ,NQ) :: FJACD
+   !    integer :: ISTOP,i
+   !    ! Check stopping condition - all values are acceptable
+   !    ISTOP=0
+   !    ! Compute model value
+   !    if (mod(IDEVAL,10).ge.1) then
+   !       do i=1,N
+   !          F(i,1)=exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !       end do
+   !    end if
+   !    ! Compute model derivatives with respect to BETA
+   !    if (mod(IDEVAL/10,10).GE.1) then
+   !       do i=1,N
+   !          FJACB(i,1,1)=(XPLUSD(i,1)-BETA(2))*exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !          FJACB(i,2,1)=            -BETA(1) *exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !       end do
+   !    end if
+   !    ! Compute model derivatives with respect to input
+   !    if (mod(IDEVAL/100,10).GE.1) then
+   !       do i=1,N
+   !          FJACD(i,1,1)=BETA(1)*exp(BETA(1)*(XPLUSD(i,1)-BETA(2)))
+   !       end do
+   !    end if
+   ! end subroutine exponential_model
+   
+   
+   !> Finalize the NGA2 simulation
+   subroutine simulation_final
+      implicit none
+      
+      ! Get rid of all objects - need destructors
+      ! monitor
+      ! ensight
+      ! bcond
+      ! timetracker
+      
+      ! Deallocate work arrays
+      deallocate(resU,resV,resW,Ui,Vi,Wi)
+      
+   end subroutine simulation_final
+   
+   
+end module simulation

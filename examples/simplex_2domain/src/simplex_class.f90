@@ -245,8 +245,8 @@ contains
          this%poly%vert(:, 2)=[-0.00442_WP,0.00000_WP]
          this%poly%vert(:, 3)=[-0.00442_WP,0.00160_WP]
          this%poly%vert(:, 4)=[-0.00385_WP,0.00160_WP]
-         this%poly%vert(:, 5)=[-0.00175_WP,0.00039_WP]
-         this%poly%vert(:, 6)=[-0.00114_WP,0.00039_WP]
+         this%poly%vert(:, 5)=[-0.00175_WP,0.00039_WP] ! Begining of neck
+         this%poly%vert(:, 6)=[-0.00114_WP,0.00039_WP] ! End of neck
          this%poly%vert(:, 7)=[ 0.00000_WP,0.00143_WP]
          this%poly%vert(:, 8)=[ 0.00000_WP,0.00177_WP]
          this%poly%vert(:, 9)=[-0.00122_WP,0.00279_WP]
