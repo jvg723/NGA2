@@ -43,6 +43,7 @@ module simulation
    real(WP), dimension(:,:,:,:),   allocatable :: SR
    real(WP), dimension(:,:,:,:,:), allocatable :: gradU
    real(WP), dimension(:,:,:,:),   allocatable :: resSC,SCtmp
+   real(WP), dimension(:,:,:,:),   allocatable :: vort
    
    !> Fluid, forcing, and particle parameters
    real(WP) :: visc,rho,meanU,meanV,meanW
@@ -341,6 +342,7 @@ contains
          allocate(resSC    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(SCtmp    (cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_,1:6))
          allocate(gradU(1:3,1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_))
+         allocate(vort     (1:3,cfg%imino_:cfg%imaxo_,cfg%jmino_:cfg%jmaxo_,cfg%kmino_:cfg%kmaxo_)); vort=0.0_WP
       end block allocate_work_arrays
       
       ! Initialize time tracker with 2 subiterations
@@ -508,6 +510,8 @@ contains
          call fs%get_div()
          ! Compute turbulence stats
          call compute_stats()
+         ! Compute voricity
+         call fs%get_vorticity(vort)
       end block initialize_velocity
 
       ! Create a viscoleastic model with log conformation stablization method
@@ -937,6 +941,10 @@ contains
          ! Recompute interpolated velocity and divergence
          call fs%interp_vel(Ui,Vi,Wi)
          call fs%get_div()
+
+         ! Compute voricity
+         vort=0.0_WP
+         call fs%get_vorticity(vort)
          
          ! Output to ensight
          if (ens_evt%occurs()) then
@@ -1161,7 +1169,7 @@ contains
       ! timetracker
       
       ! Deallocate work arrays
-      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU,resSC,SCtmp)
+      deallocate(resU,resV,resW,Ui,Vi,Wi,SR,gradU,resSC,SCtmp,vort)
       
    end subroutine simulation_final
    
