@@ -33,7 +33,7 @@ module simulation
    type(event)    :: curv_out
   
    !> Simulation monitor file
-   type(monitor) :: mfile,cflfile,hitfile,cvgfile,scfile
+   type(monitor) :: mfile,cflfile,hitfile,cvgfile,scfile,enstrile
    
    public :: simulation_init,simulation_run,simulation_final
    
@@ -66,7 +66,9 @@ module simulation
    real(WP) :: eta,ell
    real(WP) :: dx_eta,ell_Lx,Re_ratio,eps_ratio,tke_ratio,nondtime
 
+   ! For post processing
    integer :: counter=0
+   real(WP) :: l_enstrophy, g_enstrophy
 
 contains
    
@@ -323,6 +325,37 @@ contains
       
    end subroutine analyse_structs
 
+   !> Compute Enstrophy
+   subroutine get_enstrophy()
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM
+      use parallel, only: MPI_REAL_WP
+      implicit none
+      integer :: i,j,k,ierr
+      real(WP) :: my_lvol,lvol
+      real(WP) :: my_gvol,gvol
+      real(WP) :: my_lenst, my_genst
+      my_lvol=0.0_WP;  lvol=0.0_WP
+      my_gvol=0.0_WP;  gvol=0.0_WP
+      my_lenst=0.0_WP; my_genst=0.0_WP
+      do k=vf%cfg%kmin_,vf%cfg%kmax_
+         do j=vf%cfg%jmin_,vf%cfg%jmax_
+            do i=vf%cfg%imin_,vf%cfg%imax_
+               ! liquid and gas volumes
+               my_lvol=my_lvol+vf%VF(i,j,k)*cfg%vol(i,j,k)
+               my_gvol=my_gvol+(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k)
+               ! liquid and gas enstrophy
+               my_lenst=my_lenst+((vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)*vf%VF(i,j,k)*cfg%vol(i,j,k))
+               my_genst=my_genst+((vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)*(1.0_WP-vf%VF(i,j,k))*cfg%vol(i,j,k))
+            end do
+         end do
+      end do
+      call MPI_ALLREDUCE(my_lvol, lvol,       1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_gvol, gvol,       1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_lenst,l_enstrophy,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      call MPI_ALLREDUCE(my_genst,g_enstrophy,1,MPI_REAL_WP,MPI_SUM,cfg%comm,ierr)
+      l_enstrophy=0.5_WP*(l_enstrophy/lvol)
+      g_enstrophy=0.5_WP*(g_enstrophy/gvol)
+   end subroutine
    
    
    !> Initialization of problem solver
@@ -552,7 +585,7 @@ contains
          use irl_fortran_interface
          integer :: i,j,k,nplane,np
          ! Include an extra variable for structure id
-         smesh=surfmesh(nvar=10,name='plic')
+         smesh=surfmesh(nvar=14,name='plic')
          smesh%varname(1)='id'
          smesh%varname(2)='trC'
          smesh%varname(3)='Cxx'
@@ -563,6 +596,10 @@ contains
          smesh%varname(8)='Czz'
          smesh%varname(9)='curvature'
          smesh%varname(10)='curvness'
+         smesh%varname(11)='vort1'
+         smesh%varname(12)='vort2'
+         smesh%varname(13)='vort3'
+         smesh%varname(14)='vortmag'
          ! Transfer polygons to smesh
          call vf%update_surfmesh(smesh)
          ! Also populate id variable
@@ -576,6 +613,10 @@ contains
          smesh%var(8,:)=0.0_WP
          smesh%var(9,:)=0.0_WP
          smesh%var(10,:)=0.0_WP
+         smesh%var(11,:)=0.0_WP
+         smesh%var(12,:)=0.0_WP
+         smesh%var(13,:)=0.0_WP
+         smesh%var(14,:)=0.0_WP
          np=0
          do k=vf%cfg%kmin_,vf%cfg%kmax_
             do j=vf%cfg%jmin_,vf%cfg%jmax_
@@ -593,6 +634,10 @@ contains
                         smesh%var(8,np)=ve%SCrec(i,j,k,6)
                         smesh%var(9,np)=vf%curv(i,j,k)
                         smesh%var(10,np)=vf%curvness(i,j,k)
+                        smesh%var(11,np)=vort(1,i,j,k)
+                        smesh%var(12,np)=vort(2,i,j,k)
+                        smesh%var(13,np)=vort(3,i,j,k)
+                        smesh%var(14,np)=sqrt(vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)
                      end if
                   end do
                end do
@@ -633,6 +678,7 @@ contains
          call fs%get_max()
          call vf%get_max()
          call ve%get_max_reconstructed(vf%VF)
+         call get_enstrophy()
          ! Create simulation monitor
          mfile=monitor(fs%cfg%amRoot,'simulation')
          call mfile%add_column(time%n,'Timestep number')
@@ -689,6 +735,13 @@ contains
          call cvgfile%add_column(dx_eta,'dx/eta')
          call cvgfile%add_column(ell_Lx,'ell/Lx')
          call cvgfile%write()
+         ! Create enstophy monitor
+         enstrile=monitor(fs%cfg%amRoot,'enstrophy')
+         call enstrile%add_column(time%n,'Timestep number')
+         call enstrile%add_column(time%t,'Time')
+         call enstrile%add_column(l_enstrophy,'liq enstr')
+         call enstrile%add_column(g_enstrophy,'gas enstr')
+         call enstrile%write()
          ! Create scalar monitor
          scfile=monitor(ve%cfg%amRoot,'scalar')
          call scfile%add_column(time%n,'Timestep number')
@@ -965,6 +1018,10 @@ contains
                smesh%var(8,:)=0.0_WP
                smesh%var(9,:)=0.0_WP
                smesh%var(10,:)=0.0_WP
+               smesh%var(11,:)=0.0_WP
+               smesh%var(12,:)=0.0_WP
+               smesh%var(13,:)=0.0_WP
+               smesh%var(14,:)=0.0_WP
                np=0
                do k=vf%cfg%kmin_,vf%cfg%kmax_
                   do j=vf%cfg%jmin_,vf%cfg%jmax_
@@ -982,6 +1039,10 @@ contains
                               smesh%var(8,np)=ve%SCrec(i,j,k,6)
                               smesh%var(9,np)=vf%curv(i,j,k)
                               smesh%var(10,np)=vf%curvness(i,j,k)
+                              smesh%var(11,np)=vort(1,i,j,k)
+                              smesh%var(12,np)=vort(2,i,j,k)
+                              smesh%var(13,np)=vort(3,i,j,k)
+                              smesh%var(14,np)=sqrt(vort(1,i,j,k)**2+vort(2,i,j,k)**2+vort(3,i,j,k)**2)
                            end if
                         end do
                      end do
@@ -1028,6 +1089,9 @@ contains
          if (drop_evt%occurs()) then 
             call analyse_structs()
          end if
+
+         ! Compute volume average enstrophy in the domain
+         call get_enstrophy()
          
          ! Perform and output monitoring
          call compute_stats()
@@ -1038,6 +1102,7 @@ contains
          call cflfile%write()
          call hitfile%write()
          call cvgfile%write()
+         call enstrile%write()
          call scfile%write()
          
       end do
