@@ -30,6 +30,7 @@ module simulation
    type(ensight)  :: ens_out
    type(event)    :: ens_evt,inj_evt,drop_evt
    type(surfmesh) :: smesh
+   type(event)    :: curv_out
   
    !> Simulation monitor file
    type(monitor) :: mfile,cflfile,hitfile,cvgfile,scfile
@@ -692,6 +693,15 @@ contains
          call param_read('Drop analysis period',drop_evt%tper)
          if (drop_evt%occurs()) call analyse_structs()
       end block drop_analysis
+
+      curvature_analysis: block
+         use filesys,               only: makedir,isdir
+         curv_out=event(time=time,name='curvness output') 
+         call param_read('Curvness output period',curv_out%tper)
+         if (cfg%amRoot) then
+            if (.not.isdir('curvness')) call makedir('curvness')
+         end if
+      end block curvature_analysis
       
    end subroutine simulation_init
    

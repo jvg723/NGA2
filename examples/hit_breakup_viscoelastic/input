@@ -29,3 +29,6 @@ Ensight output period : 5e-2
 
 # Drop analysis
 Drop analysis period :  5e-2
+
+# Curvness output
+Curvness output period : 5e-2
