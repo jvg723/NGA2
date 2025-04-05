@@ -106,6 +106,7 @@ module atom_class
       procedure :: final                           !< Finalize atom simulation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
       procedure :: integrate_vof_2d                !< Get 2D of vof map integrated in z
+      procedure :: integrate_vof_1d                !< Get 1d vof field along y at x=0.2 mm
    end type atom
    
    
@@ -217,6 +218,49 @@ contains
       ! Deallocate work arrays
       deallocate(myVOF,VOF)
    end subroutine integrate_vof_2d
+
+
+   !> integrate VOF along z direction and get data at discrete y location for x=0.2 mm
+   subroutine integrate_vof_1d(this)
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+      use parallel, only: MPI_REAL_WP
+      use filesys,  only: makedir,isdir
+      use string,   only: str_medium
+      implicit none
+      class(atom), intent(inout) :: this
+      real(WP), dimension(:), allocatable :: myVOF,VOF
+      character(len=str_medium) :: filename,timestamp
+      integer :: i,j,k,ierr,iunit
+      ! Allocate horizontal line storage
+      allocate(myVOF(this%cfg%jmin:this%cfg%jmax)); myVOF=0.0_WP
+      allocate(  VOF(this%cfg%jmin:this%cfg%jmax));   VOF=0.0_WP
+      ! Integrate VOF over z at discrete y positons for x=0.0002 m
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               ! check if x is with range
+               if (this%cfg%xm(i).ge.0.0002_WP-5e-5_WP.and.this%cfg%xm(i).le.0.0002_WP+5e-5_WP) then
+                  myVOF(j)=myVOF(j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
+               end if 
+            end do
+         end do
+      end do
+      call MPI_ALLREDUCE(myVOF,VOF,this%cfg%ny,MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
+      VOF=VOF/this%cfg%zL
+      ! Only root process outputs to a file
+      if (this%cfg%amRoot) then
+         if (.not.isdir('stat_y_vofmap')) call makedir('stat_y_vofmap')
+         filename='yvof_'; write(timestamp,'(es12.5)') this%time%t
+         open(newunit=iunit,file='stat_y_vofmap/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(999999(a12,x))') 'ym','VOF'
+         do j=this%cfg%jmin,this%cfg%jmax
+            write(iunit,'(999999(es12.5,x))') this%cfg%ym(j),VOF(j)
+         end do
+         close(iunit)
+      end if
+      ! Deallocate work arrays
+      deallocate(myVOF,VOF)
+   end subroutine integrate_vof_1d
 
    
    !> Initialization of atom simulation
@@ -1106,6 +1150,7 @@ contains
       ! Output flow rate
       if (this%flowrate_evt%occurs()) call this%analyze_flowrate()
       if (this%vofmap_evt%occurs()) call this%integrate_vof_2d()
+      if (this%vofmap_evt%occurs()) call this%integrate_vof_1d()
       
       ! Stop timestep timer
       call this%tstep%stop()
