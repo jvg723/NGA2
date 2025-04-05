@@ -77,8 +77,9 @@ module atom_class
       type(timer)   :: tvof     !< Timer for VOF
       type(timer)   :: tdtrans  !< Timer for VOF transfer
 
-      !> Event for flow rate analysis
+      !> Event for analysis
       type(event) :: flowrate_evt  !< Event trigger for flow rate analysis
+      type(event) :: vofmap_evt  !< event for vof spatial anlysis
       
       !> Inlet pipes geometry and flow rates
       real(WP) :: Rinlet=0.002_WP
@@ -104,6 +105,7 @@ module atom_class
       procedure :: step                            !< Advance atom simulation by one time step
       procedure :: final                           !< Finalize atom simulation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
+      procedure :: integrate_vof_2d                !< Get 2D of vof map integrated in z
    end type atom
    
    
@@ -174,6 +176,47 @@ contains
          close(iunit)
       end if
    end subroutine analyze_flowrate
+
+   !> integrate VOF along z direction and get data at x/y
+   subroutine integrate_vof_2d(this)
+      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+      use parallel, only: MPI_REAL_WP
+      use filesys,  only: makedir,isdir
+      use string,   only: str_medium
+      implicit none
+      class(atom), intent(inout) :: this
+      real(WP), dimension(:,:), allocatable :: myVOF,VOF
+      character(len=str_medium) :: filename,timestamp
+      integer :: i,j,k,ierr,iunit
+      ! Allocate horizontal line storage
+      allocate(myVOF(this%cfg%imin:this%cfg%imax,this%cfg%jmin:this%cfg%jmax)); myVOF=0.0_WP
+      allocate(  VOF(this%cfg%imin:this%cfg%imax,this%cfg%jmin:this%cfg%jmax));   VOF=0.0_WP
+      ! Integrate VOF over z for each x and y
+      do k=this%cfg%kmin_,this%cfg%kmax_
+         do j=this%cfg%jmin_,this%cfg%jmax_
+            do i=this%cfg%imin_,this%cfg%imax_
+               myVOF(i,j)=myVOF(i,j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
+            end do
+         end do
+      end do
+      call MPI_ALLREDUCE(myVOF,VOF,this%cfg%nx*this%cfg%ny,MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
+      VOF=VOF/this%cfg%zL
+      ! Only root process outputs to a file
+      if (this%cfg%amRoot) then
+         if (.not.isdir('stat_xy_vofmap')) call makedir('stat_xy_vofmap')
+         filename='xyvof_'; write(timestamp,'(es12.5)') this%time%t
+         open(newunit=iunit,file='stat_xy_vofmap/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+         write(iunit,'(999999(a12,x))') 'xm','ym','VOF'
+         do j=this%cfg%jmin,this%cfg%jmax
+            do i=this%cfg%imin,this%cfg%imax
+               write(iunit,'(999999(es12.5,x))') this%cfg%xm(i),this%cfg%ym(j),VOF(i,j)
+            end do
+         end do
+         close(iunit)
+      end if
+      ! Deallocate work arrays
+      deallocate(myVOF,VOF)
+   end subroutine integrate_vof_2d
 
    
    !> Initialization of atom simulation
@@ -682,6 +725,12 @@ contains
          this%flowrate_evt=event(time=this%time,name='Flow rate output')
          call this%input%read('Flow rate output period',this%flowrate_evt%tper,default=huge(1.0_WP))
       end block flowrate_analysis_prep
+
+      ! Create an event for flow rate analysis
+      vofmap_analysis_prep: block
+         this%vofmap_evt=event(time=this%time,name='VOF map output')
+         call this%input%read('VOF map output period',this%vofmap_evt%tper,default=huge(1.0_WP))
+      end block vofmap_analysis_prep
       
       
    contains
@@ -1056,6 +1105,7 @@ contains
       
       ! Output flow rate
       if (this%flowrate_evt%occurs()) call this%analyze_flowrate()
+      if (this%vofmap_evt%occurs()) call this%integrate_vof_2d()
       
       ! Stop timestep timer
       call this%tstep%stop()

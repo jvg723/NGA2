@@ -51,6 +51,7 @@ Pressure iteration : 50
 Ensight output period   : 1e-4
 Restart output period   : 1e-3
 Flow rate output period : 1e-3
+VOF map output period   : 1e-3
 
 # Data restart
 Restart from : !4.00000E-03
