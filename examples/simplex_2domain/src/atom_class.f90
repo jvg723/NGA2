@@ -239,7 +239,7 @@ contains
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
                ! check if x is with range
-               if (this%cfg%xm(i).ge.0.0002_WP-5e-5_WP.and.this%cfg%xm(i).le.0.0002_WP+5e-5_WP) then
+               if (this%cfg%xm(i).ge.0.0001_WP.and.this%cfg%xm(i).le.0.0003_WP) then
                   myVOF(j)=myVOF(j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
                end if 
             end do
