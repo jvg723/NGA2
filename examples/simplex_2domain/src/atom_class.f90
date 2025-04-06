@@ -190,17 +190,17 @@ contains
       character(len=str_medium) :: filename,timestamp
       integer :: i,j,k,ierr,iunit
       ! Allocate horizontal line storage
-      allocate(myVOF(this%cfg%imin:this%cfg%imax,this%cfg%jmin:this%cfg%jmax)); myVOF=0.0_WP
-      allocate(  VOF(this%cfg%imin:this%cfg%imax,this%cfg%jmin:this%cfg%jmax));   VOF=0.0_WP
+      allocate(myVOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_)); myVOF=0.0_WP
+      allocate(  VOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_));   VOF=0.0_WP
       ! Integrate VOF over z for each x and y
       do k=this%cfg%kmin_,this%cfg%kmax_
          do j=this%cfg%jmin_,this%cfg%jmax_
             do i=this%cfg%imin_,this%cfg%imax_
-               myVOF(i,j)=myVOF(i,j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
+               VOF(i,j)=VOF(i,j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
             end do
          end do
       end do
-      call MPI_ALLREDUCE(myVOF,VOF,this%cfg%nx*this%cfg%ny,MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
+      call MPI_ALLREDUCE(MPI_IN_PLACE,VOF,size(VOF),MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
       VOF=VOF/this%cfg%zL
       ! Only root process outputs to a file
       if (this%cfg%amRoot) then
