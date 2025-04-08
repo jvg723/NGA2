@@ -1149,8 +1149,8 @@ contains
       
       ! Output flow rate
       if (this%flowrate_evt%occurs()) call this%analyze_flowrate()
-      if (this%vofmap_evt%occurs()) call this%integrate_vof_2d()
-      if (this%vofmap_evt%occurs()) call this%integrate_vof_1d()
+      ! if (this%vofmap_evt%occurs()) call this%integrate_vof_2d()
+      ! if (this%vofmap_evt%occurs()) call this%integrate_vof_1d()
       
       ! Stop timestep timer
       call this%tstep%stop()
