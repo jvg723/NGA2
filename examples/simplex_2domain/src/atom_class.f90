@@ -105,8 +105,8 @@ module atom_class
       procedure :: step                            !< Advance atom simulation by one time step
       procedure :: final                           !< Finalize atom simulation
       procedure :: analyze_flowrate                !< Compute and output flow rate through the nozzle
-      procedure :: integrate_vof_2d                !< Get 2D of vof map integrated in z
-      procedure :: integrate_vof_1d                !< Get 1d vof field along y at x=0.2 mm
+      ! procedure :: integrate_vof_2d                !< Get 2D of vof map integrated in z
+      ! procedure :: integrate_vof_1d                !< Get 1d vof field along y at x=0.2 mm
    end type atom
    
    
@@ -178,89 +178,89 @@ contains
       end if
    end subroutine analyze_flowrate
 
-   !> integrate VOF along z direction and get data at x/y
-   subroutine integrate_vof_2d(this)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-      use parallel, only: MPI_REAL_WP
-      use filesys,  only: makedir,isdir
-      use string,   only: str_medium
-      implicit none
-      class(atom), intent(inout) :: this
-      real(WP), dimension(:,:), allocatable :: myVOF,VOF
-      character(len=str_medium) :: filename,timestamp
-      integer :: i,j,k,ierr,iunit
-      ! Allocate horizontal line storage
-      allocate(myVOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_)); myVOF=0.0_WP
-      allocate(  VOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_));   VOF=0.0_WP
-      ! Integrate VOF over z for each x and y
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               VOF(i,j)=VOF(i,j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
-            end do
-         end do
-      end do
-      call MPI_ALLREDUCE(MPI_IN_PLACE,VOF,size(VOF),MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
-      VOF=VOF/this%cfg%zL
-      ! Only root process outputs to a file
-      if (this%cfg%amRoot) then
-         if (.not.isdir('stat_xy_vofmap')) call makedir('stat_xy_vofmap')
-         filename='xyvof_'; write(timestamp,'(es12.5)') this%time%t
-         open(newunit=iunit,file='stat_xy_vofmap/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(999999(a12,x))') 'xm','ym','VOF'
-         do j=this%cfg%jmin,this%cfg%jmax
-            do i=this%cfg%imin,this%cfg%imax
-               write(iunit,'(999999(es12.5,x))') this%cfg%xm(i),this%cfg%ym(j),VOF(i,j)
-            end do
-         end do
-         close(iunit)
-      end if
-      ! Deallocate work arrays
-      deallocate(myVOF,VOF)
-   end subroutine integrate_vof_2d
+   ! !> integrate VOF along z direction and get data at x/y
+   ! subroutine integrate_vof_2d(this)
+   !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+   !    use parallel, only: MPI_REAL_WP
+   !    use filesys,  only: makedir,isdir
+   !    use string,   only: str_medium
+   !    implicit none
+   !    class(atom), intent(inout) :: this
+   !    real(WP), dimension(:,:), allocatable :: myVOF,VOF
+   !    character(len=str_medium) :: filename,timestamp
+   !    integer :: i,j,k,ierr,iunit
+   !    ! Allocate horizontal line storage
+   !    allocate(myVOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_)); myVOF=0.0_WP
+   !    allocate(  VOF(this%cfg%imino_:this%cfg%imaxo_,this%cfg%jmino_:this%cfg%jmaxo_));   VOF=0.0_WP
+   !    ! Integrate VOF over z for each x and y
+   !    do k=this%cfg%kmin_,this%cfg%kmax_
+   !       do j=this%cfg%jmin_,this%cfg%jmax_
+   !          do i=this%cfg%imin_,this%cfg%imax_
+   !             VOF(i,j)=VOF(i,j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
+   !          end do
+   !       end do
+   !    end do
+   !    call MPI_ALLREDUCE(MPI_IN_PLACE,VOF,size(VOF),MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
+   !    VOF=VOF/this%cfg%zL
+   !    ! Only root process outputs to a file
+   !    if (this%cfg%amRoot) then
+   !       if (.not.isdir('stat_xy_vofmap')) call makedir('stat_xy_vofmap')
+   !       filename='xyvof_'; write(timestamp,'(es12.5)') this%time%t
+   !       open(newunit=iunit,file='stat_xy_vofmap/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+   !       write(iunit,'(999999(a12,x))') 'xm','ym','VOF'
+   !       do j=this%cfg%jmin,this%cfg%jmax
+   !          do i=this%cfg%imin,this%cfg%imax
+   !             write(iunit,'(999999(es12.5,x))') this%cfg%xm(i),this%cfg%ym(j),VOF(i,j)
+   !          end do
+   !       end do
+   !       close(iunit)
+   !    end if
+   !    ! Deallocate work arrays
+   !    deallocate(myVOF,VOF)
+   ! end subroutine integrate_vof_2d
 
 
-   !> integrate VOF along z direction and get data at discrete y location for x=0.2 mm
-   subroutine integrate_vof_1d(this)
-      use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
-      use parallel, only: MPI_REAL_WP
-      use filesys,  only: makedir,isdir
-      use string,   only: str_medium
-      implicit none
-      class(atom), intent(inout) :: this
-      real(WP), dimension(:), allocatable :: myVOF,VOF
-      character(len=str_medium) :: filename,timestamp
-      integer :: i,j,k,ierr,iunit
-      ! Allocate horizontal line storage
-      allocate(myVOF(this%cfg%jmin:this%cfg%jmax)); myVOF=0.0_WP
-      allocate(  VOF(this%cfg%jmin:this%cfg%jmax));   VOF=0.0_WP
-      ! Integrate VOF over z at discrete y positons for x=0.0002 m
-      do k=this%cfg%kmin_,this%cfg%kmax_
-         do j=this%cfg%jmin_,this%cfg%jmax_
-            do i=this%cfg%imin_,this%cfg%imax_
-               ! check if x is with range
-               if (this%cfg%xm(i).ge.0.0001_WP.and.this%cfg%xm(i).le.0.0003_WP) then
-                  myVOF(j)=myVOF(j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
-               end if 
-            end do
-         end do
-      end do
-      call MPI_ALLREDUCE(myVOF,VOF,this%cfg%ny,MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
-      VOF=VOF/this%cfg%zL
-      ! Only root process outputs to a file
-      if (this%cfg%amRoot) then
-         if (.not.isdir('stat_y_vofmap')) call makedir('stat_y_vofmap')
-         filename='yvof_'; write(timestamp,'(es12.5)') this%time%t
-         open(newunit=iunit,file='stat_y_vofmap/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
-         write(iunit,'(999999(a12,x))') 'ym','VOF'
-         do j=this%cfg%jmin,this%cfg%jmax
-            write(iunit,'(999999(es12.5,x))') this%cfg%ym(j),VOF(j)
-         end do
-         close(iunit)
-      end if
-      ! Deallocate work arrays
-      deallocate(myVOF,VOF)
-   end subroutine integrate_vof_1d
+   ! !> integrate VOF along z direction and get data at discrete y location for x=0.2 mm
+   ! subroutine integrate_vof_1d(this)
+   !    use mpi_f08,  only: MPI_ALLREDUCE,MPI_SUM,MPI_IN_PLACE
+   !    use parallel, only: MPI_REAL_WP
+   !    use filesys,  only: makedir,isdir
+   !    use string,   only: str_medium
+   !    implicit none
+   !    class(atom), intent(inout) :: this
+   !    real(WP), dimension(:), allocatable :: myVOF,VOF
+   !    character(len=str_medium) :: filename,timestamp
+   !    integer :: i,j,k,ierr,iunit
+   !    ! Allocate horizontal line storage
+   !    allocate(myVOF(this%cfg%jmin:this%cfg%jmax)); myVOF=0.0_WP
+   !    allocate(  VOF(this%cfg%jmin:this%cfg%jmax));   VOF=0.0_WP
+   !    ! Integrate VOF over z at discrete y positons for x=0.0002 m
+   !    do k=this%cfg%kmin_,this%cfg%kmax_
+   !       do j=this%cfg%jmin_,this%cfg%jmax_
+   !          do i=this%cfg%imin_,this%cfg%imax_
+   !             ! check if x is with range
+   !             if (this%cfg%xm(i).ge.0.0001_WP.and.this%cfg%xm(i).le.0.0003_WP) then
+   !                myVOF(j)=myVOF(j)+this%vf%VF(i,j,k)*this%cfg%dz(k)
+   !             end if 
+   !          end do
+   !       end do
+   !    end do
+   !    call MPI_ALLREDUCE(myVOF,VOF,this%cfg%ny,MPI_REAL_WP,MPI_SUM,this%cfg%zcomm,ierr)
+   !    VOF=VOF/this%cfg%zL
+   !    ! Only root process outputs to a file
+   !    if (this%cfg%amRoot) then
+   !       if (.not.isdir('stat_y_vofmap')) call makedir('stat_y_vofmap')
+   !       filename='yvof_'; write(timestamp,'(es12.5)') this%time%t
+   !       open(newunit=iunit,file='stat_y_vofmap/'//trim(adjustl(filename))//trim(adjustl(timestamp)),form='formatted',status='replace',access='stream',iostat=ierr)
+   !       write(iunit,'(999999(a12,x))') 'ym','VOF'
+   !       do j=this%cfg%jmin,this%cfg%jmax
+   !          write(iunit,'(999999(es12.5,x))') this%cfg%ym(j),VOF(j)
+   !       end do
+   !       close(iunit)
+   !    end if
+   !    ! Deallocate work arrays
+   !    deallocate(myVOF,VOF)
+   ! end subroutine integrate_vof_1d
 
    
    !> Initialization of atom simulation
@@ -770,11 +770,11 @@ contains
          call this%input%read('Flow rate output period',this%flowrate_evt%tper,default=huge(1.0_WP))
       end block flowrate_analysis_prep
 
-      ! Create an event for flow rate analysis
-      vofmap_analysis_prep: block
-         this%vofmap_evt=event(time=this%time,name='VOF map output')
-         call this%input%read('VOF map output period',this%vofmap_evt%tper,default=huge(1.0_WP))
-      end block vofmap_analysis_prep
+      ! ! Create an event for flow rate analysis
+      ! vofmap_analysis_prep: block
+      !    this%vofmap_evt=event(time=this%time,name='VOF map output')
+      !    call this%input%read('VOF map output period',this%vofmap_evt%tper,default=huge(1.0_WP))
+      ! end block vofmap_analysis_prep
       
       
    contains
