@@ -1862,12 +1862,12 @@ contains
             this%fs%visc_yz(i,j,k)=this%fs%visc_yz(i,j,k)+sum(this%fs%itp_yz(:,:,i,j,k)*this%sgs%visc(i,j-1:j,k-1:k))
             this%fs%visc_zx(i,j,k)=this%fs%visc_zx(i,j,k)+sum(this%fs%itp_xz(:,:,i,j,k)*this%sgs%visc(i-1:i,j,k-1:k))
          end do; end do; end do
-         ! Compute slip velocity using Cwm*delta*du/dn
-         do k=this%fs%cfg%kmino_,this%fs%cfg%kmaxo_; do j=this%fs%cfg%jmino_,this%fs%cfg%jmaxo_; do i=this%fs%cfg%imino_,this%fs%cfg%imaxo_
-            this%Uib(i,j,k)=-Cwm*this%fs%cfg%meshsize(i,j,k)*sum(this%gradU(:,1,i,j,k)*this%cfg%Nib(:,i,j,k))
-            this%Vib(i,j,k)=-Cwm*this%fs%cfg%meshsize(i,j,k)*sum(this%gradU(:,2,i,j,k)*this%cfg%Nib(:,i,j,k))
-            this%Wib(i,j,k)=-Cwm*this%fs%cfg%meshsize(i,j,k)*sum(this%gradU(:,3,i,j,k)*this%cfg%Nib(:,i,j,k))
-         end do; end do; end do
+         ! ! Compute slip velocity using Cwm*delta*du/dn
+         ! do k=this%fs%cfg%kmino_,this%fs%cfg%kmaxo_; do j=this%fs%cfg%jmino_,this%fs%cfg%jmaxo_; do i=this%fs%cfg%imino_,this%fs%cfg%imaxo_
+         !    this%Uib(i,j,k)=-Cwm*this%fs%cfg%meshsize(i,j,k)*sum(this%gradU(:,1,i,j,k)*this%cfg%Nib(:,i,j,k))
+         !    this%Vib(i,j,k)=-Cwm*this%fs%cfg%meshsize(i,j,k)*sum(this%gradU(:,2,i,j,k)*this%cfg%Nib(:,i,j,k))
+         !    this%Wib(i,j,k)=-Cwm*this%fs%cfg%meshsize(i,j,k)*sum(this%gradU(:,3,i,j,k)*this%cfg%Nib(:,i,j,k))
+         ! end do; end do; end do
       end block sgs_modeling
       call this%tsgs%stop() ! Stop SGS timer
       
@@ -1903,45 +1903,62 @@ contains
          this%fs%U=2.0_WP*this%fs%U-this%fs%Uold+this%resU
          this%fs%V=2.0_WP*this%fs%V-this%fs%Vold+this%resV
          this%fs%W=2.0_WP*this%fs%W-this%fs%Wold+this%resW
-         
-         ! Apply IB forcing to enforce wall boundary conditions
+
+         ! Apply IB forcing to enforce BC at the pipe walls
          ibforcing: block
-            use ibconfig_class, only: VFlo
             integer :: i,j,k
-            real(WP) :: vf
-            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_; do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_; do i=this%fs%cfg%imin_,this%fs%cfg%imax_
-               ! U cell
-               if (this%fs%umask(i,j,k).eq.0) then
-                  vf=sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))
-                  if (vf.gt.VFlo) then
-                     this%fs%U(i,j,k)=vf*this%fs%U(i,j,k)+(1.0_WP-vf)*sum(this%fs%itpr_x(:,i,j,k)*this%Uib(i-1:i,j,k))
-                  else
-                     this%fs%U(i,j,k)=0.0_WP
-                  end if
-               end if
-               ! V cell
-               if (this%fs%vmask(i,j,k).eq.0) then
-                  vf=sum(this%fs%itpr_y(:,i,j,k)*this%cfg%VF(i,j-1:j,k))
-                  if (vf.gt.VFlo) then
-                     this%fs%V(i,j,k)=vf*this%fs%V(i,j,k)+(1.0_WP-vf)*sum(this%fs%itpr_y(:,i,j,k)*this%Vib(i,j-1:j,k))
-                  else
-                    this%fs%V(i,j,k)=0.0_WP
-                  end if
-               end if
-               ! W cell
-               if (this%fs%wmask(i,j,k).eq.0) then
-                  vf=sum(this%fs%itpr_z(:,i,j,k)*this%cfg%VF(i,j,k-1:k))
-                  if (vf.gt.VFlo) then
-                     this%fs%W(i,j,k)=vf*this%fs%W(i,j,k)+(1.0_WP-vf)*sum(this%fs%itpr_z(:,i,j,k)*this%Wib(i,j,k-1:k))
-                  else
-                     this%fs%W(i,j,k)=0.0_WP
-                  end if
-               end if
-            end do; end do; end do
+            do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_
+               do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_
+                  do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+                     if (this%fs%umask(i,j,k).eq.0) this%fs%U(i,j,k)=sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))*this%fs%U(i,j,k)
+                     if (this%fs%vmask(i,j,k).eq.0) this%fs%V(i,j,k)=sum(this%fs%itpr_y(:,i,j,k)*this%cfg%VF(i,j-1:j,k))*this%fs%V(i,j,k)
+                     if (this%fs%wmask(i,j,k).eq.0) this%fs%W(i,j,k)=sum(this%fs%itpr_z(:,i,j,k)*this%cfg%VF(i,j,k-1:k))*this%fs%W(i,j,k)
+                  end do
+               end do
+            end do
             call this%fs%cfg%sync(this%fs%U)
             call this%fs%cfg%sync(this%fs%V)
             call this%fs%cfg%sync(this%fs%W)
          end block ibforcing
+         
+         ! ! Apply IB forcing to enforce wall boundary conditions
+         ! ibforcing: block
+         !    use ibconfig_class, only: VFlo
+         !    integer :: i,j,k
+         !    real(WP) :: vf
+         !    do k=this%fs%cfg%kmin_,this%fs%cfg%kmax_; do j=this%fs%cfg%jmin_,this%fs%cfg%jmax_; do i=this%fs%cfg%imin_,this%fs%cfg%imax_
+         !       ! U cell
+         !       if (this%fs%umask(i,j,k).eq.0) then
+         !          vf=sum(this%fs%itpr_x(:,i,j,k)*this%cfg%VF(i-1:i,j,k))
+         !          if (vf.gt.VFlo) then
+         !             this%fs%U(i,j,k)=vf*this%fs%U(i,j,k)+(1.0_WP-vf)*sum(this%fs%itpr_x(:,i,j,k)*this%Uib(i-1:i,j,k))
+         !          else
+         !             this%fs%U(i,j,k)=0.0_WP
+         !          end if
+         !       end if
+         !       ! V cell
+         !       if (this%fs%vmask(i,j,k).eq.0) then
+         !          vf=sum(this%fs%itpr_y(:,i,j,k)*this%cfg%VF(i,j-1:j,k))
+         !          if (vf.gt.VFlo) then
+         !             this%fs%V(i,j,k)=vf*this%fs%V(i,j,k)+(1.0_WP-vf)*sum(this%fs%itpr_y(:,i,j,k)*this%Vib(i,j-1:j,k))
+         !          else
+         !            this%fs%V(i,j,k)=0.0_WP
+         !          end if
+         !       end if
+         !       ! W cell
+         !       if (this%fs%wmask(i,j,k).eq.0) then
+         !          vf=sum(this%fs%itpr_z(:,i,j,k)*this%cfg%VF(i,j,k-1:k))
+         !          if (vf.gt.VFlo) then
+         !             this%fs%W(i,j,k)=vf*this%fs%W(i,j,k)+(1.0_WP-vf)*sum(this%fs%itpr_z(:,i,j,k)*this%Wib(i,j,k-1:k))
+         !          else
+         !             this%fs%W(i,j,k)=0.0_WP
+         !          end if
+         !       end if
+         !    end do; end do; end do
+         !    call this%fs%cfg%sync(this%fs%U)
+         !    call this%fs%cfg%sync(this%fs%V)
+         !    call this%fs%cfg%sync(this%fs%W)
+         ! end block ibforcing
          
          ! Apply other boundary conditions on the resulting fields
          call this%fs%apply_bcond(this%time%t,this%time%dt)
