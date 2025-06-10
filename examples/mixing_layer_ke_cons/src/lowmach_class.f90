@@ -963,7 +963,7 @@ contains
    end subroutine get_bcond
    
    
-   !> Enforce boundary condition - acts on both U/V/W and rhoU/rhoV/rhoW
+   !> Enforce boundary condition - acts only on U/V/W
    subroutine apply_bcond(this,t,dt)
       use messager, only: die
       implicit none

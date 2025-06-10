@@ -12,12 +12,12 @@ nz : 1
 # EOS parameters: rho(Z)=rho0*rho1/((1-Z)*rho1+Z*rho0)
 rho0 : 1
 rho1 : 1
-rhost: 0.1
+rhost: 0.1  # 10 instead of 0.1 gives a really sharp density profile
 Zst  : 0.2
 
 # Initial profiles
-Velocity thickness : 0.3
-Scalar thickness :   0.3
+Velocity thickness : 0.2
+Scalar thickness :   0.2
 
 # Disturbance amplitude
 Wave amplitude : 0.01
@@ -34,7 +34,7 @@ Dynamic viscosity :   1e-2
 Dynamic diffusivity : 1e-2
 
 # Time integration
-Max timestep size : 5e-2
+Max timestep size : 1e-1
 Max cfl number :    0.8
 Subiterations :     20
 
